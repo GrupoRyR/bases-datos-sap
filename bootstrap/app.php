@@ -12,7 +12,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Core serves the Microsoft sign-in page and the home of the panel.
+        $middleware->redirectGuestsTo(fn (): string => route('core.login'));
+        $middleware->redirectUsersTo(fn (): string => route('core.inicio'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

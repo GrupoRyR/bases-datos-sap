@@ -43,7 +43,7 @@ final class EnsureUserIsActive
             return response()->json(['message' => $message], Response::HTTP_UNAUTHORIZED);
         }
 
-        return redirect('/login')->with('error', $message);
+        return redirect()->route('core.login')->with('error', $message);
     }
 
     /**
