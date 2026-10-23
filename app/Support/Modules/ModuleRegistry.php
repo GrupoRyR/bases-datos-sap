@@ -34,17 +34,6 @@ final class ModuleRegistry
         return $this->modules ??= $this->discover();
     }
 
-    public function find(string $name): ?Module
-    {
-        foreach ($this->all() as $module) {
-            if ($module->name === $name) {
-                return $module;
-            }
-        }
-
-        return null;
-    }
-
     /**
      * @return list<string>
      */
