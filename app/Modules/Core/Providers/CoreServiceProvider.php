@@ -2,6 +2,8 @@
 
 namespace App\Modules\Core\Providers;
 
+use App\Modules\Core\Contracts\AuditLogger;
+use App\Modules\Core\Infrastructure\Audit\DatabaseAuditLogger;
 use App\Support\Modules\ModuleServiceProvider;
 
 /**
@@ -20,5 +22,11 @@ final class CoreServiceProvider extends ModuleServiceProvider
     protected function webPrefix(): string
     {
         return '';
+    }
+
+    protected function registerModule(): void
+    {
+        // Reads the signed-in user and the request, so one per request (or job).
+        $this->app->scoped(AuditLogger::class, DatabaseAuditLogger::class);
     }
 }
