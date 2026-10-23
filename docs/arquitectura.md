@@ -215,3 +215,36 @@ El usuario activa el hook una vez por clon: `git config core.hooksPath .githooks
 ## 9. Contrato del robot
 
 [`contrato-robot.md`](contrato-robot.md) define lo que el robot envía y lo que la API responde: firma HMAC, lotes, solicitudes y conteos. Lo comparten Datos y API y Robot, que trabajan en paralelo: **no cambia sin avisarle al usuario**, y un cambio va en su propio PR.
+
+## 10. Diseño
+
+El panel es de TI y lleva solo la marca de Segurex (§3 del plan). Las reglas salen de la skill `frontend-marca-sgx-sydc`:
+
+- **Logo como imagen**, nunca el nombre en texto: `public/img/logo-segurex.svg` (la versión para fondo oscuro del gestor de cartera) con `<x-ui.logo />`, alto fijo y ancho automático, sobre el gris `bg-brand-dark`. El texto sobre ese gris va en blanco (`text-on-brand`): el naranja ahí no da contraste.
+- **Tipografía Helvetica/Arial** en toda la interfaz. No se carga ninguna fuente externa ni CDN.
+- **Colores solo por variables `--brand-*`**: ninguna vista lleva un hex. `tests/Feature/Design/AssetsTest.php` falla si una vista Blade trae un color de marca o una fuente externa.
+
+**Tokens.** Viven en `resources/css/app.css`: las variables de marca en `:root[data-brand="segurex"]` y las neutras (`--ui-*`: fondo, superficie, texto, texto suave, bordes, foco, info, éxito, aviso y peligro), todas AA y con su contraste anotado. `@theme inline` las vuelve utilidades de Tailwind: `bg-surface`, `text-muted`, `border-line`, `bg-brand-button`, `text-brand-ink`, `bg-danger-bg`… La paleta por defecto de Tailwind está desactivada, así que solo existen estos colores.
+
+**Modo oscuro.** Cada token se escribe una vez con `light-dark(claro, oscuro)`. Por defecto sigue al sistema; el botón «Tema» del encabezado (`resources/js/theme.js`) alterna sistema → claro → oscuro, lo guarda en `localStorage` y lo aplica con `<html data-theme="light|dark">`. Un script en el `<head>` lo aplica antes de pintar, sin parpadeo. Sin JavaScript, el botón no aparece y manda el sistema. Si una vista necesita algo distinto en oscuro, usa la variante `dark:`, que respeta la misma regla.
+
+**Layouts.** Componentes anónimos en `resources/views/components/layouts/`:
+
+| Componente | Para qué |
+|---|---|
+| `<x-layouts.app title="…">` | Páginas con sesión: encabezado con logo, tema, usuario y «Cerrar sesión» (si existe `core.logout`); menú de `NavRegistry` por grupos, barra inferior en el celular para los ítems `mobile`; mensajes de `session('status')` y `session('error')`. |
+| `<x-layouts.guest title="…">` | Ingreso y «sin acceso»: tarjeta centrada bajo la franja gris del logo. |
+
+**Componentes** en `resources/views/components/ui/`: `button` (`primary`, `secondary`, `danger`; con `href` es un enlace), `card`, `page-header`, `alert` (`info`, `success`, `warning`, `danger`), `empty`, `badge` y `logo`. Ejemplo:
+
+```blade
+<x-layouts.app title="Solicitudes">
+    <x-ui.page-header title="Solicitudes" description="Lo que piden las apps.">
+        <x-slot:actions><x-ui.button href="{{ route('panel.solicitudes.create') }}">Nueva solicitud</x-ui.button></x-slot:actions>
+    </x-ui.page-header>
+
+    <x-ui.empty description="Aún no llega ninguna." />
+</x-layouts.app>
+```
+
+Textos en español, tuteando y en tipo oración; zonas táctiles de 44 px; foco visible; sin desplazamiento horizontal a 360 px.

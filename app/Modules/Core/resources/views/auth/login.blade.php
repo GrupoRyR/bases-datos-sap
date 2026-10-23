@@ -1,22 +1,12 @@
 {{--
-    GET /login (core.login): the sign-in page. Shows the flashed status
-    (after signing out) or error (a rejected or failed sign-in).
+    GET /login (core.login): the sign-in page. The guest layout shows the
+    flashed status (after signing out) or error (a rejected or failed sign-in).
 --}}
-@extends('core::layouts.base')
+<x-layouts.guest :title="__('core::ingreso.login.titulo')">
+    <h1 class="text-xl font-bold text-text">{{ __('core::ingreso.login.encabezado') }}</h1>
+    <p class="mt-2 text-sm text-muted">{{ __('core::ingreso.login.detalle') }}</p>
 
-@section('title', __('core::ingreso.login.titulo'))
-
-@section('content')
-    <h1>{{ __('core::ingreso.login.encabezado') }}</h1>
-    <p>{{ __('core::ingreso.login.detalle') }}</p>
-
-    @if (session('status'))
-        <p role="status">{{ session('status') }}</p>
-    @endif
-
-    @if (session('error'))
-        <p role="alert">{{ session('error') }}</p>
-    @endif
-
-    <a href="{{ route('core.auth.redirect') }}">{{ __('core::ingreso.login.boton') }}</a>
-@endsection
+    <x-ui.button :href="route('core.auth.redirect')" class="mt-6 w-full">
+        {{ __('core::ingreso.login.boton') }}
+    </x-ui.button>
+</x-layouts.guest>

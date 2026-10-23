@@ -17,9 +17,9 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 |---|---|---|---|---|
 | T1 | Skeleton: Laravel 13, PHP 8.3, three MySQL connections (app, maestros, cartera), Pest, Pint, Larastan, CI with MySQL 8, pre-push hook and `.claude/settings.json` guards | `feat/esqueleto` | delegated writer (many files) | merged (PR #1) |
 | T2 | Module zones `app/Modules/{Core,Sap,Panel}` with base provider, migration prefixes, architecture tests, `CLAUDE.md` and `docs/arquitectura.md` | `feat/modulos-base`, `feat/modulos` | delegated writer | merged (PR #2, #3) |
-| T3 | Robot contract `docs/contrato-robot.md` | `docs/contrato-robot` | inline (one document) | in review (PR #4) |
-| T4 | Microsoft Entra ID sign-in, roles admin TI and consulta, local-only demo login | `feat/ingreso-microsoft` | delegated writer | done (local checks) |
-| T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-base` | delegated writer | pending |
+| T3 | Robot contract `docs/contrato-robot.md` | `docs/contrato-robot` | inline (one document) | merged (PR #4) |
+| T4 | Microsoft Entra ID sign-in, roles admin TI and consulta, local-only demo login | `feat/ingreso-usuarios`, `feat/ingreso-entra`, `feat/ingreso-microsoft` | delegated writer | merged (PR #5, #6, #7) |
+| T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-tokens`, `feat/diseno-base` | delegated writer | merged (PR #8); PR #9 last |
 
 ## Acceptance
 
@@ -70,7 +70,7 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 - Split into two chained PRs after one slicing pass: #2 loader (`size:exception`, mostly tests) and #3 zones plus docs. `code-review` removed unused `ModuleRegistry::find()`, `NavRegistry::groupedFor()`/`mobileFor()` (`32fa146`). CI green on MySQL 8 for both; merged.
 - Size: about 1,460 changed lines against `origin/feat/esqueleto` (1,448 added, 15 removed): about 550 copied from the gestor's proven loader, 470 tests and fixtures, 320 docs. Over the 400-line advisory; it can split as (a) loader and (b) zones plus docs if the user wants chained PRs.
 
-### T3 (in review)
+### T3 (merged, PR #4)
 
 - Route: inline (one document; contract design needs the parent's context).
 - `docs/contrato-robot.md`: HMAC with timestamp and nonce, runs and batches, MAESTROS parts and CARTERA columns, requests and states, apps API.
@@ -125,8 +125,33 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
   ```
 
 - Pending for the parent: `docs/arquitectura.md` §2.4 still says `routes/web.php` shows the welcome page at `/`; it is now gone.
+### T5 (done, local checks)
+
+- Route: delegated writer (triggers: 2+ non-trivial files to write; reading the brand skills, NavRegistry and the layout needs prepared the write). Worktree `BASES_DATOS_SAP-worktrees/diseno`, branch `feat/diseno-base` from `main` (`63e9638`).
+- Commits on `feat/diseno-base`:
+  - `1b16d3a` feat(design): add Segurex tokens, fonts and dark mode
+  - `badfe89` feat(design): add the base UI components
+  - `8b9a4b3` feat(design): add the app and guest layouts with the logo
+  - `0dbd044` docs: describe the design base
+- Test first (Pest, `tests/Feature/Design/`):
+  - `AssetsTest`: 5 of 6 failed before the change (RED: Instrument Sans in `app.css` and `vite.config.js`, no Helvetica, no brand variables, no module `@source`), then passed (GREEN).
+  - `ComponentsTest`: 16 of 16 failed with missing components (RED), then passed.
+  - `LayoutsTest`: 10 of 10 failed with missing layouts (RED), then passed; a logo-height test was added after the visual check found `h-8` and `h-7` on the same image.
+- Decisions:
+  - Dark tokens are written once with `light-dark()`; `color-scheme` follows the system and `data-theme="light|dark"` overrides it. Lightning CSS (Tailwind build) compiles it to `--lightningcss-light/dark` toggles, checked in the built CSS and in a browser.
+  - Tailwind's default palette is removed (`--color-*: initial`), so only token utilities exist.
+  - `welcome.blade.php` stays because `routes/web.php` still serves it; only its `@fonts` line was removed.
+  - On phones and tablets the full menu is a `<details>` disclosure (works without JS); the sidebar shows from `lg`. NavItem icons are not rendered yet: there is no icon set.
+- Verification (local, Windows, PHP 8.3, Node 24):
+  - `composer format`: pint passed, no changes. `composer lint`: pint passed; phpstan level 6, 0 errors.
+  - `composer test`: 83 tests, 82 passed, 1 skipped (MySQL-only check).
+  - `npm run build`: OK; `public/build` is ignored and not staged.
+  - Visual check (static render served locally, 360 px and 1280 px, light and dark): no horizontal scroll at 360 px, the toggle cycles sistema → claro → oscuro and the choice survives a reload.
+- The logo PNG from the brand skill is corrupt (zlib data check fails), so the header uses the gestor de cartera's dark-background SVG (`public/img/logo-segurex.svg`) until the user provides a valid official file.
+- Size: 822 changed lines against `main` (811 added, 11 removed): about 265 tests, 33 docs, 520 CSS, JS and Blade. Over the 400-line advisory; it can split as (a) tokens and components, (b) layouts and docs.
 
 ## Next step
 
-- T3: green CI on PR #4, user approval, merge.
-- T4: `code-review`, then two chained PRs (group A, then group B) after T3 merges.
+- Merge PR #9 (layouts, logo and Core pages) after the user's approval; then the foundation is done.
+- Open for the user: replace `public/img/logo-segurex.svg` with a valid official Segurex logo (the skill's PNG is corrupt); decide the nightly photo cut-off vs `dias` (contract §6); copy the `.env.example` lines of PR #6; run `git config core.hooksPath .githooks` once per clone.
+- CI lesson: MySQL reorders JSON object keys, so audit-context assertions use `toEqual()`.
