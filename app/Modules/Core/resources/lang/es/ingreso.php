@@ -25,6 +25,15 @@ return [
         'detalle' => 'Entraste como :correo, pero aún no tienes un rol en el panel. Pídele a TI que te dé uno.',
     ],
 
+    // Only in local: /dev/entrar.
+    'demo' => [
+        'titulo' => 'Usuarios de prueba',
+        'encabezado' => 'Entra como un usuario de prueba',
+        'detalle' => 'Solo en tu equipo y en local: entras sin Microsoft para recorrer el panel.',
+        'vacio' => 'Todavía no hay usuarios de prueba. Corre php artisan migrate --seed para crearlos.',
+        'boton' => 'Entrar como :nombre',
+    ],
+
     'sesion_cerrada' => 'Cerraste sesión.',
     'error' => 'No pudimos completar el ingreso con Microsoft. Inténtalo de nuevo.',
     // The same for every Application\Auth\RejectionReason: the audit log keeps the reason.

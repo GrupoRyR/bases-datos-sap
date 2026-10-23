@@ -30,6 +30,15 @@ Las reglas completas están en `docs/arquitectura.md`.
 - Auditoría: `core.user.created`, `core.user.role_changed`, `core.auth.rejected`, `core.auth.signed_in` y `core.auth.signed_out`.
 - Las pruebas nunca llaman a Microsoft: usan `Tests\Modules\Core\Support\FakeIdentityProvider::install($this->app)`.
 
+### Ingreso de prueba (solo en local)
+
+Para recorrer el panel en tu equipo sin Microsoft:
+
+1. `php artisan migrate --seed` con `APP_ENV=local`: `CoreDemoSeeder` crea «Admin TI de prueba» y «Consulta de prueba» (`@example.test`).
+2. Abre `/dev/entrar` y elige un usuario.
+
+Las rutas `core.dev.*` solo existen en `local`; el controlador además responde 404 fuera de `local` y a cualquier petición que no venga de `127.0.0.1` o `::1` (nunca confía en encabezados reenviados), y el ingreso es un POST con CSRF. Queda en la auditoría como `core.auth.signed_in` con `method: demo`.
+
 ## Usuarios y roles
 
 Los usuarios (`App\Models\User`, tabla `users`) entran solo con Microsoft: no hay contraseñas. Nunca se borran; un usuario inactivo (`is_active = false`) sale de la sesión en su siguiente petición.
