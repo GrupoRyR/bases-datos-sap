@@ -15,9 +15,9 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 
 | ID | Task | Branch | Route | Status |
 |---|---|---|---|---|
-| T1 | Skeleton: Laravel 13, PHP 8.3, three MySQL connections (app, maestros, cartera), Pest, Pint, Larastan, CI with MySQL 8, pre-push hook and `.claude/settings.json` guards | `feat/esqueleto` | delegated writer (many files) | done (local checks) |
-| T2 | Module zones `app/Modules/{Core,Sap,Panel}` with base provider, migration prefixes, architecture tests, `CLAUDE.md` and `docs/arquitectura.md` | `feat/modulos` | delegated writer | done (local checks) |
-| T3 | Robot contract `docs/contrato-robot.md` | `docs/contrato-robot` | inline (one document) | pending |
+| T1 | Skeleton: Laravel 13, PHP 8.3, three MySQL connections (app, maestros, cartera), Pest, Pint, Larastan, CI with MySQL 8, pre-push hook and `.claude/settings.json` guards | `feat/esqueleto` | delegated writer (many files) | merged (PR #1) |
+| T2 | Module zones `app/Modules/{Core,Sap,Panel}` with base provider, migration prefixes, architecture tests, `CLAUDE.md` and `docs/arquitectura.md` | `feat/modulos-base`, `feat/modulos` | delegated writer | merged (PR #2, #3) |
+| T3 | Robot contract `docs/contrato-robot.md` | `docs/contrato-robot` | inline (one document) | in review (PR #4) |
 | T4 | Microsoft Entra ID sign-in, roles admin TI and consulta, local-only demo login | `feat/ingreso-microsoft` | delegated writer | pending |
 | T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-base` | delegated writer | pending |
 
@@ -42,7 +42,7 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
   - `composer test`: 13 tests, 12 passed, 1 skipped (MySQL-only distinct-database check, runs in CI).
   - `npm install && npm run build`: 0 vulnerabilities, build OK; `public/build` is git-ignored.
   - Pre-push hook: push to `refs/heads/main` exits 1, branch push exits 0.
-- Pending: CI on GitHub (MySQL 8 run of the connections test), `code-review`, PR. The user enables the hook with `git config core.hooksPath .githooks`.
+- Merged as PR #1 (`a84323c`) after `code-review` (fix `769fd14`: no demo user in the seeder, deny `git push *+*`, real driver test) and green CI. The user enables the hook with `git config core.hooksPath .githooks`.
 - Size: about 600 authored lines without lock files and Laravel boilerplate; the skeleton itself adds about 2,000 generated lines. One PR is proposed because the skeleton cannot be split usefully.
 
 ### T2 (done, local checks)
@@ -67,10 +67,18 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
   - `composer format`: pint passed, no changes.
   - `composer lint`: pint passed; phpstan level 6 passed, 0 errors.
   - `composer test`: 50 tests, 49 passed, 1 skipped (MySQL-only distinct-database check).
-- Pending: CI on MySQL 8 (the connection test runs DDL there, which commits and forces the next test to migrate again), `code-review`, PR.
+- Split into two chained PRs after one slicing pass: #2 loader (`size:exception`, mostly tests) and #3 zones plus docs. `code-review` removed unused `ModuleRegistry::find()`, `NavRegistry::groupedFor()`/`mobileFor()` (`32fa146`). CI green on MySQL 8 for both; merged.
 - Size: about 1,460 changed lines against `origin/feat/esqueleto` (1,448 added, 15 removed): about 550 copied from the gestor's proven loader, 470 tests and fixtures, 320 docs. Over the 400-line advisory; it can split as (a) loader and (b) zones plus docs if the user wants chained PRs.
+
+### T3 (in review)
+
+- Route: inline (one document; contract design needs the parent's context).
+- `docs/contrato-robot.md`: HMAC with timestamp and nonce, runs and batches, MAESTROS parts and CARTERA columns, requests and states, apps API.
+- `code-review` fixes (`850cc20`): 3-minute wait per dataset and company (not per part), expired requests stay `vencida` when their run closes later, exact routes served by `Sap` with an empty `apiPrefix()`.
+- Open for the user: the nightly photo uses `fecha_corte` = yesterday while the copied query computes `dias` with today (plan §4).
+- Verification: passive documentation; structural readback; `composer lint` and `composer test` green after syncing with `main`.
 
 ## Next step
 
-- T1: push `feat/esqueleto`, open the PR, run `code-review`, wait for green CI and the user's approval.
-- T2: push `feat/modulos`, open the PR against `feat/esqueleto` (retarget to `main` after T1 merges), run `code-review`, wait for green CI and the user's approval.
+- T3: green CI on PR #4, user approval, merge.
+- T4: Entra ID sign-in and roles on `feat/ingreso-microsoft`, stacked on T3.
