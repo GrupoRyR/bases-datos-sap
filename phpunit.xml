@@ -52,5 +52,8 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Never reach real Microsoft services from tests, even if .env has credentials
+             (tests bind tests/Modules/Core/Support/FakeIdentityProvider). -->
+        <env name="MICROSOFT_CLIENT_SECRET" value="" force="true"/>
     </php>
 </phpunit>

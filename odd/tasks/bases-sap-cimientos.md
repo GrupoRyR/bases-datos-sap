@@ -18,8 +18,8 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 | T1 | Skeleton: Laravel 13, PHP 8.3, three MySQL connections (app, maestros, cartera), Pest, Pint, Larastan, CI with MySQL 8, pre-push hook and `.claude/settings.json` guards | `feat/esqueleto` | delegated writer (many files) | merged (PR #1) |
 | T2 | Module zones `app/Modules/{Core,Sap,Panel}` with base provider, migration prefixes, architecture tests, `CLAUDE.md` and `docs/arquitectura.md` | `feat/modulos-base`, `feat/modulos` | delegated writer | merged (PR #2, #3) |
 | T3 | Robot contract `docs/contrato-robot.md` | `docs/contrato-robot` | inline (one document) | in review (PR #4) |
-| T4 | Microsoft Entra ID sign-in, roles admin TI and consulta, local-only demo login | `feat/ingreso-microsoft` | delegated writer | pending |
-| T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-base` | delegated writer | done (local checks) |
+| T4 | Microsoft Entra ID sign-in, roles admin TI and consulta, local-only demo login | `feat/ingreso-usuarios`, `feat/ingreso-entra`, `feat/ingreso-microsoft` | delegated writer | PR #5 merged; #6, #7 in review |
+| T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-tokens`, `feat/diseno-base` | delegated writer | in review (PR #8, next) |
 
 ## Acceptance
 
@@ -78,6 +78,53 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 - Open for the user: the nightly photo uses `fecha_corte` = yesterday while the copied query computes `dias` with today (plan §4).
 - Verification: passive documentation; structural readback; `composer lint` and `composer test` green after syncing with `main`.
 
+### T4 (done, local checks)
+
+- Route: delegated writer (triggers: 4+ files to read from the gestor reference, 2+ non-trivial files to write).
+- Stacked on `origin/docs/contrato-robot` (`093d752`). Reference: the gestor's Entra ID sign-in, copied without companies, SAP advisors or spatie/laravel-permission.
+- Commits on `feat/ingreso-microsoft`, in two groups for two chained PRs:
+  - Group A, users, roles and audit (no Microsoft yet):
+    - `130a250` feat(core): add the audit log contract
+    - `2741b22` feat(core): add users, roles and the role command
+  - Group B, Microsoft sign-in and local demo sign-in:
+    - `6de4e70` feat(core): sign in with Microsoft Entra ID
+    - `97c17d9` feat(core): add the local-only demo sign-in
+- What exists now:
+  - `users` moved to Core (`2026_11_01_000001`) without passwords: `microsoft_id`, `role`, `is_active`, `last_signed_in_at`; `password_reset_tokens` dropped. `audit_logs` (`2026_11_01_000002`).
+  - `Role` enum (`admin_ti`, `consulta`), gates `core.consultar` and `core.administrar`, `CORE_ADMIN_EMAILS`, `php artisan core:rol <correo> <admin_ti|consulta|ninguno>`, `EnsureUserIsActive` on the web group.
+  - `AuditLogger` contract with `DatabaseAuditLogger` (user, IP, time; secret-looking keys redacted).
+  - Socialite `microsoft` driver registered by Core, fail-closed without `MICROSOFT_TENANT_ID`; `SignInWithMicrosoft`; routes `core.login`, `core.auth.redirect`, `core.auth.callback`, `core.inicio`, `core.sin-acceso`, `core.logout`; bare views for T5 to restyle; welcome page removed.
+  - Demo sign-in `/dev/entrar` (local only, loopback only, POST with CSRF) and `CoreDemoSeeder`.
+- Decisions:
+  - The audit is written before the users move (commit order) so `core:rol` can audit from its first commit.
+  - Every rejected sign-in (tenant, identity mismatch, inactive) shows the same message; the reason is only in the audit log.
+  - A user matched by Microsoft object id signs in even if Entra now reports another e-mail; the stored e-mail is kept and the bootstrap-admin check uses the e-mail Microsoft vouches for.
+  - `core.auth.signed_in` is audited by the controller after `Auth::login()`, so the entry names the user as the actor.
+- Test first:
+  - Group A: audit logger tests (9) failed with the missing contract, then passed. Users, gates, command, config and middleware tests (33) failed (no columns, no states, no `core:rol`, no `core.admins`), then passed.
+  - Group B: sign-in, driver, identity, login, logout and home tests (59) failed (welcome page at `/`, 404 on Core routes, missing classes), then passed. Demo sign-in and seeder tests (18) failed (routes not defined, seeder missing), then passed.
+- Verification (local, Windows, PHP 8.3.35), each commit green on its own:
+  - `composer format`: pint passed, no changes.
+  - `composer lint`: pint passed; phpstan level 6 passed, 0 errors.
+  - `composer test`: 168 tests, 167 passed, 1 skipped (MySQL-only distinct-database check).
+- Size (changed lines, added plus removed, without `composer.lock`):
+  - Group A: 1,021 (code 544, tests 429, docs 48).
+  - Group B: 1,939 (code 1,059, tests 855, docs 25), plus 537 lines of `composer.lock` for Socialite.
+  - Both are over the 400-line advisory, mostly tests; group B can split again at its commit boundary (sign-in, then demo sign-in).
+- Proposed `.env.example` lines (the user copies them in):
+
+  ```dotenv
+  # Microsoft Entra ID sign-in (app registration of the TI panel).
+  # The tenant is required: without it nobody can sign in (never "common").
+  MICROSOFT_CLIENT_ID=
+  MICROSOFT_CLIENT_SECRET=
+  MICROSOFT_TENANT_ID=
+  MICROSOFT_REDIRECT_URI="${APP_URL}/auth/microsoft/callback"
+  # Comma-separated e-mails that become admin TI when they sign in.
+  CORE_ADMIN_EMAILS=
+  ```
+
+- Pending for the parent: `docs/arquitectura.md` §2.4 still says `routes/web.php` shows the welcome page at `/`; it is now gone.
 ### T5 (done, local checks)
 
 - Route: delegated writer (triggers: 2+ non-trivial files to write; reading the brand skills, NavRegistry and the layout needs prepared the write). Worktree `BASES_DATOS_SAP-worktrees/diseno`, branch `feat/diseno-base` from `main` (`63e9638`).
@@ -105,5 +152,4 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 
 ## Next step
 
-- T3: green CI on PR #4, user approval, merge.
-- T4: Entra ID sign-in and roles on `feat/ingreso-microsoft`, stacked on T3.
+- Merge bottom-up after green CI and the user's approval: #6 (Microsoft sign-in), #7 (demo sign-in), #8 (tokens and components), then the layouts PR.
