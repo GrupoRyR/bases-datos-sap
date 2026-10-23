@@ -121,7 +121,7 @@ Nunca edites `bootstrap/providers.php`, `routes/*.php` ni `routes/console.php` p
 | Sap | `/sap/*`, `sap.*` | `/api/sap/*`, `sap.api.*` | `2026_11_02_*` | Datos y API |
 | Panel | `/panel/*`, `panel.*` | `/api/panel/*`, `panel.api.*` | `2026_11_03_*` | Panel |
 
-Core sirve la raíz: sus rutas no pueden empezar con `/sap` ni `/panel`. Hoy `routes/web.php` todavía muestra la página de bienvenida en `/`; la quita la tarea del ingreso con Microsoft.
+Core sirve la raíz (`/`, `/login`, `/auth/microsoft`…): sus rutas no pueden empezar con `/sap` ni `/panel`. `routes/web.php` no tiene rutas propias.
 
 ## 3. Regla entre módulos
 
