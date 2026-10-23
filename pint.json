@@ -1,0 +1,9 @@
+{
+    "preset": "laravel",
+    "exclude": [
+        "storage",
+        "bootstrap/cache",
+        "node_modules",
+        "robot"
+    ]
+}

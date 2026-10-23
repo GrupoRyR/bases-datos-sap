@@ -1,0 +1,16 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    # Level 6 asks for typed arrays and iterables: contract shapes stay explicit
+    # for every agent that consumes them.
+    level: 6
+
+    paths:
+        - app/
+        - bootstrap/app.php
+        - config/
+        - database/
+        - routes/
+
+    tmpDir: storage/framework/cache/phpstan
