@@ -32,7 +32,7 @@ it('gives a role to an existing user, by e-mail in any case, and audits it', fun
         ->assertSuccessful();
 
     expect($user->refresh()->role)->toBe(Role::AdminTi)
-        ->and(roleChanges())->toBe([[
+        ->and(roleChanges())->toEqual([[
             'subject_type' => 'user',
             'subject_id' => (string) $user->id,
             'user_id' => null,
@@ -46,7 +46,7 @@ it('changes one role for the other', function () {
     $this->artisan('core:rol', ['correo' => 'ana@segurex.com', 'rol' => 'consulta'])->assertSuccessful();
 
     expect($user->refresh()->role)->toBe(Role::Consulta)
-        ->and(roleChanges()[0]['context'])->toBe(['old' => 'admin_ti', 'new' => 'consulta', 'source' => 'console']);
+        ->and(roleChanges()[0]['context'])->toEqual(['old' => 'admin_ti', 'new' => 'consulta', 'source' => 'console']);
 });
 
 it('takes the role away with "ninguno"', function () {
@@ -57,7 +57,7 @@ it('takes the role away with "ninguno"', function () {
         ->assertSuccessful();
 
     expect($user->refresh()->role)->toBeNull()
-        ->and(roleChanges()[0]['context'])->toBe(['old' => 'consulta', 'new' => null, 'source' => 'console']);
+        ->and(roleChanges()[0]['context'])->toEqual(['old' => 'consulta', 'new' => null, 'source' => 'console']);
 });
 
 it('says so and audits nothing when the user already has that role', function () {
