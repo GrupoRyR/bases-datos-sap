@@ -19,7 +19,7 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 | T2 | Module zones `app/Modules/{Core,Sap,Panel}` with base provider, migration prefixes, architecture tests, `CLAUDE.md` and `docs/arquitectura.md` | `feat/modulos-base`, `feat/modulos` | delegated writer | merged (PR #2, #3) |
 | T3 | Robot contract `docs/contrato-robot.md` | `docs/contrato-robot` | inline (one document) | in review (PR #4) |
 | T4 | Microsoft Entra ID sign-in, roles admin TI and consulta, local-only demo login | `feat/ingreso-microsoft` | delegated writer | pending |
-| T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-base` | delegated writer | pending |
+| T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-base` | delegated writer | done (local checks) |
 
 ## Acceptance
 
@@ -77,6 +77,31 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 - `code-review` fixes (`850cc20`): 3-minute wait per dataset and company (not per part), expired requests stay `vencida` when their run closes later, exact routes served by `Sap` with an empty `apiPrefix()`.
 - Open for the user: the nightly photo uses `fecha_corte` = yesterday while the copied query computes `dias` with today (plan §4).
 - Verification: passive documentation; structural readback; `composer lint` and `composer test` green after syncing with `main`.
+
+### T5 (done, local checks)
+
+- Route: delegated writer (triggers: 2+ non-trivial files to write; reading the brand skills, NavRegistry and the layout needs prepared the write). Worktree `BASES_DATOS_SAP-worktrees/diseno`, branch `feat/diseno-base` from `main` (`63e9638`).
+- Commits on `feat/diseno-base`:
+  - `1b16d3a` feat(design): add Segurex tokens, fonts and dark mode
+  - `badfe89` feat(design): add the base UI components
+  - `8b9a4b3` feat(design): add the app and guest layouts with the logo
+  - `0dbd044` docs: describe the design base
+- Test first (Pest, `tests/Feature/Design/`):
+  - `AssetsTest`: 5 of 6 failed before the change (RED: Instrument Sans in `app.css` and `vite.config.js`, no Helvetica, no brand variables, no module `@source`), then passed (GREEN).
+  - `ComponentsTest`: 16 of 16 failed with missing components (RED), then passed.
+  - `LayoutsTest`: 10 of 10 failed with missing layouts (RED), then passed; a logo-height test was added after the visual check found `h-8` and `h-7` on the same image.
+- Decisions:
+  - Dark tokens are written once with `light-dark()`; `color-scheme` follows the system and `data-theme="light|dark"` overrides it. Lightning CSS (Tailwind build) compiles it to `--lightningcss-light/dark` toggles, checked in the built CSS and in a browser.
+  - Tailwind's default palette is removed (`--color-*: initial`), so only token utilities exist.
+  - `welcome.blade.php` stays because `routes/web.php` still serves it; only its `@fonts` line was removed.
+  - On phones and tablets the full menu is a `<details>` disclosure (works without JS); the sidebar shows from `lg`. NavItem icons are not rendered yet: there is no icon set.
+- Verification (local, Windows, PHP 8.3, Node 24):
+  - `composer format`: pint passed, no changes. `composer lint`: pint passed; phpstan level 6, 0 errors.
+  - `composer test`: 83 tests, 82 passed, 1 skipped (MySQL-only check).
+  - `npm run build`: OK; `public/build` is ignored and not staged.
+  - Visual check (static render served locally, 360 px and 1280 px, light and dark): no horizontal scroll at 360 px, the toggle cycles sistema → claro → oscuro and the choice survives a reload.
+- Open: the logo PNG from the brand skill is corrupt (zlib data check fails; browsers draw only the top 15 of 53 rows). It needs a valid file at `public/img/logo-segurex.png`.
+- Size: 822 changed lines against `main` (811 added, 11 removed): about 265 tests, 33 docs, 520 CSS, JS and Blade. Over the 400-line advisory; it can split as (a) tokens and components, (b) layouts and docs.
 
 ## Next step
 
