@@ -80,28 +80,9 @@ final class NavRegistry
     }
 
     /**
-     * Visible items by group, with groups in the order of their first item.
-     *
-     * @return array<string, list<NavItem>>
-     */
-    public function groupedFor(?Authenticatable $user): array
-    {
-        return self::group($this->visibleTo($user));
-    }
-
-    /**
-     * Visible items of the phone bottom bar.
-     *
-     * @return list<NavItem>
-     */
-    public function mobileFor(?Authenticatable $user): array
-    {
-        return self::mobileOnly($this->visibleTo($user));
-    }
-
-    /**
-     * groupedFor() and mobileFor() from a single visibility pass, so each
-     * route and permission is checked once per page.
+     * The visible items by group (groups in the order of their first item)
+     * and those of the phone bottom bar, from a single visibility pass, so
+     * each route and permission is checked once per page.
      *
      * @return array{groups: array<string, list<NavItem>>, mobile: list<NavItem>}
      */
