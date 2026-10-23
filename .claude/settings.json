@@ -12,6 +12,7 @@
       "Bash(git push *--force*)",
       "Bash(git push * -f *)",
       "Bash(git push -f *)",
+      "Bash(git push *+*)",
       "Bash(git config *core.hooksPath*)",
       "Bash(gh api *merge*)",
       "PowerShell(git push origin main)",
@@ -25,6 +26,7 @@
       "PowerShell(git push *--force*)",
       "PowerShell(git push * -f *)",
       "PowerShell(git push -f *)",
+      "PowerShell(git push *+*)",
       "PowerShell(git config *core.hooksPath*)",
       "PowerShell(gh api *merge*)"
     ],

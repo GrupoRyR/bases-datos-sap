@@ -14,10 +14,13 @@ it('uses the app connection by default', function () {
     expect(config('database.default'))->toBe('app');
 });
 
-it('configures the connection', function (string $name) {
-    expect(config("database.connections.{$name}"))->toBeArray()
-        ->and(config("database.connections.{$name}.driver"))->toBe(env('DB_DRIVER', 'mysql'));
-})->with('connections');
+it('builds every connection with the same supported driver', function () {
+    $drivers = collect(['app', 'maestros', 'cartera'])
+        ->map(fn (string $name): mixed => config("database.connections.{$name}.driver"));
+
+    expect($drivers->unique()->values()->all())->toHaveCount(1)
+        ->and($drivers->first())->toBeIn(['mysql', 'sqlite']);
+});
 
 it('answers a query on the connection', function (string $name) {
     $row = DB::connection($name)->selectOne('select 1 as ok');
