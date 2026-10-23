@@ -1,0 +1,115 @@
+# No pull request is merged into main with this workflow in red.
+name: CI
+
+on:
+  # Only pull requests into main: a chained pull request that targets another pull request's
+  # branch runs once it is retargeted to main and synced (a new push), not on every link.
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A new commit on a pull request cancels that pull request's older run. Each push to main
+# gets a group of its own (its commit), so main runs never wait for, replace or cancel
+# each other: every commit merged into main gets its own result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (Pint and Larastan)
+    runs-on: ubuntu-latest
+    # A stuck run fails here instead of at GitHub's 6-hour default.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, bcmath, pdo_sqlite, zip
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Lint
+        run: composer lint
+
+  test:
+    name: Tests (PHP 8.3, MySQL 8)
+    runs-on: ubuntu-latest
+    # composer test has no time limit of its own, so this bounds a hung test.
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          # Throwaway server that only lives during the job.
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      # Overrides the SQLite defaults of phpunit.xml (they are not forced).
+      DB_DRIVER: mysql
+      DB_CONNECTION: app
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: bases_sap_test
+      DB_MAESTROS_DATABASE: maestros_sap_test
+      DB_CARTERA_DATABASE: cartera_sap_test
+      DB_USERNAME: root
+      DB_PASSWORD: root
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, bcmath, pdo_mysql, pdo_sqlite, zip
+          coverage: none
+
+      # One database per connection, like production (docs/plan-bases-sap.md, section 3).
+      - name: Create test databases
+        run: >-
+          mysql -h 127.0.0.1 -uroot -proot -e
+          "CREATE DATABASE IF NOT EXISTS bases_sap_test;
+          CREATE DATABASE IF NOT EXISTS maestros_sap_test;
+          CREATE DATABASE IF NOT EXISTS cartera_sap_test;"
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      # The test APP_KEY comes from phpunit.xml, so no key is generated here.
+      - name: Prepare environment
+        run: cp .env.example .env
+
+      - name: Test
+        run: composer test
+
+  assets:
+    name: Assets build (never committed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
