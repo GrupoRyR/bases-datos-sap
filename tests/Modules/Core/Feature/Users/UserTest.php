@@ -50,6 +50,18 @@ it('starts active and without a role', function () {
         ->and($user->last_signed_in_at)->toBeNull();
 });
 
+it('never takes the role or the active flag from mass assignment', function () {
+    $user = User::query()->create([
+        'name' => 'Ana Gómez',
+        'email' => 'ana@segurex.com',
+        'role' => Role::AdminTi->value,
+        'is_active' => false,
+    ]);
+
+    expect($user->refresh()->role)->toBeNull()
+        ->and($user->is_active)->toBeTrue();
+});
+
 it('casts the role to the Role enum and answers hasRole()', function () {
     $admin = User::factory()->adminTi()->create();
     $reader = User::factory()->consulta()->create();

@@ -27,7 +27,7 @@ use Illuminate\Support\Carbon;
  * @property bool $is_active
  * @property Carbon|null $last_signed_in_at
  */
-#[Fillable(['name', 'email', 'microsoft_id', 'role', 'is_active'])]
+#[Fillable(['name', 'email', 'microsoft_id'])]
 #[Hidden(['remember_token'])]
 class User extends Authenticatable
 {
