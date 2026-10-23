@@ -39,7 +39,7 @@ it('renders the app layout with the Segurex brand, title and theme support', fun
 
 it('shows the logo as an image on the dark header', function () {
     $this->blade('<x-layouts.app title="Inicio">Hola</x-layouts.app>')
-        ->assertSeeInOrder(['<header', 'bg-brand-dark', '<img', '/img/logo-segurex.png', 'alt="Segurex LATAM"'], false);
+        ->assertSeeInOrder(['<header', 'bg-brand-dark', '<img', '/img/logo-segurex.svg', 'alt="Segurex LATAM"'], false);
 });
 
 it('lets the caller set the logo height', function () {

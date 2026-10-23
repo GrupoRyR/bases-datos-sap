@@ -220,7 +220,7 @@ El usuario activa el hook una vez por clon: `git config core.hooksPath .githooks
 
 El panel es de TI y lleva solo la marca de Segurex (§3 del plan). Las reglas salen de la skill `frontend-marca-sgx-sydc`:
 
-- **Logo como imagen**, nunca el nombre en texto: `public/img/logo-segurex.png` con `<x-ui.logo />`, alto fijo y ancho automático, sobre el gris `bg-brand-dark`. El texto sobre ese gris va en blanco (`text-on-brand`): el naranja ahí no da contraste.
+- **Logo como imagen**, nunca el nombre en texto: `public/img/logo-segurex.svg` (la versión para fondo oscuro del gestor de cartera) con `<x-ui.logo />`, alto fijo y ancho automático, sobre el gris `bg-brand-dark`. El texto sobre ese gris va en blanco (`text-on-brand`): el naranja ahí no da contraste.
 - **Tipografía Helvetica/Arial** en toda la interfaz. No se carga ninguna fuente externa ni CDN.
 - **Colores solo por variables `--brand-*`**: ninguna vista lleva un hex. `tests/Feature/Design/AssetsTest.php` falla si una vista Blade trae un color de marca o una fuente externa.
 

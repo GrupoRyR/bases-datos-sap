@@ -100,7 +100,7 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
   - `composer test`: 83 tests, 82 passed, 1 skipped (MySQL-only check).
   - `npm run build`: OK; `public/build` is ignored and not staged.
   - Visual check (static render served locally, 360 px and 1280 px, light and dark): no horizontal scroll at 360 px, the toggle cycles sistema → claro → oscuro and the choice survives a reload.
-- Open: the logo PNG from the brand skill is corrupt (zlib data check fails; browsers draw only the top 15 of 53 rows). It needs a valid file at `public/img/logo-segurex.png`.
+- The logo PNG from the brand skill is corrupt (zlib data check fails), so the header uses the gestor de cartera's dark-background SVG (`public/img/logo-segurex.svg`) until the user provides a valid official file.
 - Size: 822 changed lines against `main` (811 added, 11 removed): about 265 tests, 33 docs, 520 CSS, JS and Blade. Over the 400-line advisory; it can split as (a) tokens and components, (b) layouts and docs.
 
 ## Next step
