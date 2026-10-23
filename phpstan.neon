@@ -13,4 +13,10 @@ parameters:
         - database/
         - routes/
 
+    # Module config files are merged by their provider and cached with the rest
+    # of the configuration, so env() is as safe there as in config/.
+    configDirectories:
+        - %currentWorkingDirectory%/config
+        - %currentWorkingDirectory%/app/Modules/*/config
+
     tmpDir: storage/framework/cache/phpstan
