@@ -14,6 +14,22 @@ Lo que otro módulo necesite de Core lo publica Core en `App\Modules\Core\Contra
 
 Las reglas completas están en `docs/arquitectura.md`.
 
+## Ingreso con Microsoft
+
+| Ruta | Nombre | Quién |
+|---|---|---|
+| `GET /login` | `core.login` | Invitados: botón «Entrar con Microsoft». |
+| `GET /auth/microsoft` | `core.auth.redirect` | Invitados: lleva a Microsoft. |
+| `GET /auth/microsoft/callback` | `core.auth.callback` | Invitados: vuelve de Microsoft. Debe coincidir con `MICROSOFT_REDIRECT_URI`. |
+| `GET /` | `core.inicio` | Usuarios con rol. Sin rol, van a `/sin-acceso`. |
+| `GET /sin-acceso` | `core.sin-acceso` | Usuarios sin rol: les dice que pidan acceso a TI. |
+| `POST /logout` | `core.logout` | Usuarios. |
+
+- El driver `microsoft` de Socialite se registra en `CoreServiceProvider` y **no se construye sin `MICROSOFT_TENANT_ID`**: sin inquilino aceptaría cuentas de cualquier directorio (`common`). La app arranca igual; solo falla el ingreso.
+- `Application\Auth\SignInWithMicrosoft` revisa el inquilino (`tid`), busca al usuario por `microsoft_id` y luego por correo, rechaza cuentas cruzadas e inactivos, crea a los nuevos sin rol y da `admin_ti` a los correos de `CORE_ADMIN_EMAILS`. Todo rechazo muestra el mismo mensaje; el motivo queda en la auditoría (`core.auth.rejected`).
+- Auditoría: `core.user.created`, `core.user.role_changed`, `core.auth.rejected`, `core.auth.signed_in` y `core.auth.signed_out`.
+- Las pruebas nunca llaman a Microsoft: usan `Tests\Modules\Core\Support\FakeIdentityProvider::install($this->app)`.
+
 ## Usuarios y roles
 
 Los usuarios (`App\Models\User`, tabla `users`) entran solo con Microsoft: no hay contraseñas. Nunca se borran; un usuario inactivo (`is_active = false`) sale de la sesión en su siguiente petición.
