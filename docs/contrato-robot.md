@@ -20,6 +20,7 @@ Nombres: las rutas y los valores de negocio van en español, como el plan; las l
 ## 2. Transporte
 
 - Base: `https://<subdominio>/api/robot/v1`. Solo HTTPS. Todas las rutas del robot son `POST`, sin query string.
+- Las rutas de este documento (`/api/robot/v1/*` y `/api/v1/*` de §7.4) son exactas. El módulo `Sap` las sirve con `apiPrefix()` vacío, no bajo el `/api/sap` por defecto (`docs/arquitectura.md`).
 - Cuerpo JSON en UTF-8 (`Content-Type: application/json`). Puede ir comprimido con `Content-Encoding: gzip`; el robot comprime por defecto.
 - Límite: 10 MB por petición tal como viaja y 40 MB descomprimida. La API responde 413 antes de revisar la firma si se pasa.
 - Límite de ritmo: 120 peticiones por minuto por IP. Pasado eso, 429 con `Retry-After`.
@@ -242,13 +243,13 @@ Cada solicitud es de una empresa (`SGX` o `SDC`).
 | `tomada` | El robot la tomó y está trabajando (`tomada_en`) |
 | `terminada` | Su corrida cerró bien (`terminada_en`) |
 | `fallida` | Su corrida falló (`error`) |
-| `vencida` | Lleva más de 30 minutos `tomada` sin terminar |
+| `vencida` | Lleva más de 30 minutos `tomada` sin terminar. Si su corrida cierra bien después, los datos se aplican igual, pero la solicitud se queda `vencida`: es la señal de que tardó demasiado (plan §6) |
 
-Al llegar una solicitud, la API decide, para la misma empresa, conjunto y parte («una igual»):
+Al llegar una solicitud, la API decide así. «Una igual» es de la misma empresa, conjunto y parte; «una hermana», de la misma empresa y conjunto, con cualquier parte (la espera es **por conjunto y empresa**):
 
 1. Si hay una igual `pendiente` o `en_cola`, la nueva **se une** a esa: no se crea otra, se agrega quién pidió y se responde la existente.
-2. Si hay una igual `tomada`, la nueva queda `en_cola` y su hora se fija cuando esa termine: 3 minutos después si termina bien, de inmediato si falla o vence.
-3. Si la última igual `terminada` terminó hace menos de **3 minutos**, la nueva queda `en_cola` con `correr_desde` = esa hora + 3 minutos.
+2. Si hay una hermana `tomada`, la nueva queda `en_cola` y su hora se fija cuando esa termine: 3 minutos después si termina bien, de inmediato si falla o vence.
+3. Si la última hermana `terminada` terminó hace menos de **3 minutos**, la nueva queda `en_cola` con `correr_desde` = esa hora + 3 minutos.
 4. Si no, queda `pendiente` con `correr_desde` = ahora.
 5. Franjas bloqueadas: si `correr_desde` cae a 15 minutos o menos (antes o después) de una hora de `BASES_SAP_FRANJAS_BLOQUEADAS` (`00:00,05:00,06:00,12:00,12:30` en Bogotá, mientras existan los otros robots), se corre al final de la franja: por ejemplo, 11:50 pasa a 12:45. La solicitud queda `en_cola` y la app muestra esa hora.
 
