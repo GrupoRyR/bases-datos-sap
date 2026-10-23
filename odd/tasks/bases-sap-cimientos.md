@@ -17,9 +17,9 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 |---|---|---|---|---|
 | T1 | Skeleton: Laravel 13, PHP 8.3, three MySQL connections (app, maestros, cartera), Pest, Pint, Larastan, CI with MySQL 8, pre-push hook and `.claude/settings.json` guards | `feat/esqueleto` | delegated writer (many files) | merged (PR #1) |
 | T2 | Module zones `app/Modules/{Core,Sap,Panel}` with base provider, migration prefixes, architecture tests, `CLAUDE.md` and `docs/arquitectura.md` | `feat/modulos-base`, `feat/modulos` | delegated writer | merged (PR #2, #3) |
-| T3 | Robot contract `docs/contrato-robot.md` | `docs/contrato-robot` | inline (one document) | in review (PR #4) |
-| T4 | Microsoft Entra ID sign-in, roles admin TI and consulta, local-only demo login | `feat/ingreso-usuarios`, `feat/ingreso-entra`, `feat/ingreso-microsoft` | delegated writer | PR #5 merged; #6, #7 in review |
-| T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-tokens`, `feat/diseno-base` | delegated writer | in review (PR #8, next) |
+| T3 | Robot contract `docs/contrato-robot.md` | `docs/contrato-robot` | inline (one document) | merged (PR #4) |
+| T4 | Microsoft Entra ID sign-in, roles admin TI and consulta, local-only demo login | `feat/ingreso-usuarios`, `feat/ingreso-entra`, `feat/ingreso-microsoft` | delegated writer | merged (PR #5, #6, #7) |
+| T5 | Segurex brand base: tokens, layout, logo, dark mode | `feat/diseno-tokens`, `feat/diseno-base` | delegated writer | merged (PR #8); PR #9 last |
 
 ## Acceptance
 
@@ -70,7 +70,7 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 - Split into two chained PRs after one slicing pass: #2 loader (`size:exception`, mostly tests) and #3 zones plus docs. `code-review` removed unused `ModuleRegistry::find()`, `NavRegistry::groupedFor()`/`mobileFor()` (`32fa146`). CI green on MySQL 8 for both; merged.
 - Size: about 1,460 changed lines against `origin/feat/esqueleto` (1,448 added, 15 removed): about 550 copied from the gestor's proven loader, 470 tests and fixtures, 320 docs. Over the 400-line advisory; it can split as (a) loader and (b) zones plus docs if the user wants chained PRs.
 
-### T3 (in review)
+### T3 (merged, PR #4)
 
 - Route: inline (one document; contract design needs the parent's context).
 - `docs/contrato-robot.md`: HMAC with timestamp and nonce, runs and batches, MAESTROS parts and CARTERA columns, requests and states, apps API.
@@ -152,4 +152,6 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
 
 ## Next step
 
-- Merge bottom-up after green CI and the user's approval: #6 (Microsoft sign-in), #7 (demo sign-in), #8 (tokens and components), then the layouts PR.
+- Merge PR #9 (layouts, logo and Core pages) after the user's approval; then the foundation is done.
+- Open for the user: replace `public/img/logo-segurex.svg` with a valid official Segurex logo (the skill's PNG is corrupt); decide the nightly photo cut-off vs `dias` (contract §6); copy the `.env.example` lines of PR #6; run `git config core.hooksPath .githooks` once per clone.
+- CI lesson: MySQL reorders JSON object keys, so audit-context assertions use `toEqual()`.
