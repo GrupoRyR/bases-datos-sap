@@ -4,11 +4,13 @@ Fuente de verdad del proyecto. Lo aprobó el usuario (TI, Segurex) el 23 de octu
 
 ## 1. Qué es
 
-Edward (CEO del Grupo RYR) pidió que los datos maestros de SAP Business One se saquen una sola vez, se mantengan al día y queden en un solo lugar para todas las apps. Así un cliente o un producto nuevo en SAP aparece en todas las apps sin pasos a mano, y no hace falta un robot por app.
+Edward (CEO del Grupo RYR) pidió que los datos de SAP Business One se saquen una sola vez, se mantengan al día y queden en un solo lugar para todas las apps. Así un cliente o un producto nuevo en SAP aparece en todas las apps sin pasos a mano.
+
+**Un solo robot para todo.** Con el tiempo reemplaza a todos los robots que hay hoy (el del gestor de cartera, CarteraWeb-ETL y CxPWeb-ETL), que dejan de existir.
 
 «Bases de datos SAP» tiene dos partes:
 
-1. **Maestros en MySQL.** Clientes, proveedores, artículos y catálogos de las dos empresas, en la base `maestros_sap` de GoDaddy. Las apps los leen con un usuario de solo lectura.
+1. **Datos en MySQL**, organizados en **conjuntos**. En la primera versión: MAESTROS (clientes, proveedores, artículos y catálogos) y CARTERA (facturas abiertas y saldos). Las apps los leen con un usuario de solo lectura.
 2. **Respaldo en carpeta.** Otras tablas de SAP que hoy no usa ninguna app (auditoría, usuarios y permisos, contabilidad…). Se guardan en CSV en el PC de TI, ordenadas, y **no** se suben a MySQL.
 
 Empresas:
@@ -20,51 +22,70 @@ Empresas:
 
 Las dos están en el mismo servidor HANA, cada una con su usuario de base de datos.
 
+### Conjuntos
+
+Cada conjunto tiene su carpeta en `C:\Users\Claude\Documents\CEREBRO\SAP\BASES_DE_DATOS` y, si va a MySQL, su propia base.
+
+| Conjunto | Qué trae | Base MySQL | Cuándo entra |
+|---|---|---|---|
+| MAESTROS | Clientes, proveedores, artículos, lista de precios pública, vendedores y catálogos | `maestros_sap` | Primera versión |
+| CARTERA | Facturas abiertas y saldos, y una foto por día | `cartera_sap` | Primera versión |
+| VENTAS, RECAUDOS, CRUCES | Lo que usa Comisiones en el gestor de cartera | Se define al moverlos | Cuando el gestor de cartera pase al robot único |
+| CUENTAS_POR_PAGAR | Lo que hoy trae CxPWeb-ETL | Se define al moverlo | Cuando esa app se mude a GoDaddy |
+| EXISTENCIAS | Inventario disponible, para el gestor de clientes que incluirá Toma de pedidos | Se define al planearlo | Segunda versión |
+
 ## 2. Cómo funciona
 
 ```text
-SAP HANA ──VPN──> Robot (PC de TI) ──HTTPS + HMAC──> App «Bases de datos SAP» (GoDaddy) ──> MySQL maestros_sap ──solo lectura──> Apps
+SAP HANA ──VPN──> Robot (PC de TI) ──HTTPS + HMAC──> App «Bases de datos SAP» (GoDaddy) ──> MySQL (una base por conjunto) ──solo lectura──> Apps
                        │
                        └──> Carpeta de CSV (respaldo de todo, en el PC de TI)
 ```
 
-- **Robot** en Python, en el PC de TI (donde ya corren los robots de cartera y cuentas por pagar). Usa la VPN Sophos solo mientras consulta SAP y la baja antes de enviar.
-- **App** Laravel en GoDaddy. Recibe los maestros del robot por HTTPS con firma HMAC, guarda las solicitudes de actualización y muestra un panel. La base nunca queda expuesta a internet sin control.
+- **Robot** en Python, en el PC de TI. Usa la VPN Sophos solo mientras consulta SAP y la baja antes de enviar. La VPN manda todo el tráfico del PC por el túnel, así que cada actualización corta su internet normal unos segundos; más adelante conviene mover el robot a un equipo que llegue a SAP sin VPN.
+- **App** Laravel en GoDaddy. Recibe los datos del robot por HTTPS con firma HMAC, guarda las solicitudes de actualización y muestra un panel.
 - **El robot pregunta, la app no llama.** La app está en internet y no puede entrar a la red interna, así que el robot le pregunta cada minuto si hay trabajo.
 
-### El botón «Actualizar datos de SAP»
+### El botón «Actualizar datos»
 
-1. Alguien toca el botón en una app. La app le avisa a Bases de datos SAP, nunca a SAP.
-2. Bases de datos SAP guarda la solicitud: quién, desde qué app y de qué empresa. Si ya hay una pendiente, la nueva se une a esa. Máximo una solicitud nueva cada 10 minutos por empresa.
-3. El robot pregunta cada minuto, sin VPN, si hay solicitudes. Si no hay, se cierra.
-4. Si hay, sube la VPN, trae de SAP solo lo que cambió y baja la VPN.
-5. Guarda el CSV y envía los maestros.
-6. La app muestra «Datos de SAP actualizados a las 10:42».
+Cada app tiene su propio botón, y el botón dice qué actualizar: en la pantalla de cartera del gestor de cartera, CARTERA; en Toma de pedidos, los clientes. El panel de Bases de datos SAP tiene además uno para TI.
 
-Estados de una solicitud: pendiente, tomada, terminada, fallida, vencida (tomada y sin terminar en 30 minutos).
+1. Alguien toca el botón. La app llama a la API de Bases de datos SAP con su propia llave, nunca a SAP.
+2. Bases de datos SAP guarda la solicitud: quién, desde qué app, qué actualizar (un conjunto completo, como CARTERA, o una parte de MAESTROS, como clientes) y de qué empresa.
+3. Si ya hay una solicitud pendiente igual, la nueva se une a esa. Si la última igual terminó hace menos de 3 minutos, la nueva queda en cola y corre al cumplirse los 3 minutos. Nunca se rechaza.
+4. El robot pregunta cada minuto, sin VPN, si hay solicitudes. Si no hay, se cierra.
+5. Si hay, sube la VPN, trae de SAP solo eso y baja la VPN.
+6. Guarda el CSV y envía los datos.
+7. La app muestra «Datos actualizados a las 10:42». Por ejemplo, el asesor ve su cartera al día; el robot trae la de toda la empresa, pero cada asesor sigue viendo solo la suya.
+
+Estados de una solicitud: pendiente, en cola, tomada, terminada, fallida, vencida (tomada y sin terminar en 30 minutos).
 
 Cada app decide qué roles ven el botón. En Toma de pedidos: gerentes, administradores de ventas y TI. Queda registrado quién pidió.
+
+No se usa MCP: las apps hablan con la API. Si más adelante un agente de IA necesita pedir actualizaciones o consultar datos, se le pone un MCP encima de la misma API.
 
 ### Horarios
 
 - **Revisión de solicitudes:** cada minuto.
-- **Corrida completa de maestros:** cada noche a las 02:00.
+- **Corrida completa:** cada noche a las 02:00 (MAESTROS y CARTERA, con la foto diaria de cartera).
 - **Fotos de la carpeta:** cada domingo a las 03:00.
-- **Franjas bloqueadas:** los otros robots usan la VPN a las 00:00, 05:00, 06:00, 12:00 y 12:30. Si una solicitud cae a 15 minutos o menos de esas horas, espera, y la app dice a qué hora corre.
+- **Franjas bloqueadas:** mientras existan los otros robots, usan la VPN a las 00:00, 05:00, 06:00, 12:00 y 12:30. Si una solicitud cae a 15 minutos o menos de esas horas, espera, y la app dice a qué hora corre.
 
 ## 3. Alojamiento
 
 - **Repo:** `GrupoRyR/bases-datos-sap`, privado. Código en `C:\Users\Claude\Documents\PROYECTOS_CLAUDE\PAGINAS_WEB\BASES_DATOS_SAP`.
-- **Dos bases en GoDaddy** (cPanel da permisos por base, no por tabla):
+- **Bases en GoDaddy**, porque cPanel da permisos por base y no por tabla:
   - `bases_sap`: la app (solicitudes, corridas, usuarios del panel, apps conectadas, auditoría).
-  - `maestros_sap`: solo los datos. Es la única que ven las apps.
-- **Un usuario MySQL de solo lectura por app y por agente**, sobre `maestros_sap`, para poder cortar uno sin tocar los demás. Cada app tiene además su propia llave para pedir actualizaciones.
+  - Una base por conjunto que va a MySQL: `maestros_sap` y `cartera_sap`. Cada app recibe permiso solo en las que usa.
+- **Un usuario MySQL de solo lectura por app y por agente**, para poder cortar uno sin tocar los demás. Cada app tiene además su propia llave para pedir actualizaciones.
 - **MySQL remoto** abierto solo para las IP que autorice el usuario (para conectar un agente o una app fuera de GoDaddy), con conexión cifrada. Nunca abierto a cualquier IP.
 - **Panel:** ingreso con la cuenta de Microsoft (Entra ID) y marca de Segurex, porque el panel es de TI.
 
-## 4. Maestros que van a MySQL (primera versión)
+## 4. Datos que van a MySQL (primera versión)
 
-| Maestro | Tablas de SAP | Cómo se actualiza |
+### MAESTROS (`maestros_sap`)
+
+| Parte | Tablas de SAP | Cómo se actualiza |
 |---|---|---|
 | Clientes | `OCRD` (CardType C), `CRD1` direcciones, `OCPR` contactos | Solo los que cambiaron (`UpdateDate`, `UpdateTS`); de esos, se traen de nuevo direcciones y contactos |
 | Proveedores | `OCRD` (CardType S), `CRD1`, `OCPR` | Igual que clientes |
@@ -75,13 +96,21 @@ Cada app decide qué roles ven el botón. En Toma de pedidos: gerentes, administ
 | Condiciones de pago | `OCTG` | Completa |
 | Municipios | `@HBT_MUNICIPIO` | Completa |
 
-Reglas:
-
 - Cada fila lleva empresa (SGX o SDC), código de SAP, activo, `actualizado_en_sap` y `sincronizado_en`. Llave única: empresa + código.
-- Lo que se borra o se inactiva en SAP queda marcado como inactivo. Bases de datos SAP nunca borra filas, para no romper las apps.
-- Las apps leen vistas estables (`v_clientes`, `v_articulos`…), no las tablas.
-- Clientes y contactos tienen datos personales: aplica la Ley 1581 de 2012 (habeas data).
-- **Validar con datos reales** antes de cargar: `UpdateTS` en `OITM`, el nombre exacto de la lista PÚBLICA en `OPLN` de cada empresa, y si `@HBT_MUNICIPIO` existe en Derivados.
+- Lo que se borra o se inactiva en SAP queda marcado como inactivo. Nunca se borran filas, para no romper las apps.
+
+### CARTERA (`cartera_sap`)
+
+| Parte | Origen | Cómo se actualiza |
+|---|---|---|
+| Cartera actual | La consulta `etl/queries/cartera.sql` del gestor de cartera, copiada tal cual (ya incluye asesor, correo del asesor y valor antes de impuestos) | Completa cada vez, con el botón y cada noche; se reemplaza en una sola transacción y nunca queda vacía |
+| Foto diaria | La misma consulta | Una por día, en la corrida de las 02:00, con fecha de corte del día anterior; no se borra. La usan la circularización (cierre de mes) y el historial |
+
+### Para todos los conjuntos
+
+- Las apps leen vistas estables (`v_clientes`, `v_articulos`, `v_cartera`…), no las tablas.
+- Clientes, contactos y cartera tienen datos personales: aplica la Ley 1581 de 2012 (habeas data).
+- **Validar con datos reales** antes de cargar: `UpdateTS` en `OITM`, el nombre exacto de la lista PÚBLICA en `OPLN` de cada empresa, si `@HBT_MUNICIPIO` existe en Derivados, y que la consulta de cartera funcione igual en el esquema de Derivados.
 
 ## 5. Tablas que solo van a la carpeta
 
@@ -104,7 +133,7 @@ Estructura: `<CARPETA>\<SGX o SDC>\<tabla>\<archivo>.csv` (`LICENCIAS` no lleva 
 
 - **Fotos** (cada domingo): `aaaa-mm-dd.csv`, estado completo de ese día. Se guardan 52 semanas.
 - **Registros** (cada noche): `aaaa-mm.csv`, un archivo por mes al que se suman las filas nuevas. No se borran.
-- **Maestros:** `MAESTROS\<empresa>\<maestro>\aaaa-mm-dd_hhmm.csv`, uno por corrida. Se borran a los 90 días.
+- **MAESTROS y CARTERA:** `aaaa-mm-dd_hhmm.csv`, uno por corrida, se borran a los 90 días. La foto diaria de cartera va en `CARTERA\<empresa>\historico\aaaa-mm-dd.csv` y no se borra.
 
 Reglas:
 
@@ -118,17 +147,18 @@ Reglas:
 Bases de datos SAP es estable cuando cumple esto **14 días seguidos** en producción:
 
 1. Todas las corridas nocturnas terminan bien.
-2. Toda solicitud del botón, fuera de las franjas bloqueadas, termina en menos de 10 minutos.
-3. Cada noche, las filas de cada maestro en `maestros_sap` coinciden con las de SAP. El robot envía el conteo de SAP al cerrar la corrida completa y la app lo compara.
+2. Toda solicitud de un botón, fuera de las franjas bloqueadas, termina en menos de 10 minutos.
+3. Cada noche, las filas de cada conjunto en MySQL coinciden con las de SAP. El robot envía el conteo de SAP al cerrar la corrida completa y la app lo compara.
 4. Nadie tuvo que corregir datos a mano.
 
-El panel muestra el contador («Estable: 9 de 14 días»). Al llegar a 14, el gestor de cartera empieza a leer los maestros de aquí.
+El panel muestra el contador («Estable: 9 de 14 días»). Al llegar a 14, el gestor de cartera empieza a tomar maestros y cartera de aquí.
 
 ## 7. Qué cambia en las otras apps
 
-- **Gestor de cartera:** hoy su robot le envía su propia copia de clientes y vendedores. Cuando Bases de datos SAP sea estable, el gestor los lee de `maestros_sap` y su robot solo envía cartera, ventas, recaudos y cruces. Los maestros viven siempre aquí.
-- **Robots actuales** (CarteraWeb-ETL y CxPWeb-ETL): se apagan cuando todas las apps estén en GoDaddy.
-- **Segunda versión:** existencias de inventario, para un gestor de clientes que incluirá Toma de pedidos. La frecuencia se define al planearla.
+- **Gestor de cartera:** sale a producción ya, con su robot actual, de forma temporal. Cuando Bases de datos SAP sea estable, toma maestros y cartera de aquí en vez de recibirlos de su robot. Después pasan al robot único VENTAS, RECAUDOS y CRUCES (sus consultas, ya probadas, se copian tal cual) y la carpeta `etl/` del gestor desaparece.
+- **CarteraWeb-ETL** (el robot del visualizador viejo): se apaga cuando el gestor de cartera reemplace al visualizador.
+- **CxPWeb-ETL:** se apaga cuando cuentas por pagar se mude a GoDaddy y su conjunto CUENTAS_POR_PAGAR entre al robot único.
+- **Segunda versión:** EXISTENCIAS, para el gestor de clientes que incluirá Toma de pedidos. La frecuencia se define al planearla.
 
 ## 8. Seguridad
 
@@ -145,18 +175,20 @@ Máximo cuatro sesiones a la vez en el PC. Todas con Opus 5.5, esfuerzo alto. La
 | # | Sesión | Cuándo | Zona |
 |---|---|---|---|
 | 1 | Bases SAP: cimientos | Primero, sola | Esqueleto, CI, protecciones, `CLAUDE.md`, `docs/arquitectura.md`, `docs/contrato-robot.md`, módulo Core, migraciones `2026_11_01_` |
-| 2 | Bases SAP: maestros y API | Después de cimientos, junto con el robot | `app/Modules/Sap/**`, `tests/Modules/Sap/**`, migraciones `2026_11_02_` |
+| 2 | Bases SAP: datos y API | Después de cimientos, junto con el robot | `app/Modules/Sap/**`, `tests/Modules/Sap/**`, migraciones `2026_11_02_` |
 | 3 | Bases SAP: robot | Después de cimientos, junto con la API | `robot/**` y sus pruebas |
 | 4 | Prueba con SAP real | La corre el usuario: `--catalogo` y `--diagnostico` | — |
 | 5 | Bases SAP: panel | Después de la API de solicitudes | `app/Modules/Panel/**`, `tests/Modules/Panel/**`, migraciones `2026_11_03_` |
 | 6 | Bases SAP: despliegue | Cuando TI entregue lo suyo | Lo que asigne el usuario |
-| 7 | Gestor de cartera lee de aquí | Cuando sea estable (sección 6) | Repo gestor-cartera |
+| 7 | Gestor de cartera toma maestros y cartera de aquí | Cuando sea estable (sección 6) | Repo gestor-cartera |
 
 El conteo nocturno de la sección 6 lo implementan la API (sesión 2: guarda y compara) y el robot (sesión 3: envía el conteo de SAP); el panel (sesión 5) lo muestra.
 
+El robot copia la consulta de cartera del repo del gestor de cartera (`C:\Users\Claude\Documents\PROYECTOS_CLAUDE\PAGINAS_WEB\GESTOR_CARTERA\etl\queries\cartera.sql`) solo leyéndola; nunca cambia ese repo.
+
 ## 10. Pendiente de TI
 
-- Confirmar que el plan de GoDaddy deja crear dos bases más, varios usuarios MySQL y MySQL remoto por IP.
+- Confirmar que el plan de GoDaddy deja crear tres bases más (`bases_sap`, `maestros_sap`, `cartera_sap`), varios usuarios MySQL y MySQL remoto por IP.
 - Las IP fijas desde las que se conectarían agentes o apps fuera de GoDaddy.
 - Un subdominio con SSL.
 - Registrar la app en Entra ID, o decidir si usa el registro del gestor de cartera.
