@@ -2,8 +2,134 @@
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
+@source '../views/**/*.blade.php';
+@source '../../app/Modules/**/resources/views/**/*.blade.php';
 
+/*
+ * Design tokens of the TI panel (docs/arquitectura.md, «Diseño»).
+ *
+ * Views never use hex values: they use the utilities mapped in @theme
+ * inline below (bg-surface, text-muted, bg-brand-button…). Brand colors
+ * live only in the --brand-* variables (frontend-marca-sgx-sydc skill).
+ *
+ * Dark mode: every token is written once as light-dark(light, dark), so
+ * the two modes cannot drift apart. Which half applies follows
+ * color-scheme: the system preference by default, or the viewer's choice
+ * in <html data-theme="light|dark"> (resources/js/theme.js). Contrast
+ * ratios are WCAG 2 against the background named in each comment.
+ */
+
+:root {
+    color-scheme: light dark;
+}
+
+:root[data-theme='light'] {
+    color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+    color-scheme: dark;
+}
+
+/*
+ * Segurex brand: the panel belongs to TI, so it is Segurex only. The
+ * data-brand attribute stays so another brand block could be added later.
+ */
+:root[data-brand='segurex'] {
+    --brand-accent: #f26522; /* accents, icons, borders; text only when large */
+    --brand-button: #c6531c; /* button background with white text: 4.51:1 (both modes) */
+    --brand-ink: light-dark(#943e15, #f26522); /* orange text: 7.10:1 on white · 5.35:1 on #1c1d20 */
+    --brand-text: light-dark(#58595b, #a8a9aa); /* long text: 7.01:1 on white · 7.16:1 on #1c1d20 */
+    --brand-dark: #58595b; /* header behind the logo; white on it 7.01:1, orange only 2.22:1 */
+}
+
+/* Neutral tokens. Dark values are redefined, not inverted. */
+:root {
+    --ui-ground: light-dark(#f5f5f2, #121315); /* page background */
+    --ui-surface: light-dark(#ffffff, #1c1d20); /* cards and bars */
+    --ui-subtle: light-dark(#f0f0ec, #26272b); /* hover, active item */
+    --ui-line: light-dark(#e5e5e0, #2c2e33); /* decorative dividers and card borders */
+    --ui-line-strong: light-dark(#8a8d93, #74777e); /* control borders: 3.33:1 on white · 3.76:1 on #1c1d20 */
+    --ui-text: light-dark(#17191c, #f2f2ef); /* body text: 17.61:1 on white · 15.03:1 on #1c1d20 */
+    --ui-muted: light-dark(#5e6168, #a3a6ad); /* secondary text: 5.43:1 on #f0f0ec · 6.12:1 on #26272b */
+    --ui-on-brand: #ffffff; /* text on --brand-button, --brand-dark and --ui-danger-solid */
+    --ui-focus: var(--brand-ink); /* focus ring: 7.10:1 on white · 5.35:1 on #1c1d20 */
+
+    /* Status pairs: text on its own background. */
+    --ui-info: light-dark(#1e4fa8, #a9c1f5); /* 6.59:1 on #e8eefa · 8.40:1 on #1b2540 */
+    --ui-info-bg: light-dark(#e8eefa, #1b2540);
+    --ui-success: light-dark(#1f7a4d, #5fd39b); /* 4.72:1 on #e6f5ec · 7.36:1 on #12332a */
+    --ui-success-bg: light-dark(#e6f5ec, #12332a);
+    --ui-warning: light-dark(#7a4f00, #f5d58a); /* 6.52:1 on #fff4db · 10.83:1 on #2a2418 */
+    --ui-warning-bg: light-dark(#fff4db, #2a2418);
+    --ui-danger: light-dark(#b42318, #ff8f84); /* 5.84:1 on #feeeec · 6.94:1 on #3a1d1a */
+    --ui-danger-bg: light-dark(#feeeec, #3a1d1a);
+    --ui-danger-solid: #b42318; /* danger button background; white on it 6.57:1 */
+}
+
+/* Only these colors exist as utilities: the default palette is removed. */
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    --color-*: initial;
+    --font-sans: Helvetica, Arial, 'Helvetica Neue', sans-serif;
+}
+
+@theme inline {
+    --color-brand-accent: var(--brand-accent);
+    --color-brand-button: var(--brand-button);
+    --color-brand-ink: var(--brand-ink);
+    --color-brand-text: var(--brand-text);
+    --color-brand-dark: var(--brand-dark);
+
+    --color-ground: var(--ui-ground);
+    --color-surface: var(--ui-surface);
+    --color-subtle: var(--ui-subtle);
+    --color-line: var(--ui-line);
+    --color-line-strong: var(--ui-line-strong);
+    --color-text: var(--ui-text);
+    --color-muted: var(--ui-muted);
+    --color-on-brand: var(--ui-on-brand);
+    --color-focus: var(--ui-focus);
+
+    --color-info: var(--ui-info);
+    --color-info-bg: var(--ui-info-bg);
+    --color-success: var(--ui-success);
+    --color-success-bg: var(--ui-success-bg);
+    --color-warning: var(--ui-warning);
+    --color-warning-bg: var(--ui-warning-bg);
+    --color-danger: var(--ui-danger);
+    --color-danger-bg: var(--ui-danger-bg);
+    --color-danger-solid: var(--ui-danger-solid);
+}
+
+/* dark: follows the tokens' rule: data-theme wins, otherwise the system. */
+@custom-variant dark {
+    &:where([data-theme='dark'], [data-theme='dark'] *) {
+        @slot;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+            @slot;
+        }
+    }
+}
+
+@layer base {
+    body {
+        @apply bg-ground text-text antialiased;
+    }
+
+    :focus-visible {
+        @apply outline-2 outline-offset-2 outline-focus;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        ::before,
+        ::after {
+            animation-duration: 0.01ms !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
 }
