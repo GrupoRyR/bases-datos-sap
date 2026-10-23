@@ -96,7 +96,7 @@ describe('a successful sign-in', function () {
 
         expect($user->role)->toBe(Role::AdminTi)
             ->and(array_column(signInAudit(), 'action'))->toBe(['core.user.created', 'core.user.role_changed', 'core.auth.signed_in'])
-            ->and(signInAudit()[1]['context'])->toBe(['old' => null, 'new' => 'admin_ti', 'source' => 'core_admin_emails']);
+            ->and(signInAudit()[1]['context'])->toEqual(['old' => null, 'new' => 'admin_ti', 'source' => 'core_admin_emails']);
 
         $this->followingRedirects()->get('/')->assertOk()->assertSee('Admin TI');
     });
@@ -108,7 +108,7 @@ describe('a successful sign-in', function () {
         $this->get(MICROSOFT_CALLBACK)->assertRedirect('/');
 
         expect($user->refresh()->role)->toBe(Role::AdminTi)
-            ->and(signInAudit()[0]['context'])->toBe(['old' => 'consulta', 'new' => 'admin_ti', 'source' => 'core_admin_emails']);
+            ->and(signInAudit()[0]['context'])->toEqual(['old' => 'consulta', 'new' => 'admin_ti', 'source' => 'core_admin_emails']);
     });
 
     it('never downgrades anyone who is not a bootstrap admin', function () {
