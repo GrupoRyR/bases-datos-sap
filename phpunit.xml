@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <!-- Leaves room for the Pest architecture tests later tasks add. -->
+        <ini name="memory_limit" value="1G"/>
+        <env name="APP_ENV" value="testing"/>
+        <!-- Test-only encryption key, not a secret: it lets the suite run in a checkout without .env.
+             Set in $_SERVER, which Laravel reads first, so an APP_KEY inherited from the environment
+             (even an empty one) never changes the tests.
+             It is never used outside tests; real keys live only in .env. -->
+        <server name="APP_KEY" value="base64:OCvnBqKfDpWGhrvbDzUZ+TxD+nne+cDr8qyQQBKLqkE="/>
+        <env name="APP_LOCALE" value="es"/>
+        <env name="APP_FALLBACK_LOCALE" value="es"/>
+        <env name="APP_TIMEZONE" value="America/Bogota"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="BROADCAST_CONNECTION" value="null"/>
+        <env name="CACHE_STORE" value="array"/>
+        <!-- Local runs use one SQLite database in memory per connection; CI overrides
+             DB_* with MySQL 8 (these values are not forced). -->
+        <env name="DB_DRIVER" value="sqlite"/>
+        <env name="DB_CONNECTION" value="app"/>
+        <env name="DB_DATABASE" value=":memory:"/>
+        <env name="DB_MAESTROS_DATABASE" value=":memory:"/>
+        <env name="DB_CARTERA_DATABASE" value=":memory:"/>
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false"/>
+    </php>
+</phpunit>

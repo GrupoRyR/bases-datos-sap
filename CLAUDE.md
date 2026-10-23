@@ -30,6 +30,12 @@ The «Bases SAP: cimientos» session expands this file with module zones, provid
 - PRs: about 400 changed lines; use chained PRs for larger work.
 - Tests first when a runnable test with a clear expected result exists.
 
+## Commands
+
+- `composer format`: format with Pint.
+- `composer lint`: Pint check and Larastan (level 6).
+- `composer test`: Pest suite (SQLite in memory locally, MySQL 8 in CI).
+
 ## Skills
 
 Load the ones that apply before working: `work-unit-commits`, `chained-pr`, `frontend-marca-sgx-sydc`, `robot-sap-hana`, `cpanel-deploy`.
