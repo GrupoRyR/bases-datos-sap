@@ -94,7 +94,7 @@ Nunca se envían a la app ni a MySQL. Carpeta: `C:\Users\Claude\Documents\CEREBR
 | `USUARIOS_Y_PERMISOS` | Usuarios sin contraseñas, permisos adicionales por usuario y por grupo, árbol de permisos | `OUSR` (columnas sin claves), `USR3`, `UGR1`, `OUPT`, `UPT1` | Cada domingo |
 | `LICENCIAS` | Asignación de licencias. No está en la base: vive en un archivo del servidor de licencias. TI la exporta a mano desde «Administración de licencias» | — | Cada mes |
 | `CONTABILIDAD` | Plan de cuentas, centros de costo, normas de reparto, proyectos, períodos, monedas, tasas de cambio, impuestos y retenciones | `OACT`, `OPRC`, `OOCR`, `OPRJ`, `OFPR`, `OCRN`, `ORTT`, `OSTC`, `OWHT` | Cada domingo; tasas de cambio cada noche |
-| `BANCOS` | Bancos, cuentas bancarias propias y formas de pago. **Pendiente:** si entran o no las cuentas bancarias de clientes y proveedores (`OCRB`) | `ODSC`, `DSC1`, `OPYM` | Cada domingo |
+| `BANCOS` | Bancos, cuentas bancarias propias y formas de pago. Las cuentas bancarias de clientes y proveedores (`OCRB`) quedan fuera: ninguna app las usa y un archivo con ellas sería blanco de fraude | `ODSC`, `DSC1`, `OPYM` | Cada domingo |
 | `INVENTARIO` | Bodegas, unidades de medida, listas de materiales y precios especiales | `OWHS`, `OUOM`, `OUGP`, `OITT`, `ITT1`, `OSPP`, `SPP1` | Cada domingo |
 | `ORGANIZACION` | Empresa, sucursales, departamentos, cargos, territorios, sectores y empleados (solo nombre, cargo, área y correo) | `OADM`, `OBPL`, `OUDP`, `OHPS`, `OTER`, `OIND`, `OHEM` | Cada domingo |
 | `VENTAS_Y_CRM` | Actividades, oportunidades, formas de envío, países y departamentos | `OCLG`, `OOPR`, `OPR1`, `OSHP`, `OCRY`, `OCST` | Cada domingo |
@@ -110,7 +110,7 @@ Reglas:
 
 - Los nombres de tabla salen de la documentación de SAP Business One y se confirman con el catálogo antes de la primera extracción. Si el historial de documentos y asientos (`ADOC`, `ADO1`, `AJDT`, `AJD1`) resulta muy grande, se le avisa al usuario con las cifras antes de extraerlo.
 - Los permisos estándar de SAP vienen codificados en un solo campo de `OUSR` y no se pueden leer por SQL; los adicionales y por grupo sí.
-- Nunca se extraen contraseñas de `OUSR` ni cédula, salario o cuentas bancarias de `OHEM`. Las columnas se listan una por una; nunca `SELECT *`.
+- Nunca se extraen contraseñas de `OUSR`, cédula, salario o cuentas bancarias de `OHEM`, ni la tabla `OCRB`. Las columnas se listan una por una; nunca `SELECT *`.
 - La carpeta no se comparte ni se sincroniza con OneDrive: tiene datos personales y registros de acceso.
 
 ## 6. Cuándo se considera estable
