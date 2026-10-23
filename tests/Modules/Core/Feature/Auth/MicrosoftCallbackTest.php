@@ -13,6 +13,7 @@ const REJECTED_MESSAGE = 'No puedes entrar con esa cuenta. Si crees que es un er
 
 /**
  * The audit entries in order, as action => context (decoded), plus user_id.
+ * MySQL reorders the keys of a JSON object, so compare them with toEqual().
  *
  * @return list<array{action: string, user_id: int|null, context: array<string, mixed>|null}>
  */
@@ -34,7 +35,7 @@ function assertSignInRejected(string $reason, string $email = 'ana.gomez@segurex
     test()->get(MICROSOFT_CALLBACK)->assertRedirect('/login')->assertSessionHas('error', REJECTED_MESSAGE);
     test()->assertGuest();
 
-    expect(signInAudit())->toBe([[
+    expect(signInAudit())->toEqual([[
         'action' => 'core.auth.rejected',
         'user_id' => null,
         'context' => ['reason' => $reason, 'email' => $email],
@@ -61,7 +62,7 @@ describe('a successful sign-in', function () {
             ->and($user->role)->toBeNull()
             ->and($user->is_active)->toBeTrue()
             ->and($user->last_signed_in_at?->equalTo(now()))->toBeTrue()
-            ->and(signInAudit())->toBe([
+            ->and(signInAudit())->toEqual([
                 ['action' => 'core.user.created', 'user_id' => null, 'context' => ['email' => 'ana.gomez@segurex.com', 'source' => 'microsoft']],
                 ['action' => 'core.auth.signed_in', 'user_id' => $user->id, 'context' => ['method' => 'microsoft']],
             ]);
