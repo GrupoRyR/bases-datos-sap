@@ -8,7 +8,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 /**
- * The only row of audit_logs, with its context decoded.
+ * The only row of audit_logs, with its context decoded. MySQL reorders the
+ * keys of a JSON object, so contexts are compared with toEqual(), not toBe().
  *
  * @return array<string, mixed>
  */
@@ -48,7 +49,7 @@ it('records the signed-in user and the IP address of the request', function () {
         ->and($row['action'])->toBe('core.user.role_changed')
         ->and($row['subject_type'])->toBe('user')
         ->and($row['subject_id'])->toBe('7')
-        ->and($row['context'])->toBe(['old' => null, 'new' => 'consulta'])
+        ->and($row['context'])->toEqual(['old' => null, 'new' => 'consulta'])
         ->and((int) $row['user_id'])->toBe($user->id)
         ->and($row['ip'])->toBe('203.0.113.9')
         ->and(Carbon::parse($row['created_at'])->equalTo(now()))->toBeTrue();
@@ -82,7 +83,7 @@ it('never stores values whose keys look like secrets, at any depth', function ()
         'nested' => ['client_secret' => 'xyz', 'Password' => 'p', 'kept' => 1],
     ]);
 
-    expect(soleAuditRow()['context'])->toBe([
+    expect(soleAuditRow()['context'])->toEqual([
         'name' => 'Gestor de cartera',
         'api_token' => '[redacted]',
         'nested' => ['client_secret' => '[redacted]', 'Password' => '[redacted]', 'kept' => 1],
