@@ -23,10 +23,11 @@ final class CoreDemoSeeder extends Seeder
             'admin-ti@example.test' => ['Admin TI de prueba', Role::AdminTi],
             'consulta@example.test' => ['Consulta de prueba', Role::Consulta],
         ] as $email => [$name, $role]) {
-            User::query()->updateOrCreate(
-                ['email' => $email],
-                ['name' => $name, 'role' => $role, 'is_active' => true],
-            );
+            // forceFill: role and is_active are never mass-assignable (User),
+            // and this seeder may run outside db:seed's unguarded wrapper.
+            User::query()->firstOrNew(['email' => $email])
+                ->forceFill(['name' => $name, 'role' => $role, 'is_active' => true])
+                ->save();
         }
     }
 }
