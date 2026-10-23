@@ -24,13 +24,20 @@
     "autoload": {
         "psr-4": {
             "App\\": "app/",
+            "App\\Modules\\Core\\Database\\Factories\\": "app/Modules/Core/database/factories/",
+            "App\\Modules\\Core\\Database\\Seeders\\": "app/Modules/Core/database/seeders/",
+            "App\\Modules\\Panel\\Database\\Factories\\": "app/Modules/Panel/database/factories/",
+            "App\\Modules\\Panel\\Database\\Seeders\\": "app/Modules/Panel/database/seeders/",
+            "App\\Modules\\Sap\\Database\\Factories\\": "app/Modules/Sap/database/factories/",
+            "App\\Modules\\Sap\\Database\\Seeders\\": "app/Modules/Sap/database/seeders/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Tests\\": "tests/"
+            "Tests\\": "tests/",
+            "Tests\\Fixtures\\Modules\\Demo\\Database\\Seeders\\": "tests/Fixtures/Modules/Demo/database/seeders/"
         }
     },
     "scripts": {

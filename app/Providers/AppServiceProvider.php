@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\Navigation\NavRegistry;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -11,7 +12,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Shared navigation; modules fill it from their providers.
+        $this->app->singleton(NavRegistry::class);
     }
 
     /**
