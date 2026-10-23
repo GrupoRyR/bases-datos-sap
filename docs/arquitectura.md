@@ -214,4 +214,4 @@ El usuario activa el hook una vez por clon: `git config core.hooksPath .githooks
 
 ## 9. Contrato del robot
 
-[`contrato-robot.md`](contrato-robot.md) (llega en un PR posterior de cimientos) define lo que el robot envía y lo que la API responde: firma HMAC, lotes, solicitudes y conteos. Lo comparten Datos y API y Robot, que trabajan en paralelo: **no cambia sin avisarle al usuario**, y un cambio va en su propio PR.
+[`contrato-robot.md`](contrato-robot.md) define lo que el robot envía y lo que la API responde: firma HMAC, lotes, solicitudes y conteos. Lo comparten Datos y API y Robot, que trabajan en paralelo: **no cambia sin avisarle al usuario**, y un cambio va en su propio PR.
