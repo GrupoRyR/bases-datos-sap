@@ -26,3 +26,9 @@ composer lint     # Pint en modo revisión y Larastan
 composer test     # corre las pruebas de Pest
 npm run build     # compila los assets (public/build nunca se sube al repo)
 ```
+
+## Protección de main
+
+Los cambios llegan a `main` solo por pull request. El hook `.githooks/pre-push` bloquea cualquier push a `main`, y `.claude/settings.json` impide a los agentes hacer push a `main`, forzar un push o saltarse los hooks.
+
+Activa el hook una vez por clon: `git config core.hooksPath .githooks`
