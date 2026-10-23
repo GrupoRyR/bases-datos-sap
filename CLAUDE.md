@@ -6,7 +6,7 @@ Central store of SAP Business One master data for the Grupo RYR apps (Segurex SG
 
 - `docs/plan-bases-sap.md`: scope, decisions, schedules, folder layout and sessions. It is the source of truth.
 - `docs/arquitectura.md`: owners of each folder, module anatomy and provider hooks, the cross-module rule, databases and connections, tests, CI and the protections of `main`. Its rules are as binding as this file.
-- `docs/contrato-robot.md`, once «cimientos» writes it: the robot contract. It is shared by two parallel sessions: never change it without the user's approval.
+- `docs/contrato-robot.md`: the robot contract (signature, runs, batches, datasets and update requests). It is shared by two parallel sessions: never change it without the user's approval.
 
 ## Hard rules
 
