@@ -41,7 +41,7 @@ return [
     */
 
     'apps' => [
-        // Per IP; beyond it, 429 with Retry-After.
+        // Per key; beyond it, 429 with Retry-After.
         'requests_per_minute' => 60,
     ],
 

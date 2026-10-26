@@ -20,8 +20,8 @@ final class StatusController
 {
     public function __invoke(Request $request): JsonResponse
     {
-        $company = Company::tryFrom((string) $request->query('empresa'));
-        $dataset = Dataset::tryFrom((string) $request->query('conjunto'));
+        $company = Company::tryFrom(is_string($empresa = $request->query('empresa')) ? $empresa : '');
+        $dataset = Dataset::tryFrom(is_string($conjunto = $request->query('conjunto')) ? $conjunto : '');
 
         if ($company === null || $dataset === null) {
             throw RobotRequestRejected::invalid('La consulta no cumple el contrato.', array_filter([

@@ -6,6 +6,7 @@ use App\Modules\Sap\Contracts\ClientAppKeys;
 use App\Modules\Sap\Contracts\Data\IssuedAppKey;
 use App\Modules\Sap\Models\ClientApp;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 /**
  * Issues, finds and revokes app keys. Keys are "bsap_" plus 48 random
@@ -13,12 +14,21 @@ use Illuminate\Support\Str;
  */
 final class AppKeys implements ClientAppKeys
 {
+    /**
+     * @throws InvalidArgumentException when the name is empty or another app has it
+     */
     public function issue(string $name): IssuedAppKey
     {
+        $name = trim($name);
+
+        if ($name === '' || ClientApp::where('nombre', $name)->exists()) {
+            throw new InvalidArgumentException("Ya existe una app llamada «{$name}» o el nombre está vacío.");
+        }
+
         $key = 'bsap_'.Str::random(48);
 
         $app = ClientApp::create([
-            'nombre' => trim($name),
+            'nombre' => $name,
             'key_hash' => hash('sha256', $key),
             'key_prefix' => substr($key, 0, 12),
         ]);

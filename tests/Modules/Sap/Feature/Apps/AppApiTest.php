@@ -154,3 +154,26 @@ it('creates a key from the console and prints it once', function () {
 
     expect(DB::table('client_apps')->where('nombre', 'Toma de pedidos')->exists())->toBeTrue();
 });
+
+it('refuses a second app with the same name', function () {
+    $this->artisan('sap:app', ['nombre' => ' Gestor de cartera '])
+        ->expectsOutputToContain('Ya existe')
+        ->assertFailed();
+
+    expect(DB::table('client_apps')->count())->toBe(1);
+});
+
+it('answers 422, not 500, to a query parameter sent as a list', function () {
+    $this->getJson('/api/v1/estado?empresa[]=SGX&conjunto=CARTERA', bearer($this->key))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor('empresa');
+});
+
+it('limits each key on its own, so apps on one server do not share the limit', function () {
+    config(['sap.apps.requests_per_minute' => 1]);
+    $other = app(ClientAppKeys::class)->issue('Toma de pedidos')->key;
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertOk();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertStatus(429);
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($other))->assertOk();
+});

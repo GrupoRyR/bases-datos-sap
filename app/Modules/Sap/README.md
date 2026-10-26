@@ -102,7 +102,7 @@ El candado usa la caché de Laravel: en producción `CACHE_STORE` debe ser `data
 
 ## API de las apps
 
-Cada app tiene su llave (`client_apps`): `bsap_` y 48 caracteres al azar; se guarda solo su SHA-256 y sus primeros 12 caracteres. Se crea con `php artisan sap:app "Nombre"` (la muestra una vez) o desde el panel por el contrato `Contracts\ClientAppKeys` (`issue`, `revoke`). Va en `Authorization: Bearer <llave>`; una llave revocada o desconocida recibe 401 `Llave inválida.` (`Http\Middleware\AuthenticateClientApp`). Límite: 60 peticiones por minuto por IP.
+Cada app tiene su llave (`client_apps`): `bsap_` y 48 caracteres al azar; se guarda solo su SHA-256 y sus primeros 12 caracteres. Se crea con `php artisan sap:app "Nombre"` (la muestra una vez) o desde el panel por el contrato `Contracts\ClientAppKeys` (`issue`, `revoke`). Va en `Authorization: Bearer <llave>`; una llave revocada o desconocida recibe 401 `Llave inválida.` (`Http\Middleware\AuthenticateClientApp`). Límite: 60 peticiones por minuto por llave (las apps del mismo servidor comparten IP).
 
 | Ruta | Hace |
 |---|---|
