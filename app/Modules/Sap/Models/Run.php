@@ -4,11 +4,13 @@ namespace App\Modules\Sap\Models;
 
 use App\Modules\Sap\Contracts\Enums\Company;
 use App\Modules\Sap\Contracts\Enums\Dataset;
+use App\Modules\Sap\Contracts\Enums\Part;
 use App\Modules\Sap\Domain\Runs\RunState;
 use App\Modules\Sap\Domain\Runs\RunType;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\LazyCollection;
 
 /**
  * A run of the robot (table robot_runs, docs/contrato-robot.md, section 4).
@@ -87,9 +89,12 @@ final class Run extends Model
      * run cannot both win. Returns false (and reloads the run) if it was no
      * longer open.
      */
-    public function finish(RunState $state, ?string $error = null): bool
+    /**
+     * @param  array<string, mixed>  $attributes  Saved with the new state, e.g. what a close applied.
+     */
+    public function finish(RunState $state, ?string $error = null, array $attributes = []): bool
     {
-        return DB::transaction(function () use ($state, $error): bool {
+        return DB::transaction(function () use ($state, $error, $attributes): bool {
             $current = self::query()->whereKey($this->id)->lockForUpdate()->firstOrFail();
 
             if ($current->estado !== RunState::Open) {
@@ -99,6 +104,7 @@ final class Run extends Model
             }
 
             $this->forceFill([
+                ...$attributes,
                 'estado' => $state,
                 'error' => $error,
                 'abierta_lock' => null,
@@ -110,6 +116,27 @@ final class Run extends Model
 
             return true;
         });
+    }
+
+    /**
+     * The rows the run received for a part, by column name, ten batches
+     * (up to 10,000 rows) in memory at a time. Order does not matter: keys
+     * never repeat within a run.
+     *
+     * @return LazyCollection<int, array<string, mixed>>
+     */
+    public function rowsOf(Part $part): LazyCollection
+    {
+        $columns = array_keys($part->columns());
+
+        return DB::table('robot_batches')
+            ->where('run_id', $this->id)
+            ->where('parte', $part->value)
+            ->lazyById(10, 'id')
+            ->flatMap(fn (object $batch): array => array_map(
+                fn (array $row): array => array_combine($columns, $row),
+                json_decode((string) $batch->rows, true, flags: JSON_THROW_ON_ERROR),
+            ));
     }
 
     /**
