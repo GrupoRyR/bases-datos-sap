@@ -350,6 +350,14 @@ def test_preparar_filas_llave_repetida():
     assert "C1" in str(error.value) and "direcciones" in str(error.value)
 
 
+def test_llave_que_solo_cambia_en_mayusculas_es_repetida():
+    # MySQL compara la llave sin distinguir mayúsculas: C001 y c001 chocarían allá.
+    filas = [("C001", "Uno", "Y"), ("c001", "Otro", "Y")]
+    columnas = ["codigo", "nombre", "activo"]
+    with pytest.raises(LlaveRepetida):
+        preparar_filas(PARTES["municipios"], columnas, filas)
+
+
 def test_llave_repetida_muestra_hasta_cinco():
     filas = [(i % 7, f"M{i}", "Y") for i in range(20)]
     with pytest.raises(LlaveRepetida) as error:

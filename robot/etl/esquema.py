@@ -451,8 +451,19 @@ def preparar_filas(
 def _revisar_llave(parte: Parte, filas: list[list[Any]]) -> None:
     nombres = parte.nombres
     posiciones = [nombres.index(n) for n in parte.llave]
-    conteo = Counter(tuple(fila[p] for p in posiciones) for fila in filas)
-    repetidas = [llave for llave, veces in conteo.items() if veces > 1]
+    # La llave única de MySQL no distingue mayúsculas (collation *_ci): "C001" y
+    # "c001" son distintas en HANA pero chocarían allá, así que se comparan igual.
+    def normal(valor: Any) -> Any:
+        return valor.casefold() if isinstance(valor, str) else valor
+
+    conteo: Counter[tuple[Any, ...]] = Counter()
+    original: dict[tuple[Any, ...], tuple[Any, ...]] = {}  # para el mensaje, tal como vino
+    for fila in filas:
+        llave = tuple(fila[p] for p in posiciones)
+        clave = tuple(normal(v) for v in llave)
+        conteo[clave] += 1
+        original.setdefault(clave, llave)
+    repetidas = [original[clave] for clave, veces in conteo.items() if veces > 1]
     if not repetidas:
         return
     muestra = repetidas[:MAX_LLAVES_EN_ERROR]
