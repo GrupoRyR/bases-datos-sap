@@ -113,3 +113,24 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # The robot runs on the TI PC; CI only runs its tests, which use fakes (no SAP, VPN or network).
+  robot:
+    name: Robot tests (Python 3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: robot
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Test
+        run: python -m pytest
