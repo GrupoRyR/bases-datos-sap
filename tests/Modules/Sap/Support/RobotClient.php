@@ -2,6 +2,8 @@
 
 namespace Tests\Modules\Sap\Support;
 
+use App\Modules\Sap\Contracts\Enums\Part;
+use App\Modules\Sap\Domain\Columns\ColumnType;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -20,6 +22,68 @@ final class RobotClient
     public static function configure(): void
     {
         config(['sap.robot.keys' => self::KEY.':'.self::SECRET]);
+    }
+
+    /**
+     * Opens a run through the API and returns its id. By default a request
+     * run of SGX MAESTROS with the customers and their addresses and contacts.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    public static function openRun(TestCase $test, array $overrides = []): int
+    {
+        return (int) self::post($test, '/api/robot/v1/corridas', array_merge([
+            'conjunto' => 'MAESTROS',
+            'empresa' => 'SGX',
+            'tipo' => 'solicitud',
+            'partes' => ['clientes' => 'cambios', 'direcciones' => 'cambios', 'contactos' => 'cambios'],
+            'solicitudes' => [],
+            'fecha_corte' => null,
+            'extraida_en' => now()->toIso8601String(),
+        ], $overrides))->assertCreated()->json('run_id');
+    }
+
+    /**
+     * A valid row of the part as the robot sends it: invented values for
+     * the required columns, null for the rest, then the overrides.
+     *
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    public static function row(Part $part, array $overrides = []): array
+    {
+        $row = [];
+
+        foreach ($part->columns() as $name => $column) {
+            $row[$name] = ! $column->required ? null : match ($column->type) {
+                ColumnType::Text => mb_substr('X'.$name, 0, $column->length ?? 255),
+                ColumnType::Integer => 1,
+                ColumnType::Decimal => '1000.50',
+                ColumnType::Boolean => true,
+                ColumnType::Date => '2026-10-20',
+                ColumnType::DateTime => '2026-10-23T09:15:02-05:00',
+            };
+        }
+
+        return array_merge($row, $overrides);
+    }
+
+    /**
+     * The batch body for rows given by column name, in the part's column order.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return array<string, mixed>
+     */
+    public static function batch(int $number, Part $part, array $rows): array
+    {
+        $columns = array_keys($part->columns());
+
+        return [
+            'batch' => $number,
+            'parte' => $part->value,
+            'columns' => $columns,
+            'rows' => array_map(fn (array $row): array => array_map(fn (string $column): mixed => $row[$column] ?? null, $columns), $rows),
+        ];
     }
 
     public static function sign(string $secret, int $timestamp, string $nonce, string $path, string $body): string

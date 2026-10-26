@@ -2,6 +2,7 @@
 
 use App\Modules\Sap\Http\Controllers\Robot\FailRunController;
 use App\Modules\Sap\Http\Controllers\Robot\StartRunController;
+use App\Modules\Sap\Http\Controllers\Robot\StoreBatchController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -12,5 +13,6 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('robot/v1')->name('robot.')->middleware('sap.robot')->group(function () {
     Route::post('corridas', StartRunController::class)->name('corridas.store');
+    Route::post('corridas/{run}/lotes', StoreBatchController::class)->whereNumber('run')->name('corridas.lotes');
     Route::post('corridas/{run}/fallar', FailRunController::class)->whereNumber('run')->name('corridas.fallar');
 });
