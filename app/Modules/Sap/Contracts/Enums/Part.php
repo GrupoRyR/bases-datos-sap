@@ -87,6 +87,6 @@ enum Part: string
      */
     public function tracksSapUpdates(): bool
     {
-        return in_array($this, [self::Customers, self::Suppliers, self::Items], true);
+        return isset($this->columns()['actualizado_en_sap']);
     }
 }

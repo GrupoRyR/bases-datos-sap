@@ -12,9 +12,24 @@ use App\Modules\Sap\Contracts\Enums\Part;
 final class PartColumns
 {
     /**
+     * Built once per part: batch validation asks for them on every row.
+     *
+     * @var array<string, array<string, Column>>
+     */
+    private static array $cache = [];
+
+    /**
      * @return array<string, Column>
      */
     public static function for(Part $part): array
+    {
+        return self::$cache[$part->value] ??= self::build($part);
+    }
+
+    /**
+     * @return array<string, Column>
+     */
+    private static function build(Part $part): array
     {
         $columns = match ($part) {
             Part::Customers, Part::Suppliers => self::businessPartners(),
