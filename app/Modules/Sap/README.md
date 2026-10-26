@@ -75,3 +75,11 @@ Una corrida lleva un conjunto de una empresa (`robot_runs`, contrato §4). Estad
 5. Deja la corrida `cerrada` con `aplicada_en`, lotes, filas y conteo de SAP, y borra sus lotes.
 
 Si la transacción falla, nada cambia y la corrida sigue abierta para reintentar el cierre, que es idempotente.
+
+## Conteo diario
+
+Al cerrar una corrida `completa`, `Application\Apply\CountRun` compara por parte el conteo de SAP que envía el robot (`conteo_sap`), las filas recibidas y las filas activas de la empresa en MySQL después de aplicar (en CARTERA, todas las líneas de la empresa). Si no cuadra, la corrida no falla: queda registrado.
+
+- La respuesta del cierre trae `conteo` (solo en la `completa`) y la corrida lo guarda.
+- `daily_counts` guarda el resultado del día (fecha de `extraida_en` en Bogotá), una fila por empresa y parte; si la corrida completa se repite el mismo día, la reemplaza. Es el criterio 3 de estabilidad del plan (§6), que el panel muestra; el panel lo leerá por un contrato de `Sap` cuando lo pida.
+- Un día sin filas de una empresa (su corrida completa falló o venció) **no** es un día estable: el panel debe exigir las filas de todas las partes de cada empresa y cruzarlas con `robot_runs`.
