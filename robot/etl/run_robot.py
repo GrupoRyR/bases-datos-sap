@@ -24,13 +24,14 @@ Uso:
     python run_robot.py --archivo registros        # solo los registros del archivo
     python run_robot.py --catalogo                 # solo el catálogo
     python run_robot.py --diagnostico              # cifras de MAESTROS y CARTERA, sin enviar
-    python run_robot.py --completa --forzar        # corre aunque sea dentro de una franja bloqueada
+    python run_robot.py --completa --forzar        # no espera la franja bloqueada
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
 revisión de solicitudes que está terminando); el catálogo y el diagnóstico, que
-los corre el usuario, no esperan. La completa y el archivo no corren dentro de
-una franja bloqueada de los otros robots (±15 minutos) salvo con --forzar.
+los corre el usuario, no esperan. Si la completa o el archivo arrancan dentro de
+una franja bloqueada de los otros robots (±15 minutos), esperan a que pase,
+salvo con --forzar.
 
 Salida: 0 todo bien, 1 algún fallo (se avisa por correo, salvo en el
 diagnóstico, que lo corre el usuario), 2 configuración incompleta, 130
@@ -309,12 +310,20 @@ def main(
     if programado and franja:
         mensaje = (f"Son las {momento:%H:%M}, dentro de la franja de las {franja} "
                    f"(±{cfg.margen_franja_min} minutos) en que los otros robots usan la VPN")
-        if not args.forzar:
-            log.warning("%s: no se corre. Usa --forzar si de verdad hace falta.", mensaje)
-            guardar_estado(estado="ERROR", modo=modo, etapa="FRANJA", error=mensaje)
-            notificar.avisar_fallos(cfg.alertas, [("FRANJA", f"{mensaje}; el robot ({modo}) no corrió.")])
-            return 1
-        log.warning("%s: se corre igual por --forzar.", mensaje)
+        if args.forzar:
+            log.warning("%s: se corre igual por --forzar.", mensaje)
+        else:
+            # Pasa cuando el PC prendió tarde (StartWhenAvailable): se espera a que la
+            # franja termine, antes de subir la VPN, en vez de perder la corrida.
+            try:
+                fin = bloqueo.fin_de_franja(momento, cfg.franjas, cfg.margen_franja_min)
+            except ValueError as exc:
+                log.error("%s", exc)
+                guardar_estado(estado="ERROR", modo=modo, etapa="FRANJA", error=str(exc))
+                notificar.avisar_fallos(cfg.alertas, [("FRANJA", str(exc))])
+                return 1
+            log.warning("%s: espero hasta las %s para no cruzarme con ellos.", mensaje, f"{fin:%H:%M}")
+            dormir((fin - momento).total_seconds())
 
     candado = bloqueo.Bloqueo(reloj=ahora)
     try:

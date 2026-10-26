@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import bloqueo
 import config
 from bloqueo import Bloqueo, en_franja
+from config import BOGOTA
 
 FRANJAS = ["00:00", "05:00", "06:00", "12:00", "12:30"]
 AHORA = datetime(2026, 10, 26, 2, 0, 5, tzinfo=config.BOGOTA)
@@ -167,3 +169,16 @@ def test_soltar_sin_tomar_no_hace_nada(tmp_path):
     _escribir(ruta)
     Bloqueo(ruta, reloj=_reloj).soltar()
     assert ruta.exists()
+
+
+def test_fin_de_franja_salta_franjas_seguidas() -> None:
+    franjas = ["00:00", "05:00", "06:00", "12:00", "12:30"]
+    momento = datetime(2026, 10, 26, 11, 50, 30, tzinfo=BOGOTA)
+
+    assert bloqueo.fin_de_franja(momento, franjas, 15) == datetime(2026, 10, 26, 12, 46, tzinfo=BOGOTA)
+
+
+def test_fin_de_franja_fuera_de_franja_es_el_mismo_momento() -> None:
+    momento = datetime(2026, 10, 26, 2, 0, 5, tzinfo=BOGOTA)
+
+    assert bloqueo.fin_de_franja(momento, ["00:00", "05:00"], 15) == momento

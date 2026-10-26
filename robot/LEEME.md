@@ -56,6 +56,14 @@ Con lo que dejan en `_CATALOGO` y `_DIAGNOSTICO`, revisa lo que las consultas ma
 
 Si algo no cuadra, corrige la consulta en `robot\queries` y vuelve a correr el diagnóstico.
 
+La primera vez, los registros del archivo (auditoría y tasas de cambio) traen **todo el historial** con la VPN arriba. Para que eso no caiga en la nocturna, córrelos una vez a mano, en una hora tranquila y fuera de las franjas:
+
+```powershell
+..\.venv\Scripts\python.exe run_robot.py --archivo registros
+```
+
+Desde ahí, cada noche solo se suman los días nuevos.
+
 ## Modos
 
 Todos se corren desde `robot\etl` con el Python del `.venv`.
@@ -73,7 +81,7 @@ Opciones de `run_robot.py`:
 
 - `--empresa SGX` o `--empresa SDC`: solo esa empresa (se puede repetir). Por defecto, las dos.
 - `--sin-vpn`: no maneja la VPN; úsalo si ya la conectaste a mano.
-- `--forzar`: corre `--completa` o `--archivo` aunque sea dentro de una franja bloqueada. Úsalo solo si sabes que los otros robots no están corriendo.
+- `--forzar`: corre `--completa` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
 
 Si el robot está ocupado (otra ejecución tiene el candado), `--completa` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
 

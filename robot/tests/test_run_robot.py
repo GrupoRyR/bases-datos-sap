@@ -430,15 +430,31 @@ def test_completa_sin_candado_en_20_minutos_avisa(entorno, correos, candado_ajen
 
 
 @pytest.mark.parametrize("argumentos", [("--completa",), ("--archivo", "fotos")])
-def test_no_corre_dentro_de_una_franja_sin_forzar(entorno, correos, monkeypatch, argumentos):
+def test_dentro_de_una_franja_espera_a_que_pase(entorno, correos, argumentos):
+    # El PC prendió tarde (StartWhenAvailable): la tarea arranca a las 11:50, dentro
+    # de las franjas de las 12:00 y las 12:30, y corre a las 12:46, cuando ya pasaron.
     e = entorno
     a_las_1150 = lambda: datetime(2026, 10, 26, 11, 50, tzinfo=config.BOGOTA)  # noqa: E731
-    assert _main(e, *argumentos, ahora=a_las_1150) == 1
-    assert e.vpn.conexiones == 0
-    assert e.servidor.peticiones == []
-    assert (_estado()["estado"], _estado()["etapa"]) == ("ERROR", "FRANJA")
-    assert not (config.STATE_DIR / CANDADO).exists()
-    assert _main(e, *argumentos, "--forzar", ahora=a_las_1150) == 0
+    esperas: list[float] = []
+
+    def dormir(segundos):
+        assert e.vpn.conexiones == 0  # la espera es antes de subir la VPN
+        esperas.append(segundos)
+
+    assert _main(e, *argumentos, ahora=a_las_1150, dormir=dormir) == 0
+    assert esperas == [56 * 60]
+    assert e.vpn.conexiones == 1
+    assert correos == []
+
+
+def test_forzar_corre_dentro_de_la_franja_sin_esperar(entorno, correos):
+    e = entorno
+    a_las_1150 = lambda: datetime(2026, 10, 26, 11, 50, tzinfo=config.BOGOTA)  # noqa: E731
+
+    def no_esperar(segundos):
+        raise AssertionError("con --forzar no se espera la franja")
+
+    assert _main(e, "--completa", "--forzar", ahora=a_las_1150, dormir=no_esperar) == 0
     assert e.vpn.conexiones == 1
 
 

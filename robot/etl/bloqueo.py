@@ -58,6 +58,22 @@ def en_franja(momento: datetime, franjas: Iterable[str], margen_min: int = 15) -
     return None
 
 
+
+def fin_de_franja(momento: datetime, franjas: Iterable[str], margen_min: int = 15) -> datetime:
+    """Primer minuto en que `momento` ya no está en ninguna franja (él mismo si no lo está).
+
+    Salta franjas seguidas: a las 11:50, con las 12:00 y las 12:30, da las 12:46.
+    """
+    if en_franja(momento, franjas, margen_min) is None:
+        return momento
+    siguiente = momento.replace(second=0, microsecond=0)
+    for _ in range(MINUTOS_DIA):
+        siguiente += timedelta(minutes=1)
+        if en_franja(siguiente, franjas, margen_min) is None:
+            return siguiente
+    raise ValueError("Todas las horas del día están bloqueadas: revisa BASES_SAP_FRANJAS_BLOQUEADAS.")
+
+
 class Bloqueo:
     """Candado de archivo: se crea en exclusiva con el pid y la hora de Bogotá.
 
