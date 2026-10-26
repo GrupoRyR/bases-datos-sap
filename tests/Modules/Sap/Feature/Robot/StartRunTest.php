@@ -51,7 +51,7 @@ it('opens a run and answers when it closes for lack of batches', function () {
     ]);
 
     expect($run->estado)->toBe(RunState::Open)
-        ->and($run->partes)->toBe(['clientes' => 'cambios', 'direcciones' => 'cambios', 'contactos' => 'cambios'])
+        ->and($run->partes)->toEqual(['clientes' => 'cambios', 'direcciones' => 'cambios', 'contactos' => 'cambios'])
         ->and($run->robot_key)->toBe(RobotClient::KEY)
         ->and($run->extraida_en->toIso8601String())->toBe('2026-10-23T10:41:30-05:00');
 });
