@@ -34,6 +34,55 @@ final class CloseRun
         $run = $this->runs->find($runId);
         [$batches, $declared, $sapCounts] = $this->validated($run, $input);
 
+        $appliedAt = now();
+
+        // Under a lock on the run, so a late batch, its expiry or a second
+        // close cannot change what is counted and applied. Returns the full
+        // parts that came empty instead of applying anything.
+        $empty = DB::transaction(function () use ($run, $appliedAt, $batches, $declared, $sapCounts): array {
+            $current = Run::query()->whereKey($run->id)->lockForUpdate()->firstOrFail();
+
+            if ($current->estado !== RunState::Open) {
+                throw new RobotRequestRejected(409, 'La corrida ya no está abierta.', ['estado' => $current->estado->value]);
+            }
+
+            $rows = $this->checkReceived($run, $batches, $declared);
+            $empty = array_keys(array_filter($rows, fn (int $count, string $part): bool => $count === 0 && $run->partes[$part] === PartMode::Full->value, ARRAY_FILTER_USE_BOTH));
+
+            if ($empty !== []) {
+                return $empty;
+            }
+
+            DB::connection($run->conjunto->connection())->transaction(fn () => $run->conjunto === Dataset::Maestros
+                ? $this->maestros->apply($run, $appliedAt)
+                : $this->cartera->apply($run, $appliedAt));
+
+            $run->finish(RunState::Closed, null, [
+                'batches' => $batches,
+                'filas' => $rows,
+                'conteo_sap' => $sapCounts,
+                'aplicada_en' => $appliedAt,
+            ]);
+
+            return [];
+        });
+
+        if ($empty !== []) {
+            $this->failEmpty($run, $empty);
+        }
+
+        return $run;
+    }
+
+    /**
+     * The rows received per part, once every declared batch is there and the
+     * rows match what the robot declared; 409 otherwise, and the run stays open.
+     *
+     * @param  array<string, int>  $declared
+     * @return array<string, int>
+     */
+    private function checkReceived(Run $run, int $batches, array $declared): array
+    {
         $received = DB::table('robot_batches')->where('run_id', $run->id)->pluck('parte', 'batch')->all();
         $missing = array_values(array_diff($batches > 0 ? range(1, $batches) : [], array_keys($received)));
 
@@ -47,31 +96,7 @@ final class CloseRun
             throw new RobotRequestRejected(409, 'Las filas no cuadran con los lotes recibidos.', ['faltan' => [], 'filas' => $rows]);
         }
 
-        $this->refuseEmptyFullParts($run, $rows);
-
-        $appliedAt = now();
-
-        DB::transaction(function () use ($run, $appliedAt, $batches, $rows, $sapCounts) {
-            // Locks the run, so its expiry or a second close cannot interleave.
-            $current = Run::query()->whereKey($run->id)->lockForUpdate()->firstOrFail();
-
-            if ($current->estado !== RunState::Open) {
-                throw new RobotRequestRejected(409, 'La corrida ya no está abierta.', ['estado' => $current->estado->value]);
-            }
-
-            DB::connection($run->conjunto->connection())->transaction(fn () => $run->conjunto === Dataset::Maestros
-                ? $this->maestros->apply($run, $appliedAt)
-                : $this->cartera->apply($run, $appliedAt));
-
-            $run->finish(RunState::Closed, null, [
-                'batches' => $batches,
-                'filas' => $rows,
-                'conteo_sap' => $sapCounts,
-                'aplicada_en' => $appliedAt,
-            ]);
-        });
-
-        return $run;
+        return $rows;
     }
 
     /**
@@ -143,16 +168,10 @@ final class CloseRun
      * An empty read of SAP never empties a table: a part in "todo" with no
      * rows fails the run (422) and the previous data stays.
      *
-     * @param  array<string, int>  $rows
+     * @param  list<string>  $empty
      */
-    private function refuseEmptyFullParts(Run $run, array $rows): void
+    private function failEmpty(Run $run, array $empty): never
     {
-        $empty = array_keys(array_filter($rows, fn (int $count, string $part): bool => $count === 0 && $run->partes[$part] === PartMode::Full->value, ARRAY_FILTER_USE_BOTH));
-
-        if ($empty === []) {
-            return;
-        }
-
         $run->finish(RunState::Failed, 'Llegó vacía en modo todo: '.implode(', ', $empty).'.');
 
         throw RobotRequestRejected::invalid('Una parte en modo todo llegó sin filas; la corrida falló y los datos anteriores siguen.', array_combine(
