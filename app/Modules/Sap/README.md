@@ -6,7 +6,7 @@ Los datos de SAP y todo lo que los mueve: los conjuntos MAESTROS y CARTERA, la r
 |---|---|
 | Dueña | Sesión «Datos y API» |
 | Rutas web | `/sap/*`, nombres `sap.*` |
-| Rutas API | `/api/sap/*`, nombres `sap.api.*` |
+| Rutas API | `/api/robot/v1/*` y `/api/v1/*`, exactas como dice el contrato (`apiPrefix()` vacío), nombres `sap.api.*` |
 | Migraciones | `2026_11_02_*` |
 | Conexiones | `maestros` y `cartera` para las tablas de cada conjunto; `app` para el resto (solicitudes, corridas, lotes) |
 | Puede usar | Contratos de Core |
@@ -30,3 +30,14 @@ Las reglas completas están en `docs/arquitectura.md`.
 - CARTERA no tiene llave natural: cada cierre bueno reemplaza toda la cartera de la empresa en una transacción.
 - Las vistas listan sus columnas una por una y nunca muestran `id` ni `corrida_id`. Para cambiar una vista se agregan columnas al final en una migración nueva; nunca se renombra ni se quita una, porque las apps leen de ellas.
 - Los textos van como `varchar` con el largo de SAP; las horas, en hora de Bogotá; los montos, `decimal(19,2)`.
+
+## Peticiones del robot
+
+Toda ruta del robot va en el grupo de middleware `sap.robot` (`SapServiceProvider`), en este orden:
+
+1. `throttle:sap-robot`: 120 peticiones por minuto por IP; después, 429 con `Retry-After`.
+2. `LimitRobotPayload`: 413 si el cuerpo pasa de 10 MB tal como viaja, antes de mirar la firma.
+3. `VerifyRobotSignature`: HMAC-SHA256 del contrato (§3) con las llaves de `ROBOT_HMAC_KEYS`. Toda falla responde 401 `Firma inválida.` y queda en el log con el motivo, la llave y la IP. El nonce se guarda en `robot_nonces` solo después de validar la firma; el programador borra los de más de 10 minutos.
+4. `DecodeRobotBody`: descomprime gzip por partes (413 si pasa de 40 MB, 400 si está dañado), exige un objeto JSON (400) y deja el texto en el atributo `robot_body` para comparar lotes por su SHA-256.
+
+Los límites están en `config/sap.php` (`sap.robot.*`).
