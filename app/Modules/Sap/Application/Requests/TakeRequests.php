@@ -6,6 +6,8 @@ use App\Modules\Sap\Contracts\Enums\Part;
 use App\Modules\Sap\Contracts\Enums\RequestScope;
 use App\Modules\Sap\Contracts\Enums\RequestState;
 use App\Modules\Sap\Models\UpdateRequest;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -20,6 +22,16 @@ final class TakeRequests
      * @return list<array{id: int, empresa: string, conjunto: string, parte: string|null, desde: array<string, string|null>|object, solicitada_en: string}>
      */
     public function take(int $max): array
+    {
+        // One take at a time: overlapping polls could otherwise both see a
+        // company and dataset free and each take a sister of it.
+        return Cache::lock('sap:solicitudes:tomar', 30)->block(15, fn (): array => $this->takeDue($max));
+    }
+
+    /**
+     * @return list<array{id: int, empresa: string, conjunto: string, parte: string|null, desde: array<string, string|null>|object, solicitada_en: string}>
+     */
+    private function takeDue(int $max): array
     {
         return DB::transaction(function () use ($max): array {
             $busy = UpdateRequest::query()->where('estado', RequestState::Taken)
@@ -77,6 +89,6 @@ final class TakeRequests
     {
         $newest = DB::connection('maestros')->table($part->table())->where('empresa', $company)->max('actualizado_en_sap');
 
-        return $newest === null ? null : now()->parse((string) $newest)->toIso8601String();
+        return $newest === null ? null : Carbon::parse((string) $newest)->toIso8601String();
     }
 }

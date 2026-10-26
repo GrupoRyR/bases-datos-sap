@@ -170,9 +170,10 @@ final class StartRun
             $request = $found->get($id);
             $asked = $request === null ? [] : array_map(fn (Part $part): string => $part->value, RequestScope::partsFor($request->conjunto, $request->parte));
 
-            if ($request === null || $request->estado !== RequestState::Taken || $request->empresa !== $company
+            // A request already linked belongs to another open run.
+            if ($request === null || $request->estado !== RequestState::Taken || $request->run_id !== null || $request->empresa !== $company
                 || $request->conjunto !== $dataset || array_diff($asked, array_keys($parts)) !== []) {
-                $this->fail('solicitudes', "La solicitud {$id} no está tomada, es de otra empresa o conjunto, o pide partes que la corrida no trae.");
+                $this->fail('solicitudes', "La solicitud {$id} no está tomada, ya está en otra corrida, es de otra empresa o conjunto, o pide partes que la corrida no trae.");
             }
         }
     }

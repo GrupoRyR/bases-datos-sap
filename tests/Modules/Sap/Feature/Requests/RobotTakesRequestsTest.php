@@ -115,6 +115,12 @@ it('links the taken requests to the run that serves them and refuses others', fu
 
     expect(UpdateRequest::find($taken)->run_id)->toBe($run);
 
+    // Already served by that run: another run cannot claim it.
+    RobotClient::post($this, '/api/robot/v1/corridas', [
+        'conjunto' => 'CARTERA', 'empresa' => 'SGX', 'tipo' => 'solicitud', 'partes' => ['cartera' => 'todo'],
+        'solicitudes' => [$taken], 'fecha_corte' => '2026-10-26', 'extraida_en' => now()->toIso8601String(),
+    ])->assertUnprocessable()->assertJsonValidationErrorFor('solicitudes');
+
     RobotClient::post($this, '/api/robot/v1/corridas', [
         'conjunto' => 'MAESTROS', 'empresa' => 'SDC', 'tipo' => 'solicitud', 'partes' => ['articulos' => 'cambios'],
         'solicitudes' => [$pending], 'fecha_corte' => null, 'extraida_en' => now()->toIso8601String(),
