@@ -15,10 +15,12 @@ final class CloseRunController
     {
         $closed = $close->handle($run, $request->all());
 
-        return response()->json([
+        // The count comes only in a full run.
+        return response()->json(array_filter([
             'run_id' => $closed->id,
             'estado' => $closed->estado->value,
             'aplicada_en' => $closed->aplicada_en?->toIso8601String(),
-        ]);
+            'conteo' => $closed->conteo,
+        ], fn (mixed $value): bool => $value !== null));
     }
 }

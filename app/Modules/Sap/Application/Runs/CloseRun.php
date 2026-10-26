@@ -4,6 +4,7 @@ namespace App\Modules\Sap\Application\Runs;
 
 use App\Modules\Sap\Application\Apply\ApplyCartera;
 use App\Modules\Sap\Application\Apply\ApplyMaestros;
+use App\Modules\Sap\Application\Apply\CountRun;
 use App\Modules\Sap\Contracts\Enums\Dataset;
 use App\Modules\Sap\Domain\Runs\PartMode;
 use App\Modules\Sap\Domain\Runs\RunState;
@@ -24,6 +25,7 @@ final class CloseRun
         private readonly OpenRuns $runs,
         private readonly ApplyMaestros $maestros,
         private readonly ApplyCartera $cartera,
+        private readonly CountRun $counts,
     ) {}
 
     /**
@@ -61,6 +63,7 @@ final class CloseRun
                 'batches' => $batches,
                 'filas' => $rows,
                 'conteo_sap' => $sapCounts,
+                'conteo' => $sapCounts === null ? null : $this->counts->compare($run, $rows, $sapCounts),
                 'aplicada_en' => $appliedAt,
             ]);
 
