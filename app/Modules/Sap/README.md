@@ -61,3 +61,17 @@ Una corrida lleva un conjunto de una empresa (`robot_runs`, contrato §4). Estad
 - Una llave no se repite en la corrida, ni en el lote ni entre lotes (`robot_batch_keys`); CARTERA no tiene llave.
 - Un 422 cuenta en `lotes_rechazados` y la corrida sigue abierta. Cada lote aceptado extiende `abierta_hasta` 30 minutos.
 - El lote se guarda con la fila de la corrida bloqueada, así que no se cruza con su cierre ni con su vencimiento.
+
+## Cierre
+
+`POST /api/robot/v1/corridas/{id}/cerrar` (`Application\Runs\CloseRun`, contrato §4.3):
+
+1. Valida `batches` y `filas` (un número por cada parte de la corrida); `conteo_sap` es obligatorio en una corrida `completa` y prohibido en las demás.
+2. Si falta algún lote del 1 al `batches`, responde 409 con `faltan`; si las filas no cuadran con lo recibido, 409 con `faltan: []` y `filas`. La corrida sigue abierta.
+3. Una parte en `todo` con 0 filas no se aplica: la corrida queda `fallida` (422) y los datos anteriores siguen.
+4. Aplica en una transacción sobre la base del conjunto, con la fila de la corrida bloqueada:
+   - MAESTROS (`Application\Apply\ApplyMaestros`): inserta o actualiza por empresa y llave, con `sincronizado_en` y `corrida_id`; en las partes `todo` inactiva lo que la corrida no trajo; por cada socio enviado, inactiva sus direcciones y contactos que no llegaron, aunque vayan en `cambios`. Nunca borra.
+   - CARTERA (`ApplyCartera`): reemplaza toda la cartera de la empresa. En la corrida `completa` guarda además la foto de `fecha_corte` (reemplaza otra del mismo día) con `dias` recalculado como `fecha_corte - fecha_vencimiento`, porque la consulta cuenta los días hasta el día en que corre (plan §4).
+5. Deja la corrida `cerrada` con `aplicada_en`, lotes, filas y conteo de SAP, y borra sus lotes.
+
+Si la transacción falla, nada cambia y la corrida sigue abierta para reintentar el cierre, que es idempotente.
