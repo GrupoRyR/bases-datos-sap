@@ -283,3 +283,126 @@ def test_mensaje_seguro_de_hana_corta_el_texto_del_driver(texto, esperado):
     import hana
 
     assert extraccion.mensaje_seguro(hana.HanaError(texto)) == esperado
+
+
+# --- Archivo, catálogo y diagnóstico (T5) ------------------------------------------
+
+SIN_API = ("BASES_SAP_API_URL", "BASES_SAP_ROBOT_KEY_ID", "BASES_SAP_ROBOT_SECRET")
+
+
+def _sin_api(e, monkeypatch):
+    """Sin configuración de la API y con una fábrica que falla si se usa."""
+    for nombre in SIN_API:
+        monkeypatch.delenv(nombre, raising=False)
+
+    def prohibida(cfg_api):
+        raise AssertionError("el archivo, el catálogo y el diagnóstico nunca llaman a la API")
+
+    return prohibida
+
+
+def test_completa_suma_los_registros_del_archivo_en_la_misma_vpn(entorno, correos):
+    e = entorno
+    assert _main(e, "--completa") == 0
+    assert e.vpn.conexiones == 1
+    revisar_fases(e.linea)
+    usr5 = e.csv_dir / "AUDITORIA" / "SGX" / "USR5"
+    assert sorted(p.name for p in usr5.iterdir()) == ["2026-09.csv", "2026-10.csv"]
+    assert (e.csv_dir / "CONTABILIDAD" / "SDC" / "ORTT" / "2026-10.csv").is_file()
+    # Solo registros: las fotos y el catálogo son del domingo.
+    assert not (e.csv_dir / "USUARIOS_Y_PERMISOS").exists()
+    assert not (e.csv_dir / "_CATALOGO").exists()
+    archivo_csv = [ev for ev in e.linea if ev[0] == "csv" and "AUDITORIA" in str(ev[1])]
+    assert e.linea.index(("vpn", "abajo")) < e.linea.index(archivo_csv[0])
+
+
+def test_completa_reporta_el_archivo_sin_frenar_maestros_ni_cartera(entorno, correos):
+    e = entorno
+    e.hana.partes_que_fallan.add(("SGX", "archivo/AUDITORIA/USR5"))
+    assert _main(e, "--completa") == 1
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 4
+    assert correos == [[("ARCHIVO", "SGX AUDITORIA/USR5: Error ejecutando la consulta "
+                                    "'SGX AUDITORIA/USR5'; revisa robot/logs/robot.log.")]]
+    assert (e.csv_dir / "AUDITORIA" / "SDC" / "USR5" / "2026-10.csv").is_file()
+
+
+def test_archivo_fotos_con_el_catalogo_en_una_vpn_y_sin_api(entorno, correos, monkeypatch):
+    e = entorno
+    prohibida = _sin_api(e, monkeypatch)
+    assert _main(e, "--archivo", "fotos", fabrica_api=prohibida) == 0
+    assert e.vpn.conexiones == 1
+    revisar_fases(e.linea)
+    assert e.servidor.peticiones == []
+    for empresa in ("SGX", "SDC"):
+        assert (e.csv_dir / "USUARIOS_Y_PERMISOS" / empresa / "OUSR" / "2026-10-26.csv").is_file()
+        assert (e.csv_dir / "CONFIGURACION" / empresa / "@HBT_CONFIG" / "2026-10-26.csv").is_file()
+        assert (e.csv_dir / "_CATALOGO" / empresa / "columnas" / "2026-10-26.csv").is_file()
+    assert not (e.csv_dir / "AUDITORIA").exists()
+    estado = _estado()
+    assert (estado["estado"], estado["modo"]) == ("OK", "archivo fotos")
+    assert correos == []
+
+
+@pytest.mark.parametrize("argumentos, esperado", [
+    (("--archivo", "registros"), "AUDITORIA/SGX/USR5/2026-10.csv"),
+    (("--catalogo",), "_CATALOGO/SDC/tablas/2026-10-26.csv"),
+    (("--diagnostico",), "_DIAGNOSTICO/resumen/2026-10-26_0200.csv"),
+])
+def test_modos_de_carpeta_nunca_llaman_a_la_api(entorno, correos, monkeypatch, argumentos, esperado):
+    e = entorno
+    prohibida = _sin_api(e, monkeypatch)
+    assert _main(e, *argumentos, fabrica_api=prohibida) == 0
+    assert (e.csv_dir / esperado).is_file()
+    assert e.servidor.peticiones == []
+    assert not [ev for ev in e.linea if ev[0] == "api"]
+    assert e.vpn.conexiones == 1
+    revisar_fases(e.linea)
+
+
+def test_modulos_de_carpeta_no_importan_la_api():
+    import archivo
+    import catalogo
+    import diagnostico
+
+    for modulo in (archivo, catalogo, diagnostico):
+        fuente = Path(modulo.__file__).read_text(encoding="utf-8")
+        assert "import api" not in fuente and "from api " not in fuente, modulo.__name__
+        assert "ApiCliente" not in vars(modulo)
+
+
+def test_diagnostico_con_errores_sale_con_1_sin_correo(entorno, correos, monkeypatch):
+    e = entorno
+    prohibida = _sin_api(e, monkeypatch)
+    e.hana.partes_que_fallan.add(("SDC", "precios"))
+    assert _main(e, "--diagnostico", fabrica_api=prohibida) == 1
+    assert correos == []
+    estado = _estado()
+    assert estado["modo"] == "diagnostico"
+    assert [etapa for etapa, _ in estado["fallos"]] == ["DIAGNOSTICO"]
+
+
+def test_archivo_si_falla_la_vpn_avisa_y_no_escribe(entorno, correos, monkeypatch):
+    e = entorno
+    prohibida = _sin_api(e, monkeypatch)
+    vpn = VpnFalsa(e.linea, fallar=True)
+    e.hana.vpn = vpn
+    assert _main(e, "--archivo", "fotos", vpn=vpn, fabrica_api=prohibida) == 1
+    assert [etapa for etapa, _ in correos[0]] == ["VPN"]
+    assert not any(Path(e.csv_dir).rglob("*.csv"))
+    revisar_fases(e.linea)
+
+
+def test_archivo_falla_hana_de_una_empresa_y_la_otra_sigue(entorno, correos, monkeypatch):
+    e = entorno
+    prohibida = _sin_api(e, monkeypatch)
+    e.hana.empresas_que_fallan.add("SGX")
+    assert _main(e, "--archivo", "registros", fabrica_api=prohibida) == 1
+    assert [(etapa, msg.split(":")[0]) for etapa, msg in correos[0]] == [("HANA", "SGX")]
+    assert (e.csv_dir / "AUDITORIA" / "SDC" / "USR5" / "2026-10.csv").is_file()
+
+
+def test_los_modos_se_excluyen(entorno):
+    with pytest.raises(SystemExit):
+        run_robot.main(["--completa", "--catalogo"])
+    with pytest.raises(SystemExit):
+        run_robot.main(["--archivo", "todo"])

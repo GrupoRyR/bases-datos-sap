@@ -12,13 +12,22 @@ Se separan porque el perfil VPN es de túnel completo (0.0.0.0/0): con la VPN
 arriba no hay salida a internet. Se extrae todo, se baja el túnel y recién ahí
 se escribe y se envía.
 
+Las tablas que solo van a la carpeta (archivo, catálogo, diagnóstico, plan §5)
+siguen las mismas dos fases y nunca llaman a la API.
+
 Uso:
-    python run_robot.py --completa                 # nocturna: MAESTROS y CARTERA de SGX y SDC
+    python run_robot.py --completa                 # nocturna: MAESTROS y CARTERA de SGX y SDC,
+                                                   # más los registros del archivo (AUDITORIA, ORTT)
     python run_robot.py --completa --empresa SGX   # solo una empresa (se puede repetir)
     python run_robot.py --completa --sin-vpn       # asume la VPN ya conectada a mano
+    python run_robot.py --archivo fotos            # domingo 03:00: fotos del archivo y catálogo
+    python run_robot.py --archivo registros        # solo los registros del archivo
+    python run_robot.py --catalogo                 # solo el catálogo
+    python run_robot.py --diagnostico              # cifras de MAESTROS y CARTERA, sin enviar
 
-Salida: 0 todo bien, 1 algún fallo (se avisa por correo), 2 configuración
-incompleta, 130 cancelado con Ctrl+C.
+Salida: 0 todo bien, 1 algún fallo (se avisa por correo, salvo en el
+diagnóstico, que lo corre el usuario), 2 configuración incompleta, 130
+cancelado con Ctrl+C.
 """
 from __future__ import annotations
 
@@ -29,7 +38,10 @@ import time
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Iterable
 
+import archivo
+import catalogo
 import config
+import diagnostico
 import envio
 import extraccion
 import hana
@@ -71,22 +83,28 @@ def ejecutar_trabajos(
     sin_vpn: bool = False,
     ahora: Callable[[], datetime] = config.ahora,
     antes_de_enviar: Callable[[list[extraccion.Resultado]], None] | None = None,
+    registros: archivo.Archivo | None = None,
 ) -> list[tuple[str, str]]:
     """Fase 1 (extraer), fase 2 (CSV y API) y retención de la carpeta. Devuelve los fallos.
 
     `antes_de_enviar(resultados)` corre con la VPN ya abajo, antes del envío
-    (la nocturna toma ahí las solicitudes).
+    (la nocturna toma ahí las solicitudes). `registros` lee el archivo en la
+    misma sesión de VPN y lo escribe en la fase 2; sus fallos van a la lista,
+    pero nunca frenan MAESTROS ni CARTERA.
     """
     api = api or ApiCliente(cfg.api)
     carpeta = carpeta or Carpeta(cfg.csv_dir)
     momento = ahora()  # hora de la ejecución: nombre de los CSV
 
     resultados = extraccion.extraer(
-        cfg, trabajos, robot_vpn=robot_vpn, conectar=conectar, sin_vpn=sin_vpn, ahora=ahora
+        cfg, trabajos, robot_vpn=robot_vpn, conectar=conectar, sin_vpn=sin_vpn, ahora=ahora,
+        extra=registros,
     )
     if antes_de_enviar is not None:
         antes_de_enviar(resultados)
     fallos = envio.enviar(api, carpeta, resultados, momento=momento, ahora=ahora)
+    if registros is not None:
+        fallos += registros.escribir()
     try:
         carpeta.purgar_corridas(momento.date())
     except OSError as exc:
@@ -169,15 +187,65 @@ def _completa(
         sin_vpn=sin_vpn,
         ahora=ahora,
         antes_de_enviar=tomar,
+        registros=archivo.Archivo(cfg, "registros", hoy),
     )
     return trabajos, fallos_solicitudes + fallos
+
+
+def _solo_carpeta(
+    cfg: Config,
+    empresas: list[str],
+    modo: str,
+    *,
+    sin_vpn: bool,
+    fabrica_vpn: Callable[..., Any],
+    conectar: Callable[..., Any],
+    ahora: Callable[[], datetime],
+) -> list[tuple[str, str]]:
+    """Archivo, catálogo o diagnóstico: una sesión de VPN para leer y luego escribir.
+
+    Nunca crea el cliente de la API.
+    """
+    momento = ahora()
+    hoy = momento.date()
+    pasos: list[Any] = []
+    if modo == "archivo fotos":
+        pasos = [archivo.Archivo(cfg, "fotos", hoy), catalogo.Catalogo(cfg, hoy)]
+    elif modo == "archivo registros":
+        pasos = [archivo.Archivo(cfg, "registros", hoy)]
+    elif modo == "catalogo":
+        pasos = [catalogo.Catalogo(cfg, hoy)]
+    elif modo == "diagnostico":
+        pasos = [diagnostico.Diagnostico(cfg, momento)]
+    else:
+        raise ValueError(f"Modo desconocido: {modo}")
+
+    def leer(conn: Any, empresa: str) -> None:
+        for paso in pasos:
+            paso(conn, empresa)
+
+    fallos = extraccion.sesion(
+        cfg, empresas, leer,
+        robot_vpn=None if sin_vpn else fabrica_vpn(cfg.vpn), conectar=conectar, sin_vpn=sin_vpn,
+    )
+    for paso in pasos:  # FASE 2: la VPN ya está abajo
+        fallos += paso.escribir()
+    return fallos
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Robot de Bases de datos SAP")
     modo = parser.add_mutually_exclusive_group(required=True)
     modo.add_argument("--completa", action="store_true",
-                      help="Corrida nocturna: MAESTROS y CARTERA completos, con la foto de cartera.")
+                      help="Corrida nocturna: MAESTROS y CARTERA completos, con la foto de cartera "
+                           "y los registros del archivo.")
+    modo.add_argument("--archivo", choices=("fotos", "registros"),
+                      help="Tablas que solo van a la carpeta: fotos (domingo, con el catálogo) "
+                           "o registros.")
+    modo.add_argument("--catalogo", action="store_true",
+                      help="Catálogo de tablas y columnas de cada empresa (carpeta _CATALOGO).")
+    modo.add_argument("--diagnostico", action="store_true",
+                      help="Extrae MAESTROS y CARTERA con sus conteos a _DIAGNOSTICO; no envía nada.")
     parser.add_argument("--empresa", action="append", choices=EMPRESAS,
                         help="Empresa a procesar (se puede repetir). Por defecto, todas.")
     parser.add_argument("--sin-vpn", action="store_true",
@@ -195,44 +263,61 @@ def main(
 ) -> int:
     args = _parser().parse_args(argv)
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
+    if args.completa:
+        modo = "completa"
+    elif args.archivo:
+        modo = f"archivo {args.archivo}"
+    else:
+        modo = "catalogo" if args.catalogo else "diagnostico"
+    completa = modo == "completa"
 
     registro.configurar()
     inicio = time.monotonic()
     log.info("=" * 68)
-    log.info("Inicio del robot (completa) para %s%s.", ", ".join(empresas),
+    log.info("Inicio del robot (%s) para %s%s.", modo, ", ".join(empresas),
              " [SIN VPN]" if args.sin_vpn else "")
 
     cfg: Config | None = None
     try:
         cfg = cargar_config()
-        cfg.validar(requiere_vpn=not args.sin_vpn, requiere_api=True, empresas=empresas)
+        # Solo la completa habla con la API; el archivo, el catálogo y el diagnóstico no.
+        cfg.validar(requiere_vpn=not args.sin_vpn, requiere_api=completa, empresas=empresas)
     except ConfigError as exc:
         log.error("Configuración incompleta:\n%s", exc)
-        guardar_estado(estado="ERROR", modo="completa", etapa="CONFIGURACION", error=str(exc))
+        guardar_estado(estado="ERROR", modo=modo, etapa="CONFIGURACION", error=str(exc))
         if cfg is not None and cfg.alertas.habilitada:
             notificar.avisar_fallos(cfg.alertas, [("CONFIGURACION", str(exc))])
         return 2
 
+    avisar = modo != "diagnostico"  # el diagnóstico lo corre el usuario y ve el resumen
+    trabajos: list[Trabajo] = []
     try:
-        trabajos, fallos = _completa(
-            cfg, empresas, sin_vpn=args.sin_vpn, fabrica_api=fabrica_api,
-            fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora,
-        )
+        if completa:
+            trabajos, fallos = _completa(
+                cfg, empresas, sin_vpn=args.sin_vpn, fabrica_api=fabrica_api,
+                fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora,
+            )
+        else:
+            fallos = _solo_carpeta(
+                cfg, empresas, modo, sin_vpn=args.sin_vpn, fabrica_vpn=fabrica_vpn,
+                conectar=conectar, ahora=ahora,
+            )
     except KeyboardInterrupt:
         log.warning("Ejecución cancelada por el usuario.")
         return 130
     except Exception as exc:  # red de seguridad: nada sale sin registrar
         log.exception("Error inesperado en el robot.")
         mensaje = extraccion.mensaje_seguro(exc)
-        guardar_estado(estado="ERROR", modo="completa", etapa="INESPERADO", error=mensaje,
+        guardar_estado(estado="ERROR", modo=modo, etapa="INESPERADO", error=mensaje,
                        duracion_seg=round(time.monotonic() - inicio, 1))
-        notificar.avisar_fallos(cfg.alertas, [("INESPERADO", mensaje)])
+        if avisar:
+            notificar.avisar_fallos(cfg.alertas, [("INESPERADO", mensaje)])
         return 1
 
     duracion = round(time.monotonic() - inicio, 1)
     guardar_estado(
         estado="ERROR" if fallos else "OK",
-        modo="completa",
+        modo=modo,
         empresas=empresas,
         trabajos=[t.nombre for t in trabajos],
         fallos=[list(f) for f in fallos],
@@ -241,8 +326,10 @@ def main(
     if fallos:
         for etapa, mensaje in fallos:
             log.error("FALLO en la etapa %s: %s", etapa, mensaje)
-        log.error("La app conserva los datos de la última corrida buena de lo que falló.")
-        notificar.avisar_fallos(cfg.alertas, fallos)
+        if completa:
+            log.error("La app conserva los datos de la última corrida buena de lo que falló.")
+        if avisar:
+            notificar.avisar_fallos(cfg.alertas, fallos)
         return 1
     log.info("Robot terminado sin fallos en %.1fs.", duracion)
     return 0
