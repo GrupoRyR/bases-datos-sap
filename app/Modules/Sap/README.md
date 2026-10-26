@@ -97,3 +97,5 @@ Una solicitud pide un conjunto completo o una parte de MAESTROS (`Contracts\Enum
 5. Si la hora cae a 15 minutos o menos de una franja bloqueada (`BASES_SAP_FRANJAS_BLOQUEADAS`, `Domain\Requests\BlockedSlots`), pasa al final de la franja y queda `en_cola`; las franjas que se tocan se encadenan (11:50 → 12:45).
 
 Nunca se rechaza. El botón del panel usa el contrato `Contracts\UpdateRequests`.
+
+El candado usa la caché de Laravel: en producción `CACHE_STORE` debe ser `database` o `file` (compartida entre procesos), nunca `array`. Si el candado no llega en 10 segundos, la solicitud se ubica igual (nunca se rechaza) y queda un aviso en el log.

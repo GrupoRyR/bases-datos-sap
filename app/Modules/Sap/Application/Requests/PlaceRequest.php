@@ -11,8 +11,10 @@ use App\Modules\Sap\Contracts\UpdateRequests;
 use App\Modules\Sap\Domain\Requests\BlockedSlots;
 use App\Modules\Sap\Models\UpdateRequest;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 /**
@@ -42,7 +44,7 @@ final class PlaceRequest implements UpdateRequests
             throw new InvalidArgumentException("{$dataset->value} cannot be requested by scope [{$scope->value}].");
         }
 
-        return Cache::lock("sap:solicitudes:{$company->value}:{$dataset->value}", 10)->block(5, fn () => DB::transaction(function () use ($company, $dataset, $scope, $email, $name, $appId) {
+        $place = fn () => DB::transaction(function () use ($company, $dataset, $scope, $email, $name, $appId) {
             $request = UpdateRequest::query()->sisters($company, $dataset)
                 ->where('parte', $scope)
                 ->whereIn('estado', [RequestState::Pending, RequestState::Queued])
@@ -61,7 +63,17 @@ final class PlaceRequest implements UpdateRequests
             ]);
 
             return $request->toData($created);
-        }));
+        });
+
+        try {
+            return Cache::lock("sap:solicitudes:{$company->value}:{$dataset->value}", 15)->block(10, $place);
+        } catch (LockTimeoutException) {
+            // A request is never refused: at worst an identical one is created
+            // instead of joined, and the robot serves both in one run.
+            Log::warning('sap.requests.lock_timeout', ['empresa' => $company->value, 'conjunto' => $dataset->value]);
+
+            return $place();
+        }
     }
 
     private function create(Company $company, Dataset $dataset, ?RequestScope $scope): UpdateRequest
