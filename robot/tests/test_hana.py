@@ -172,3 +172,15 @@ def test_contar_con_resultado_raro_falla() -> None:
 
     with pytest.raises(HanaError, match="conteo"):
         hana.contar(ConexionFalsa(cursor), "SELECT 1, 2 FROM DUMMY", "conteo")
+
+
+def test_ejecutar_columna_inexistente_no_culpa_al_esquema() -> None:
+    class CursorQueFalla(CursorFalso):
+        def execute(self, sql: str, params: Any = None) -> None:
+            raise RuntimeError("invalid column name: UPDATETS: not found")
+
+    with pytest.raises(HanaError) as error:
+        hana.ejecutar(ConexionFalsa(CursorQueFalla([], [])), "SELECT 1", "articulos", "SEGUREX")
+
+    assert "invalid column name: UPDATETS: not found" in str(error.value)
+    assert "esquema" not in str(error.value)

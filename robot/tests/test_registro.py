@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 import registro
@@ -53,3 +54,19 @@ def test_configurar_escribe_robot_log_sin_secretos(tmp_path: Path) -> None:
         for handler in list(logger.handlers):
             handler.close()
             logger.removeHandler(handler)
+
+
+def test_la_traza_de_una_excepcion_tampoco_lleva_secretos() -> None:
+    registro.registrar_secreto("secreto-en-la-traza")
+    try:
+        raise RuntimeError("falló con secreto-en-la-traza")
+    except RuntimeError:
+        record = logging.LogRecord(
+            "bases_sap.prueba", logging.ERROR, __file__, 1, "fallo", (), sys.exc_info()
+        )
+
+    registro._RedactarSecretos().filter(record)
+    texto = logging.Formatter().format(record)
+
+    assert "secreto-en-la-traza" not in texto
+    assert "RuntimeError" in texto

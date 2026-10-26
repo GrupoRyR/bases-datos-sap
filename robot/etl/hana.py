@@ -155,12 +155,13 @@ def ejecutar(
     except HanaError:
         raise
     except Exception as exc:
-        texto = str(exc).lower()
-        if "invalid table name" in texto or "not found" in texto:
+        # Solo una tabla inexistente apunta al esquema; una columna que no existe
+        # (p. ej. UpdateTS en OITM) se reporta con el texto de HANA tal cual.
+        if "invalid table name" in str(exc).lower():
             raise HanaError(
-                f"Consulta '{etiqueta}': HANA no encuentra una tabla. "
-                f"Lo más probable es que el esquema ('{esquema}') sea incorrecto. "
-                "Revisa HANA_SGX_SCHEMA / HANA_SDC_SCHEMA en robot/.env."
+                f"Consulta '{etiqueta}': HANA no encuentra una tabla ({exc}). "
+                f"Puede faltar la tabla en el esquema '{esquema}' o el esquema ser "
+                "incorrecto: revisa HANA_SGX_SCHEMA / HANA_SDC_SCHEMA en robot/.env."
             ) from exc
         raise HanaError(f"Error ejecutando la consulta '{etiqueta}': {exc}") from exc
     finally:

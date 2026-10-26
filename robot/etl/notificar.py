@@ -44,8 +44,12 @@ def avisar_fallos(
     )
 
     try:
-        with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30) as smtp:
-            smtp.starttls()
+        # El puerto 465 es TLS desde el inicio; los demás (587) suben a TLS con STARTTLS.
+        ssl_directo = cfg.smtp_port == 465
+        clase = smtplib.SMTP_SSL if ssl_directo else smtplib.SMTP
+        with clase(cfg.smtp_host, cfg.smtp_port, timeout=30) as smtp:
+            if not ssl_directo:
+                smtp.starttls()
             if cfg.smtp_user:
                 smtp.login(cfg.smtp_user, cfg.smtp_password)
             smtp.send_message(msg)

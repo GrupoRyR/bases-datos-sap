@@ -45,10 +45,19 @@ def _bool(valor: str | None, por_defecto: bool = False) -> bool:
     return valor.strip().lower() in {"1", "true", "si", "sí", "yes", "y"}
 
 
-def _int(valor: str | None, por_defecto: int) -> int:
+def _int(nombre: str, por_defecto: int, invalidos: list[str]) -> int:
+    """Entero de la variable; si falta, el valor por defecto.
+
+    Un valor que no es número también usa el valor por defecto, pero queda en
+    `invalidos` para que validar() lo reporte en vez de ignorarlo en silencio.
+    """
+    valor = (os.getenv(nombre) or "").strip()
+    if not valor:
+        return por_defecto
     try:
-        return int(str(valor).strip())
-    except (TypeError, ValueError):
+        return int(valor)
+    except ValueError:
+        invalidos.append(f"{nombre}={valor}")
         return por_defecto
 
 
@@ -128,6 +137,7 @@ class Config:
     margen_franja_min: int
     historial_documentos: bool
     alertas: AlertaConfig
+    numeros_invalidos: tuple[str, ...] = ()
 
     def validar(
         self,
@@ -185,6 +195,12 @@ class Config:
                 f"por comas): {', '.join(invalidas)}"
             )
 
+        if self.numeros_invalidos:
+            faltantes.append(
+                "Estas variables deben ser números enteros: "
+                + ", ".join(self.numeros_invalidos)
+            )
+
         if faltantes:
             detalle = "\n  - ".join(faltantes)
             raise ConfigError(
@@ -200,6 +216,7 @@ def cargar_config(env_path: Path | None = None) -> Config:
     for carpeta in (LOGS_DIR, STATE_DIR):
         carpeta.mkdir(parents=True, exist_ok=True)
 
+    invalidos: list[str] = []
     destinatarios = [
         c.strip()
         for c in os.getenv("ALERTA_DESTINATARIOS", "").split(",")
@@ -214,13 +231,13 @@ def cargar_config(env_path: Path | None = None) -> Config:
             conexion=_texto("SOPHOS_CONNECTION"),
             usuario=_texto("SOPHOS_USER"),
             password=os.getenv("SOPHOS_PASSWORD", ""),
-            timeout=_int(os.getenv("SOPHOS_TIMEOUT"), 90),
+            timeout=_int("SOPHOS_TIMEOUT", 90, invalidos),
             desconectar_al_final=_bool(os.getenv("SOPHOS_DISCONNECT_AL_FINAL"), True),
         ),
         hana=HanaConfig(
             host=_texto("HANA_HOST"),
-            port=_int(os.getenv("HANA_PORT"), 30015),
-            timeout=_int(os.getenv("HANA_TIMEOUT"), 600),
+            port=_int("HANA_PORT", 30015, invalidos),
+            timeout=_int("HANA_TIMEOUT", 600, invalidos),
             empresas={
                 codigo: EmpresaHana(
                     codigo=codigo,
@@ -242,11 +259,12 @@ def cargar_config(env_path: Path | None = None) -> Config:
         historial_documentos=_bool(os.getenv("BASES_SAP_ARCHIVO_HISTORIAL_DOCUMENTOS"), False),
         alertas=AlertaConfig(
             smtp_host=_texto("ALERTA_SMTP_HOST"),
-            smtp_port=_int(os.getenv("ALERTA_SMTP_PORT"), 587),
+            smtp_port=_int("ALERTA_SMTP_PORT", 587, invalidos),
             smtp_user=_texto("ALERTA_SMTP_USER"),
             smtp_password=os.getenv("ALERTA_SMTP_PASSWORD", ""),
             destinatarios=destinatarios,
         ),
+        numeros_invalidos=tuple(invalidos),
     )
 
 

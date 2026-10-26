@@ -19,16 +19,25 @@ class _RedactarSecretos(logging.Filter):
             mensaje = record.getMessage()
         except Exception:
             return True
-        # Cualquier secreto registrado: claves de VPN, HANA y SMTP, y el secreto
-        # de la llave del robot (BASES_SAP_ROBOT_SECRET).
-        for secreto in _SECRETOS:
-            if secreto and secreto in mensaje:
-                mensaje = mensaje.replace(secreto, "***")
-        # Cubre también el patrón  -p <algo>  de la línea de comandos
-        mensaje = re.sub(r"(-p|--password)\s+\S+", r"\1 ***", mensaje)
-        record.msg = mensaje
+        record.msg = _redactar(mensaje)
         record.args = ()
+        # La traza de log.exception() se formatea después del filtro; se arma aquí
+        # para redactarla, y el Formatter reutiliza exc_text en vez de rehacerla.
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = _redactar(record.exc_text)
         return True
+
+
+def _redactar(texto: str) -> str:
+    # Cualquier secreto registrado: claves de VPN, HANA y SMTP, y el secreto
+    # de la llave del robot (BASES_SAP_ROBOT_SECRET).
+    for secreto in _SECRETOS:
+        if secreto and secreto in texto:
+            texto = texto.replace(secreto, "***")
+    # Cubre también el patrón  -p <algo>  de la línea de comandos
+    return re.sub(r"(-p|--password)\s+\S+", r"\1 ***", texto)
 
 
 def registrar_secreto(valor: str | None) -> None:

@@ -167,10 +167,13 @@ def test_desconectar_vpn_al_final_se_puede_apagar(monkeypatch: pytest.MonkeyPatc
     assert cargar_config().vpn.desconectar_al_final is False
 
 
-def test_numero_invalido_usa_el_valor_por_defecto(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HANA_PORT", "abc")
+def test_numero_invalido_falla_al_validar(
+    entorno_completo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HANA_PORT", "3OO15")
 
-    assert cargar_config().hana.port == 30015
+    with pytest.raises(ConfigError, match="HANA_PORT"):
+        cargar_config().validar()
 
 
 def test_alertas_habilitadas_con_host_y_destinatarios(monkeypatch: pytest.MonkeyPatch) -> None:

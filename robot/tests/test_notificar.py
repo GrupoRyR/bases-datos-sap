@@ -100,3 +100,23 @@ def test_un_error_de_smtp_no_se_propaga(smtp: type[SmtpFalso]) -> None:
     notificar.avisar_fallo(_cfg(), "VPN", "sin túnel")
 
     assert smtp.instancias[0].enviados == []
+
+
+def test_puerto_465_usa_ssl_sin_starttls(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SmtpSslFalso(SmtpFalso):
+        def starttls(self) -> None:
+            raise AssertionError("SMTP_SSL no usa STARTTLS")
+
+    monkeypatch.setattr(notificar.smtplib, "SMTP_SSL", SmtpSslFalso)
+    cfg = AlertaConfig(
+        smtp_host="smtp.prueba.test",
+        smtp_port=465,
+        smtp_user="robot@prueba.test",
+        smtp_password="clave-smtp-prueba",
+        destinatarios=["ti@prueba.test"],
+    )
+
+    notificar.avisar_fallo(cfg, "VPN", "sin túnel")
+
+    assert isinstance(SmtpFalso.instancias[-1], SmtpSslFalso)
+    assert len(SmtpFalso.instancias[-1].enviados) == 1
