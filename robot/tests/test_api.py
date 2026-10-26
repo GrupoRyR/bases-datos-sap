@@ -432,7 +432,7 @@ def test_transporte_urllib_envia_post(monkeypatch: pytest.MonkeyPatch) -> None:
         vistas.append((peticion, timeout))
         return _RespuestaUrllib()
 
-    monkeypatch.setattr(api.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(api, "_abrir", urlopen)
 
     respuesta = api.transporte_urllib(BASE + "/x", {"X-Robot-Key": KEY_ID}, b"{}", 12)
 
@@ -455,7 +455,7 @@ def test_transporte_urllib_devuelve_los_errores_http(monkeypatch: pytest.MonkeyP
     def urlopen(peticion, timeout):
         raise urllib.error.HTTPError(peticion.full_url, 429, "Too Many", encabezados, io.BytesIO(b"{}"))
 
-    monkeypatch.setattr(api.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(api, "_abrir", urlopen)
 
     respuesta = api.transporte_urllib(BASE + "/x", {}, b"{}", 5)
 
@@ -471,7 +471,74 @@ def test_transporte_urllib_sin_respuesta_es_error_red(monkeypatch: pytest.Monkey
     def urlopen(peticion, timeout):
         raise urllib.error.URLError(falla) if isinstance(falla, TimeoutError) else falla
 
-    monkeypatch.setattr(api.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(api, "_abrir", urlopen)
 
     with pytest.raises(ErrorRed):
         api.transporte_urllib(BASE + "/x", {}, b"{}", 5)
+
+
+# ------------------------------------------------- respuestas que se pierden
+def test_iniciar_recupera_su_corrida_si_se_perdio_la_respuesta(
+    cliente: ApiCliente, servidor: ApiFalsa
+) -> None:
+    servidor.programar_fallas("iniciar", status=502, despues=True)
+
+    respuesta = _iniciar_maestros(cliente)
+
+    assert respuesta["run_id"] == 1
+    assert respuesta["recuperada"] is True
+    assert len(servidor.corridas) == 1
+
+
+def test_corrida_abierta_en_el_primer_intento_sigue_siendo_error(cliente: ApiCliente) -> None:
+    _iniciar_maestros(cliente)
+
+    with pytest.raises(CorridaAbierta):
+        _iniciar_maestros(cliente)
+
+
+def test_cerrar_recupera_el_cierre_si_se_perdio_la_respuesta(
+    cliente: ApiCliente, servidor: ApiFalsa
+) -> None:
+    run_id = _iniciar_maestros(cliente)["run_id"]
+    _lote(cliente, run_id, 1)
+    servidor.programar_fallas("cerrar", red=True, despues=True)
+
+    respuesta = cliente.cerrar_corrida(run_id, batches=1, filas={"vendedores": 2})
+
+    assert respuesta["estado"] == "cerrada"
+    assert respuesta["recuperada"] is True
+
+
+def test_fallar_recupera_la_falla_si_se_perdio_la_respuesta(
+    cliente: ApiCliente, servidor: ApiFalsa
+) -> None:
+    run_id = _iniciar_maestros(cliente)["run_id"]
+    servidor.programar_fallas("fallar", status=504, despues=True)
+
+    respuesta = cliente.fallar_corrida(run_id, "VPN no conectó")
+
+    assert respuesta["estado"] == "fallida"
+
+
+def test_el_422_lleva_el_detalle_de_las_filas(cliente: ApiCliente, servidor: ApiFalsa) -> None:
+    run_id = _iniciar_maestros(cliente)["run_id"]
+    servidor.programar_fallas(
+        "lote",
+        status=422,
+        datos={"message": "Datos inválidos.", "errors": {"rows.12.codigo": ["Obligatorio."]}},
+    )
+
+    with pytest.raises(ApiRechazo) as error:
+        _lote(cliente, run_id, 1)
+
+    assert "rows.12.codigo: Obligatorio." in str(error.value)
+
+
+def test_una_redireccion_no_se_sigue_y_explica_la_url(cliente: ApiCliente, servidor: ApiFalsa) -> None:
+    servidor.programar_fallas("tomar", status=301, headers={"Location": "https://www.bases.prueba.test/"})
+
+    with pytest.raises(ApiError, match="BASES_SAP_API_URL"):
+        cliente.tomar_solicitudes()
+
+    assert len(servidor.peticiones_a("tomar")) == 1

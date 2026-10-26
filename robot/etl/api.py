@@ -8,6 +8,9 @@ Reintentos dentro de una llamada, siempre con el mismo cuerpo y firma nueva:
 - error de red o 5xx: hasta 3 reenvíos, con esperas de 2, 4 y 8 s;
 - 429: espera Retry-After (30 s si no viene, máximo 120) y gasta un intento;
 - 401 y 413: sin reintento.
+- iniciar, cerrar y fallar: si un intento se quedó sin respuesta y el reintento
+  da 409, la API ya lo había aplicado y se toma como éxito (`recuperada`).
+- 3xx: no se sigue (urllib haría un GET sin cuerpo); se pide corregir la URL.
 
 En el log solo van ruta, estado e intento: nunca el secreto, la firma ni el
 cuerpo, que puede llevar datos de SAP.
@@ -93,11 +96,25 @@ class LotesFaltantes(ApiRechazo):
         self.faltan: list[int] = list(self.datos.get("faltan") or []) if isinstance(self.datos, dict) else []
 
 
+class _SinRedirecciones(urllib.request.HTTPRedirectHandler):
+    """urllib convierte un POST redirigido en un GET sin cuerpo ni firma: mejor no seguirlo."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_ABRIDOR = urllib.request.build_opener(_SinRedirecciones)
+
+
+def _abrir(peticion: urllib.request.Request, timeout: float) -> Any:
+    return _ABRIDOR.open(peticion, timeout=timeout)
+
+
 def transporte_urllib(url: str, headers: dict[str, str], cuerpo: bytes, timeout: float) -> Respuesta:
-    """POST con urllib. Un 4xx/5xx también es una Respuesta; sin respuesta, ErrorRed."""
+    """POST con urllib. Un 3xx/4xx/5xx también es una Respuesta; sin respuesta, ErrorRed."""
     peticion = urllib.request.Request(url, data=cuerpo, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(peticion, timeout=timeout) as r:
+        with _abrir(peticion, timeout) as r:
             return Respuesta(r.status, {k.lower(): v for k, v in r.headers.items()}, r.read())
     except urllib.error.HTTPError as e:
         return Respuesta(e.code, {k.lower(): v for k, v in (e.headers or {}).items()}, e.read())
@@ -168,7 +185,13 @@ class ApiCliente:
             "fecha_corte": fecha_corte,
             "extraida_en": extraida_en,
         }
-        return self._post("/corridas", cuerpo, conflicto=CorridaAbierta)
+        def recuperar(datos: dict[str, Any]) -> dict[str, Any] | None:
+            # La corrida abierta es la que creó el intento cuya respuesta se perdió.
+            if datos.get("run_id") is None:
+                return None
+            return {"run_id": datos["run_id"], "estado": "abierta", "recuperada": True}
+
+        return self._post("/corridas", cuerpo, conflicto=CorridaAbierta, recuperar=recuperar)
 
     def enviar_lote(
         self,
@@ -200,10 +223,24 @@ class ApiCliente:
                 return LotesFaltantes(mensaje, status=status, datos=datos)
             return ApiRechazo(mensaje, status=status, datos=datos)
 
-        return self._post(f"/corridas/{run_id}/cerrar", cuerpo, conflicto=conflicto)
+        def recuperar(datos: dict[str, Any]) -> dict[str, Any] | None:
+            if datos.get("estado") != "cerrada":
+                return None
+            return {"run_id": run_id, "estado": "cerrada", "recuperada": True}
+
+        return self._post(
+            f"/corridas/{run_id}/cerrar", cuerpo, conflicto=conflicto, recuperar=recuperar
+        )
 
     def fallar_corrida(self, run_id: int, error: str) -> dict[str, Any]:
-        return self._post(f"/corridas/{run_id}/fallar", {"error": error.strip()[:MAX_ERROR]})
+        def recuperar(datos: dict[str, Any]) -> dict[str, Any] | None:
+            if datos.get("estado") != "fallida":
+                return None
+            return {"run_id": run_id, "estado": "fallida", "recuperada": True}
+
+        return self._post(
+            f"/corridas/{run_id}/fallar", {"error": error.strip()[:MAX_ERROR]}, recuperar=recuperar
+        )
 
     # ---------------------------------------------------------------- interno
     def cuerpo(self, datos: Any) -> bytes:
@@ -221,7 +258,14 @@ class ApiCliente:
         datos: dict[str, Any],
         *,
         conflicto: Callable[..., ApiRechazo] = ApiRechazo,
+        recuperar: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     ) -> dict[str, Any]:
+        """POST firmado con reintentos.
+
+        `recuperar` cubre las rutas que no se pueden repetir (iniciar, cerrar, fallar):
+        si un intento anterior se quedó sin respuesta (red o 5xx), la API pudo haberlo
+        aplicado, y el 409 del reintento lo confirma en vez de ser un error.
+        """
         # La ruta firmada va desde la raíz de la app: si BASES_SAP_API_URL tiene un
         # subdirectorio, va en la URL pero no en la firma (contrato §3).
         ruta = RUTA_BASE + relativa
@@ -239,6 +283,7 @@ class ApiCliente:
         if self.comprimir:
             fijos["Content-Encoding"] = "gzip"
 
+        sin_respuesta = False  # algún intento anterior pudo aplicarse sin que lo supiéramos
         for intento in range(1, MAX_INTENTOS + 1):
             encabezados = {
                 **fijos,
@@ -257,6 +302,7 @@ class ApiCliente:
                     f"POST {ruta}: sin respuesta (intento {intento} de {MAX_INTENTOS}): {e}; "
                     f"reintento en {espera} s"
                 )
+                sin_respuesta = True
                 self.dormir(espera)
                 continue
 
@@ -268,6 +314,20 @@ class ApiCliente:
                     raise ApiError(f"La API respondió {status} en {ruta} sin un objeto JSON.", status=status)
                 return contenido
 
+            if status == 409 and sin_respuesta and recuperar and isinstance(contenido, dict):
+                recuperado = recuperar(contenido)
+                if recuperado is not None:
+                    log.warning(f"POST {ruta} → 409 tras un intento sin respuesta: ya estaba aplicado")
+                    return recuperado
+
+            if 300 <= status < 400:
+                destino = respuesta.headers.get("location", "?")
+                raise ApiError(
+                    f"La API redirige {ruta} a {destino} ({status}). Corrige BASES_SAP_API_URL "
+                    "en robot/.env con la dirección final (https y sin redirecciones).",
+                    status=status,
+                )
+
             reintentable = status >= 500 or status == 429
             if not reintentable or intento == MAX_INTENTOS:
                 log.error(f"POST {ruta} → {status} (intento {intento} de {MAX_INTENTOS})")
@@ -277,6 +337,7 @@ class ApiCliente:
                 espera = _retry_after(respuesta.headers.get("retry-after"))
             else:
                 espera = ESPERAS_S[intento - 1]
+                sin_respuesta = True
             log.warning(f"POST {ruta} → {status} (intento {intento} de {MAX_INTENTOS}); reintento en {espera} s")
             self.dormir(espera)
 
@@ -301,6 +362,13 @@ class ApiCliente:
         if 400 <= status < 500 and status != 429:
             clase = conflicto if status == 409 else ApiRechazo
             detalle = f": {mensaje_api}" if mensaje_api else ""
+            errores = datos.get("errors") if isinstance(datos, dict) else None
+            if isinstance(errores, dict) and errores:
+                primeros = list(errores.items())[:5]
+                detalle += " (" + "; ".join(
+                    f"{campo}: {' '.join(map(str, m)) if isinstance(m, list) else m}"
+                    for campo, m in primeros
+                ) + ")"
             return clase(f"La API respondió {status} en {ruta}{detalle}", status=status, datos=datos)
         return ApiError(
             f"La API respondió {status} en {ruta} después de {MAX_INTENTOS} intentos.",

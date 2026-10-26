@@ -110,6 +110,8 @@ class _Falla:
     headers: dict[str, str] = field(default_factory=dict)
     datos: Any = None
     red: bool = False
+    # True: la API procesa la petición y luego se pierde la respuesta.
+    despues: bool = False
 
 
 class _Error(Exception):
@@ -169,9 +171,13 @@ class ApiFalsa:
         headers: dict[str, str] | None = None,
         datos: Any = None,
         red: bool = False,
+        despues: bool = False,
     ) -> None:
-        """Las próximas `veces` llamadas a la ruta `nombre` responden `status` o, con red=True, lanzan ErrorRed."""
-        falla = _Falla(status, {k.lower(): v for k, v in (headers or {}).items()}, datos, red)
+        """Las próximas `veces` llamadas a la ruta `nombre` responden `status` o, con red=True, lanzan ErrorRed.
+
+        Con despues=True la API procesa la petición antes de fallar: la respuesta se pierde.
+        """
+        falla = _Falla(status, {k.lower(): v for k, v in (headers or {}).items()}, datos, red, despues)
         self._fallas.setdefault(nombre, []).extend([falla] * veces)
 
     def peticiones_a(self, nombre: str) -> list[Peticion]:
@@ -190,11 +196,18 @@ class ApiFalsa:
         fallas = self._fallas.get(peticion.nombre)
         if fallas:
             falla = fallas.pop(0)
+            if falla.despues:
+                self._procesar(peticion, ruta, relativa, headers, cuerpo)
             if falla.red:
                 peticion.status = -1
                 raise ErrorRed("Falla de red simulada.")
             return self._responder(peticion, falla.status, falla.datos or {"message": "Falla simulada."}, falla.headers)
 
+        return self._procesar(peticion, ruta, relativa, headers, cuerpo)
+
+    def _procesar(
+        self, peticion: Peticion, ruta: str, relativa: str | None, headers: dict[str, str], cuerpo: bytes
+    ) -> Respuesta:
         try:
             if len(cuerpo) > LIMITE_BYTES:
                 raise _Error(413, {"message": "Cuerpo demasiado grande."})
