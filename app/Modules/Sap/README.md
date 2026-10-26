@@ -41,3 +41,13 @@ Toda ruta del robot va en el grupo de middleware `sap.robot` (`SapServiceProvide
 4. `DecodeRobotBody`: descomprime gzip por partes (413 si pasa de 40 MB, 400 si está dañado), exige un objeto JSON (400) y deja el texto en el atributo `robot_body` para comparar lotes por su SHA-256.
 
 Los límites están en `config/sap.php` (`sap.robot.*`).
+
+## Corridas
+
+Una corrida lleva un conjunto de una empresa (`robot_runs`, contrato §4). Estados: `abierta` → `cerrada`, `fallida` o `vencida` (`Domain\Runs\RunState`).
+
+- `POST /api/robot/v1/corridas` (`Application\Runs\StartRun`): valida conjunto, empresa, tipo, partes y modos (una corrida `completa` trae todas las partes en `todo`; solo clientes, proveedores y artículos, con sus direcciones y contactos, van en `cambios`), `fecha_corte` solo en CARTERA y `extraida_en` con zona. Responde 201 con `abierta_hasta`.
+- Solo una corrida abierta por conjunto y empresa: lo asegura el índice único de `abierta_lock`. La segunda recibe 409 con el `run_id` de la abierta.
+- `POST /api/robot/v1/corridas/{id}/fallar` (`FailRun`): la marca `fallida` con el error del robot y descarta sus lotes.
+- Una corrida que pasa 30 minutos sin lotes queda `vencida`: al tocarla, al iniciar otra del mismo conjunto y empresa, y con `php artisan sap:vencer`, que el programador corre cada minuto.
+- Los errores del robot se responden con `Http\Exceptions\RobotRequestRejected`: 422 con `errors` (máximo 50), 409 con `estado` o `run_id`, 404 si la corrida no existe. El repositorio no trae mensajes de validación en español, así que el módulo escribe los suyos.

@@ -40,7 +40,7 @@ final class RobotClient
     {
         $json = is_string($body) ? $body : (string) json_encode((object) $body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $wire = $gzip ? (string) gzencode($json) : $json;
-        $timestamp ??= time();
+        $timestamp ??= now()->getTimestamp();
         $nonce ??= bin2hex(random_bytes(16));
 
         $all = array_merge([

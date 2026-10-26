@@ -2,6 +2,7 @@
 
 namespace App\Modules\Sap\Providers;
 
+use App\Modules\Sap\Console\ExpireCommand;
 use App\Modules\Sap\Http\Middleware\DecodeRobotBody;
 use App\Modules\Sap\Http\Middleware\LimitRobotPayload;
 use App\Modules\Sap\Http\Middleware\VerifyRobotSignature;
@@ -35,6 +36,8 @@ final class SapServiceProvider extends ModuleServiceProvider
 
     protected function bootModule(): void
     {
+        $this->commands([ExpireCommand::class]);
+
         // Every robot route, in this order: rate limit, size, signature, body.
         Route::middlewareGroup('sap.robot', [
             'throttle:sap-robot',
@@ -50,6 +53,8 @@ final class SapServiceProvider extends ModuleServiceProvider
 
     protected function schedule(Schedule $schedule): void
     {
+        $schedule->command('sap:vencer')->everyMinute()->withoutOverlapping();
+
         $schedule->call(fn () => app(NonceStore::class)->prune())
             ->name('sap:limpiar-nonces')
             ->everyTenMinutes()
