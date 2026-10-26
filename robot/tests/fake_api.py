@@ -138,6 +138,7 @@ class ApiFalsa:
         secret: str = "secreto-robot-de-prueba",
         reloj: Callable[[], float] | None = None,
         columnas_por_parte: dict[str, list[str]] | None = None,
+        linea: list | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.llaves = {key_id: secret}
@@ -145,6 +146,8 @@ class ApiFalsa:
         self._reloj = reloj
         # Si se da, los lotes deben traer exactamente esas columnas (contrato §4.2).
         self.columnas_por_parte = columnas_por_parte
+        # Línea de tiempo compartida con la VPN y la HANA falsas (fake_hana.revisar_fases).
+        self.linea = linea
         self.peticiones: list[Peticion] = []
         self.corridas: dict[int, Corrida] = {}
         self.siguiente_run_id = 1
@@ -192,6 +195,8 @@ class ApiFalsa:
         relativa = ruta[len(RUTA_BASE):] if ruta.startswith(RUTA_BASE + "/") else None
         peticion = Peticion(self._nombre(relativa), ruta, url, headers, cuerpo, None)
         self.peticiones.append(peticion)
+        if self.linea is not None:
+            self.linea.append(("api", peticion.nombre))
 
         fallas = self._fallas.get(peticion.nombre)
         if fallas:
