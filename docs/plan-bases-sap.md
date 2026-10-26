@@ -104,7 +104,7 @@ No se usa MCP: las apps hablan con la API. Si más adelante un agente de IA nece
 | Parte | Origen | Cómo se actualiza |
 |---|---|---|
 | Cartera actual | La consulta `etl/queries/cartera.sql` del gestor de cartera, copiada tal cual (ya incluye asesor, correo del asesor y valor antes de impuestos) | Completa cada vez, con el botón y cada noche; se reemplaza en una sola transacción y nunca queda vacía |
-| Foto diaria | La misma consulta | Una por día, en la corrida de las 02:00, con fecha de corte del día anterior; no se borra. La usan la circularización (cierre de mes) y el historial |
+| Foto diaria | La misma consulta | Una por día, en la corrida de las 02:00, con fecha de corte del día anterior (es el cierre de ese día); no se borra. La usan la circularización (cierre de mes) y el historial. Como la consulta calcula los días de mora con la fecha de la corrida, en la foto se recalculan contra la fecha de corte (fecha de corte menos vencimiento), para que no quede un día más vieja. La consulta no se cambia |
 
 ### Para todos los conjuntos
 
