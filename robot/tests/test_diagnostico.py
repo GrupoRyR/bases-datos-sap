@@ -56,15 +56,16 @@ def test_precios_del_diagnostico_son_solo_la_lista_de_la_empresa(escenario):
     assert (precios["filas"], precios["conteo_sap"], precios["error"]) == ("2", "2", "")
 
 
-def test_empresa_sin_lista_de_precios_queda_con_el_error_en_el_resumen(escenario):
+def test_empresa_sin_lista_de_precios_se_omite_sin_ser_un_fallo(escenario):
     e = escenario
     e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=None)
     _, fallos = _correr(e, ("SDC",))
-    assert [etapa for etapa, _ in fallos] == ["DIAGNOSTICO"]
+    assert fallos == []
     resumen = _resumen(e)
     precios = _fila(resumen, "SDC", "precios")
-    assert "HANA_SDC_LISTA_PRECIOS" in precios["error"]
+    assert precios["error"].startswith("Omitida") and "HANA_SDC_LISTA_PRECIOS" in precios["error"]
     assert (precios["filas"], precios["conteo_sap"]) == ("", "")
+    assert not e.hana.de("SDC", parte="precios")
     # Las demás partes y las listas de OPLN (para elegir el número) siguen saliendo.
     assert _fila(resumen, "SDC", "cartera")["error"] == ""
     assert _fila(resumen, "SDC", "listas_precios")["filas"] == "1"

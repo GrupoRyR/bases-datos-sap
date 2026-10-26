@@ -76,6 +76,10 @@ class Diagnostico:
         for parte in esquema.PARTES.values():
             p = ParteDiagnostico(empresa, parte.conjunto, parte.nombre)
             self.partes.append(p)
+            if parte.nombre == consultas.PARTE_PRECIOS and empresa_cfg.lista_precios is None:
+                # Como en la corrida real (contrato §4.1): no se pide y no es un fallo.
+                p.error = f"Omitida: {empresa} no tiene lista de precios pública (HANA_{empresa}_LISTA_PRECIOS)."
+                continue
             try:
                 self._leer_parte(conn, empresa_cfg, parte, p)
             except Exception as exc:
