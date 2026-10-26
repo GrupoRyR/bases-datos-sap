@@ -2,7 +2,9 @@
 
 namespace App\Modules\Sap\Providers;
 
+use App\Modules\Sap\Application\Requests\PlaceRequest;
 use App\Modules\Sap\Console\ExpireCommand;
+use App\Modules\Sap\Contracts\UpdateRequests;
 use App\Modules\Sap\Http\Middleware\DecodeRobotBody;
 use App\Modules\Sap\Http\Middleware\LimitRobotPayload;
 use App\Modules\Sap\Http\Middleware\VerifyRobotSignature;
@@ -32,6 +34,12 @@ final class SapServiceProvider extends ModuleServiceProvider
     protected function apiPrefix(): string
     {
         return '';
+    }
+
+    protected function registerModule(): void
+    {
+        // The panel's "Actualizar datos" button asks through this contract.
+        $this->app->bind(UpdateRequests::class, PlaceRequest::class);
     }
 
     protected function bootModule(): void
