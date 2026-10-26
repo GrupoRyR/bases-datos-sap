@@ -1,0 +1,3 @@
+# Solo para las pruebas (local y CI). Las pruebas nunca importan hdbcli.
+python-dotenv==1.0.1
+pytest==8.4.2
