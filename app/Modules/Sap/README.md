@@ -83,3 +83,19 @@ Al cerrar una corrida `completa`, `Application\Apply\CountRun` compara por parte
 - La respuesta del cierre trae `conteo` (solo en la `completa`) y la corrida lo guarda.
 - `daily_counts` guarda el resultado del día (fecha de `extraida_en` en Bogotá), una fila por empresa y parte; si la corrida completa se repite el mismo día, la reemplaza. Es el criterio 3 de estabilidad del plan (§6), que el panel muestra; el panel lo leerá por un contrato de `Sap` cuando lo pida.
 - Un día sin filas de una empresa (su corrida completa falló o venció) **no** es un día estable: el panel debe exigir las filas de todas las partes de cada empresa y cruzarlas con `robot_runs`.
+
+## Solicitudes de actualización
+
+Una solicitud pide un conjunto completo o una parte de MAESTROS (`Contracts\Enums\RequestScope`: `clientes`, `proveedores`, `articulos`, `precios`, `vendedores`, `catalogos`) de una empresa (contrato §7). Estados en `Contracts\Enums\RequestState`. Tablas: `update_requests`, `update_request_requesters` (quién pidió: app o panel, correo y nombre) y `client_apps`.
+
+`Application\Requests\PlaceRequest` las ubica con un candado por empresa y conjunto (§7.2):
+
+1. Si hay una igual `pendiente` o `en_cola`, la nueva se une a esa (se registra quién pidió).
+2. Si hay una hermana `tomada`, queda `en_cola` sin hora (`correr_desde` nulo) hasta que esa termine.
+3. Si la última hermana `terminada` terminó hace menos de 3 minutos, queda `en_cola` hasta 3 minutos después.
+4. Si no, `pendiente` para ahora.
+5. Si la hora cae a 15 minutos o menos de una franja bloqueada (`BASES_SAP_FRANJAS_BLOQUEADAS`, `Domain\Requests\BlockedSlots`), pasa al final de la franja y queda `en_cola`; las franjas que se tocan se encadenan (11:50 → 12:45).
+
+Nunca se rechaza. El botón del panel usa el contrato `Contracts\UpdateRequests`.
+
+El candado usa la caché de Laravel: en producción `CACHE_STORE` debe ser `database` o `file` (compartida entre procesos), nunca `array`. Si el candado no llega en 10 segundos, la solicitud se ubica igual (nunca se rechaza) y queda un aviso en el log.
