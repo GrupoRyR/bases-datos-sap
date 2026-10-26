@@ -49,7 +49,7 @@ final class AppRequestController
             $errors['solicitado_por.nombre'] = 'Debe ser texto de hasta 255 caracteres.';
         }
 
-        if ($errors !== [] || $company === null || $dataset === null) {
+        if ($errors !== [] || $dataset === null) {
             throw RobotRequestRejected::invalid('La solicitud no cumple el contrato.', $errors);
         }
 
