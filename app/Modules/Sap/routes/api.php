@@ -6,6 +6,7 @@ use App\Modules\Sap\Http\Controllers\Robot\CloseRunController;
 use App\Modules\Sap\Http\Controllers\Robot\FailRunController;
 use App\Modules\Sap\Http\Controllers\Robot\StartRunController;
 use App\Modules\Sap\Http\Controllers\Robot\StoreBatchController;
+use App\Modules\Sap\Http\Controllers\Robot\TakeRequestsController;
 use App\Modules\Sap\Http\Middleware\AuthenticateClientApp;
 use Illuminate\Support\Facades\Route;
 
@@ -20,6 +21,8 @@ Route::prefix('robot/v1')->name('robot.')->middleware('sap.robot')->group(functi
     Route::post('corridas/{run}/lotes', StoreBatchController::class)->whereNumber('run')->name('corridas.lotes');
     Route::post('corridas/{run}/cerrar', CloseRunController::class)->whereNumber('run')->name('corridas.cerrar');
     Route::post('corridas/{run}/fallar', FailRunController::class)->whereNumber('run')->name('corridas.fallar');
+    // Query and take in one call: an empty list means nothing to do.
+    Route::post('solicitudes/tomar', TakeRequestsController::class)->name('solicitudes.tomar');
 });
 
 // The apps, each with its own key (contract section 7.4).

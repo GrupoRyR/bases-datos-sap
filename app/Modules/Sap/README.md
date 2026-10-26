@@ -109,3 +109,10 @@ Cada app tiene su llave (`client_apps`): `bsap_` y 48 caracteres al azar; se gua
 | `POST /api/v1/solicitudes` | Pide una actualización (`empresa`, `conjunto`, `parte`, `solicitado_por.correo` y `nombre`). 201 si creó una solicitud, 200 si se unió a una igual; responde `id`, `estado`, `correr_desde`, `empresa`, `conjunto`, `parte`. |
 | `GET /api/v1/solicitudes/{id}` | La solicitud con `tomada_en`, `terminada_en`, `error` y `solicitada_en`. Una app solo ve las solicitudes a las que se unió; las demás dan 404. |
 | `GET /api/v1/estado?empresa=SGX&conjunto=CARTERA` | Por cada parte, `actualizado_en`: la última vez que una corrida cerrada la aplicó (o `null`). |
+
+## El robot y las solicitudes
+
+- `POST /api/robot/v1/solicitudes/tomar` (`Application\Requests\TakeRequests`, contrato §7.3) pregunta y toma en una sola llamada: pasa a `tomada`, en una transacción y de la más vieja a la más nueva, hasta `max` (1 a 100, por defecto 20) solicitudes `pendiente` o `en_cola` cuya hora ya llegó. Las de una empresa y conjunto que ya tiene una tomada esperan, porque el robot no podría abrir otra corrida de ese conjunto. Por cada parte en modo `cambios` responde `desde` = el mayor `actualizado_en_sap` de la empresa en MySQL (`null` si no hay filas: trae todo). Lista vacía: no hay nada que hacer.
+- Al iniciar una corrida, cada id de `solicitudes` debe estar `tomada`, ser de la misma empresa y conjunto y pedir solo partes que la corrida trae; si no, 422. La solicitud queda ligada a la corrida (`run_id`).
+- Las solicitudes se cierran con su corrida (`Domain\Runs\RunFinished`, en la misma transacción, `SettleRequests`): cerrada → `terminada`; fallida → `fallida` con el error; vencida → `vencida`. Las hermanas que esperaban sin hora reciben la suya: 3 minutos después si terminó bien, de inmediato si falló o venció, y siempre fuera de las franjas bloqueadas.
+- `sap:vencer` además vence las solicitudes que llevan 30 minutos `tomada`. Si su corrida cierra bien después, los datos se aplican igual y la solicitud se queda `vencida`: es la señal de que tardó demasiado.

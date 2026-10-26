@@ -5,6 +5,7 @@ namespace App\Modules\Sap\Models;
 use App\Modules\Sap\Contracts\Enums\Company;
 use App\Modules\Sap\Contracts\Enums\Dataset;
 use App\Modules\Sap\Contracts\Enums\Part;
+use App\Modules\Sap\Domain\Runs\RunFinished;
 use App\Modules\Sap\Domain\Runs\RunState;
 use App\Modules\Sap\Domain\Runs\RunType;
 use Illuminate\Database\Eloquent\Model;
@@ -113,6 +114,9 @@ final class Run extends Model
 
             DB::table('robot_batch_keys')->where('run_id', $this->id)->delete();
             DB::table('robot_batches')->where('run_id', $this->id)->delete();
+
+            // Its update requests end in the same transaction.
+            event(new RunFinished($this));
 
             return true;
         });

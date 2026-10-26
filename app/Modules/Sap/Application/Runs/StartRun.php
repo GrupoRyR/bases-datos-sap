@@ -5,12 +5,15 @@ namespace App\Modules\Sap\Application\Runs;
 use App\Modules\Sap\Contracts\Enums\Company;
 use App\Modules\Sap\Contracts\Enums\Dataset;
 use App\Modules\Sap\Contracts\Enums\Part;
+use App\Modules\Sap\Contracts\Enums\RequestScope;
+use App\Modules\Sap\Contracts\Enums\RequestState;
 use App\Modules\Sap\Domain\Runs\PartMode;
 use App\Modules\Sap\Domain\Runs\RunState;
 use App\Modules\Sap\Domain\Runs\RunType;
 use App\Modules\Sap\Domain\Values\SapTime;
 use App\Modules\Sap\Http\Exceptions\RobotRequestRejected;
 use App\Modules\Sap\Models\Run;
+use App\Modules\Sap\Models\UpdateRequest;
 use Illuminate\Database\UniqueConstraintViolationException;
 use LogicException;
 
@@ -56,6 +59,10 @@ final class StartRun
             $this->fail('extraida_en', 'Debe ser una hora ISO 8601 con zona.');
         }
 
+        if ($dataset !== null && $company !== null && $requests !== []) {
+            $this->checkRequests($requests, $dataset, $company, $parts);
+        }
+
         if ($this->errors !== [] || $dataset === null || $company === null || $type === null || $extractedAt === null) {
             throw RobotRequestRejected::invalid('La corrida no cumple el contrato.', $this->errors);
         }
@@ -79,7 +86,10 @@ final class StartRun
         // the refused insert and the lookup.
         foreach ([1, 2] as $attempt) {
             try {
-                return Run::create([...$attributes, 'abierta_hasta' => now()->addMinutes(Run::IDLE_MINUTES)]);
+                $run = Run::create([...$attributes, 'abierta_hasta' => now()->addMinutes(Run::IDLE_MINUTES)]);
+                UpdateRequest::whereIn('id', $requests)->update(['run_id' => $run->id]);
+
+                return $run;
             } catch (UniqueConstraintViolationException) {
                 $open = Run::where('abierta_lock', $attributes['abierta_lock'])->first();
 
@@ -143,6 +153,28 @@ final class StartRun
         }
 
         return $requests;
+    }
+
+    /**
+     * Every request the run serves must be taken, of the same company and
+     * dataset, and ask only for parts the run brings (contract section 4.1).
+     *
+     * @param  list<int>  $ids
+     * @param  array<string, string>  $parts
+     */
+    private function checkRequests(array $ids, Dataset $dataset, Company $company, array $parts): void
+    {
+        $found = UpdateRequest::whereIn('id', $ids)->get()->keyBy('id');
+
+        foreach ($ids as $id) {
+            $request = $found->get($id);
+            $asked = $request === null ? [] : array_map(fn (Part $part): string => $part->value, RequestScope::partsFor($request->conjunto, $request->parte));
+
+            if ($request === null || $request->estado !== RequestState::Taken || $request->empresa !== $company
+                || $request->conjunto !== $dataset || array_diff($asked, array_keys($parts)) !== []) {
+                $this->fail('solicitudes', "La solicitud {$id} no está tomada, es de otra empresa o conjunto, o pide partes que la corrida no trae.");
+            }
+        }
     }
 
     private function cutOff(mixed $date, Dataset $dataset): ?string
