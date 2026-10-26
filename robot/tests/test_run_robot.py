@@ -221,3 +221,34 @@ def test_sin_vpn_no_crea_la_vpn(entorno, correos):
     assert _main(e, "--completa", "--sin-vpn", fabrica_vpn=no_llamar) == 0
     assert not [ev for ev in e.linea if ev[0] == "vpn"]
     assert [c[3] for c in _corridas(e)] == ["cerrada"] * 4
+
+
+def test_error_de_hana_no_lleva_el_texto_del_driver(entorno, correos):
+    e = entorno
+    e.hana.partes_que_fallan.add(("SGX", "marcas"))
+    e.hana.texto_de_falla = "invalid value 'CSGX001' for column CardCode"
+    assert _main(e, "--completa") == 1
+    maestros_sgx = e.servidor.corridas[1]
+    assert maestros_sgx.estado == "fallida"
+    assert "SGX marcas" in maestros_sgx.error
+    assert "CSGX001" not in maestros_sgx.error
+    assert "CSGX001" not in json.dumps(correos)
+    assert "CSGX001" not in json.dumps(_estado())
+
+
+@pytest.mark.parametrize("texto, esperado", [
+    ("Error ejecutando la consulta 'SGX marcas': valor 'CSGX001' inválido",
+     "Error ejecutando la consulta 'SGX marcas'; revisa robot/logs/robot.log."),
+    ("Consulta 'SDC precios': HANA no encuentra una tabla (invalid table name: X 'CSGX001'). Puede faltar",
+     "Consulta 'SDC precios': HANA no encuentra una tabla; revisa HANA_SGX_SCHEMA / "
+     "HANA_SDC_SCHEMA y robot/logs/robot.log."),
+    ("No se pudo conectar a HANA (SGX) tras 3 intentos: host 'CSGX001' rechazó",
+     "No se pudo conectar a HANA (SGX) tras 3 intentos; revisa robot/logs/robot.log."),
+    ("La consulta 'SGX clientes' no devolvió resultados.",
+     "La consulta 'SGX clientes' no devolvió resultados."),
+])
+def test_mensaje_seguro_de_hana_corta_el_texto_del_driver(texto, esperado):
+    import extraccion
+    import hana
+
+    assert extraccion.mensaje_seguro(hana.HanaError(texto)) == esperado

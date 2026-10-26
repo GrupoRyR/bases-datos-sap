@@ -53,6 +53,26 @@ class FalloTrabajo(RuntimeError):
 
 
 _RE_LLAVES = re.compile(r"^(Parte \w+: \d+ llaves repetidas \([^)]*\))")
+_RE_TABLA = re.compile(r"^Consulta '([^']*)': HANA no encuentra una tabla")
+_RE_ETIQUETA = re.compile(r"^(.*?'[^']*'): ")
+_RE_CONEXION = re.compile(r"^(No se pudo conectar a HANA \(\w+\) tras \d+ intentos): ")
+_VER_LOG = "revisa robot/logs/robot.log."
+
+
+def _hana_seguro(texto: str) -> str:
+    """Corta el texto del driver de un HanaError: puede citar valores de SAP.
+
+    Queda solo el prefijo propio (la etiqueta de la consulta o la empresa); el
+    texto completo sigue en el log local.
+    """
+    m = _RE_TABLA.match(texto)
+    if m:
+        return (f"Consulta '{m.group(1)}': HANA no encuentra una tabla; revisa "
+                "HANA_SGX_SCHEMA / HANA_SDC_SCHEMA y robot/logs/robot.log.")
+    m = _RE_ETIQUETA.match(texto) or _RE_CONEXION.match(texto)
+    if m:
+        return f"{m.group(1)}; {_VER_LOG}"
+    return texto
 
 
 def mensaje_seguro(exc: BaseException) -> str:
@@ -63,7 +83,9 @@ def mensaje_seguro(exc: BaseException) -> str:
     if isinstance(exc, esquema.ValorInvalido):
         # serializar() termina el mensaje con " (tipo valor)": se quita el valor.
         return str(exc).split(" (", 1)[0]
-    if isinstance(exc, (esquema.ColumnasInesperadas, hana.HanaError, VpnError, FalloTrabajo)):
+    if isinstance(exc, hana.HanaError):
+        return _hana_seguro(str(exc).strip())
+    if isinstance(exc, (esquema.ColumnasInesperadas, VpnError, FalloTrabajo)):
         return str(exc).strip()
     return f"Error inesperado ({type(exc).__name__}); revisa robot/logs/robot.log."
 

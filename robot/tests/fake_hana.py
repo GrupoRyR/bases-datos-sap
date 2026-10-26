@@ -188,7 +188,7 @@ class _Cursor:
         h.ejecutadas.append(Ejecucion(self.empresa, tipo, parte, params))
         h.linea.append(("hana", "consulta", self.empresa, parte, tipo))
         if (self.empresa, parte) in h.partes_que_fallan:
-            raise RuntimeError("falla simulada de la consulta")
+            raise RuntimeError(h.texto_de_falla)
 
         filas = list(h.datos.get(self.empresa, {}).get(parte, []))
         if 'X."actualizado_en_sap" >= ?' in sql:
@@ -232,6 +232,7 @@ class HanaFalsa:
     ejecutadas: list[Ejecucion] = field(default_factory=list)
     empresas_que_fallan: set[str] = field(default_factory=set)
     partes_que_fallan: set[tuple[str, str]] = field(default_factory=set)
+    texto_de_falla: str = "falla simulada de la consulta"  # texto del driver en una falla
     columnas_que_faltan: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     _textos: dict[str, dict[str, str]] = field(default_factory=dict)
 
