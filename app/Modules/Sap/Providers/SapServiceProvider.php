@@ -4,10 +4,12 @@ namespace App\Modules\Sap\Providers;
 
 use App\Modules\Sap\Application\Apps\AppKeys;
 use App\Modules\Sap\Application\Requests\PlaceRequest;
+use App\Modules\Sap\Application\Requests\SettleRequests;
 use App\Modules\Sap\Console\CreateAppKeyCommand;
 use App\Modules\Sap\Console\ExpireCommand;
 use App\Modules\Sap\Contracts\ClientAppKeys;
 use App\Modules\Sap\Contracts\UpdateRequests;
+use App\Modules\Sap\Domain\Runs\RunFinished;
 use App\Modules\Sap\Http\Middleware\DecodeRobotBody;
 use App\Modules\Sap\Http\Middleware\LimitRobotPayload;
 use App\Modules\Sap\Http\Middleware\VerifyRobotSignature;
@@ -16,6 +18,7 @@ use App\Support\Modules\ModuleServiceProvider;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 
@@ -51,6 +54,8 @@ final class SapServiceProvider extends ModuleServiceProvider
     protected function bootModule(): void
     {
         $this->commands([ExpireCommand::class, CreateAppKeyCommand::class]);
+
+        Event::listen(RunFinished::class, [SettleRequests::class, 'onRunFinished']);
 
         // The apps: per key, since apps on the same server share an IP; a
         // request without a key counts against its IP.
