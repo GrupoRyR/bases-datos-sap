@@ -2,8 +2,11 @@
 
 namespace App\Modules\Sap\Providers;
 
+use App\Modules\Sap\Application\Apps\AppKeys;
 use App\Modules\Sap\Application\Requests\PlaceRequest;
+use App\Modules\Sap\Console\CreateAppKeyCommand;
 use App\Modules\Sap\Console\ExpireCommand;
+use App\Modules\Sap\Contracts\ClientAppKeys;
 use App\Modules\Sap\Contracts\UpdateRequests;
 use App\Modules\Sap\Http\Middleware\DecodeRobotBody;
 use App\Modules\Sap\Http\Middleware\LimitRobotPayload;
@@ -40,11 +43,19 @@ final class SapServiceProvider extends ModuleServiceProvider
     {
         // The panel's "Actualizar datos" button asks through this contract.
         $this->app->bind(UpdateRequests::class, PlaceRequest::class);
+
+        // The panel creates and revokes app keys through this contract.
+        $this->app->bind(ClientAppKeys::class, AppKeys::class);
     }
 
     protected function bootModule(): void
     {
-        $this->commands([ExpireCommand::class]);
+        $this->commands([ExpireCommand::class, CreateAppKeyCommand::class]);
+
+        // The apps: per IP, before the key is checked.
+        RateLimiter::for('sap-apps', fn (Request $request) => Limit::perMinute((int) config('sap.apps.requests_per_minute'))
+            ->by('sap-apps|'.$request->ip())
+            ->response(fn (Request $request, array $headers) => response()->json(['message' => 'Demasiadas peticiones.'], 429, $headers)));
 
         // Every robot route, in this order: rate limit, size, signature, body.
         Route::middlewareGroup('sap.robot', [
