@@ -1,31 +1,18 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+import logging
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
 import config
-import notificar
 import run_robot
 from fake_hana import VpnFalsa, revisar_fases
 from trabajos import trabajos_de_solicitudes
 
 HOY = date(2026, 10, 26)
-
-
-@pytest.fixture
-def correos(monkeypatch) -> list:
-    enviados: list = []
-    monkeypatch.setattr(notificar, "avisar_fallos", lambda cfg, fallos, detalle="": enviados.append(list(fallos)))
-    return enviados
-
-
-@pytest.fixture
-def entorno(escenario, entorno_completo, monkeypatch):
-    monkeypatch.setenv("BASES_SAP_CSV_DIR", str(escenario.csv_dir))
-    return escenario
 
 
 def _main(e, *argumentos, vpn=None, **kwargs):
@@ -406,3 +393,82 @@ def test_los_modos_se_excluyen(entorno):
         run_robot.main(["--completa", "--catalogo"])
     with pytest.raises(SystemExit):
         run_robot.main(["--archivo", "todo"])
+
+
+# --- Candado y franjas bloqueadas (T6) ----------------------------------------------
+
+CANDADO = "robot.lock"
+
+
+def test_completa_espera_el_candado_y_corre(entorno, correos, candado_ajeno):
+    e = entorno
+    ruta = candado_ajeno()  # una revisión de solicitudes que está terminando
+    esperas: list[float] = []
+
+    def dormir(segundos):
+        esperas.append(segundos)
+        if len(esperas) == 2:
+            ruta.unlink()
+
+    assert _main(e, "--completa", dormir=dormir) == 0
+    assert esperas == [10, 10]
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 4
+    assert not (config.STATE_DIR / CANDADO).exists()
+
+
+def test_completa_sin_candado_en_20_minutos_avisa(entorno, correos, candado_ajeno):
+    e = entorno
+    ruta = candado_ajeno()
+    esperas: list[float] = []
+    assert _main(e, "--completa", dormir=esperas.append) == 1
+    assert sum(esperas) == 20 * 60
+    assert e.vpn.conexiones == 0
+    assert e.servidor.peticiones == []
+    assert [etapa for etapa, _ in correos[0]] == ["CANDADO"]
+    assert ruta.exists()
+    assert (_estado()["estado"], _estado()["etapa"]) == ("ERROR", "CANDADO")
+
+
+@pytest.mark.parametrize("argumentos", [("--completa",), ("--archivo", "fotos")])
+def test_dentro_de_una_franja_espera_a_que_pase(entorno, correos, argumentos):
+    # El PC prendió tarde (StartWhenAvailable): la tarea arranca a las 11:50, dentro
+    # de las franjas de las 12:00 y las 12:30, y corre a las 12:46, cuando ya pasaron.
+    e = entorno
+    a_las_1150 = lambda: datetime(2026, 10, 26, 11, 50, tzinfo=config.BOGOTA)  # noqa: E731
+    esperas: list[float] = []
+
+    def dormir(segundos):
+        assert e.vpn.conexiones == 0  # la espera es antes de subir la VPN
+        esperas.append(segundos)
+
+    assert _main(e, *argumentos, ahora=a_las_1150, dormir=dormir) == 0
+    assert esperas == [56 * 60]
+    assert e.vpn.conexiones == 1
+    assert correos == []
+
+
+def test_forzar_corre_dentro_de_la_franja_sin_esperar(entorno, correos):
+    e = entorno
+    a_las_1150 = lambda: datetime(2026, 10, 26, 11, 50, tzinfo=config.BOGOTA)  # noqa: E731
+
+    def no_esperar(segundos):
+        raise AssertionError("con --forzar no se espera la franja")
+
+    assert _main(e, "--completa", "--forzar", ahora=a_las_1150, dormir=no_esperar) == 0
+    assert e.vpn.conexiones == 1
+
+
+@pytest.mark.parametrize("modo", ["--diagnostico", "--catalogo"])
+def test_diagnostico_con_el_candado_ocupado_sale_sin_vpn(entorno, correos, monkeypatch, candado_ajeno, modo, caplog):
+    e = entorno
+    prohibida = _sin_api(e, monkeypatch)
+    candado_ajeno()
+
+    def no_llamar(*args):
+        raise AssertionError("no debía usar la VPN ni esperar")
+
+    with caplog.at_level(logging.WARNING, logger="bases_sap"):
+        assert _main(e, modo, fabrica_api=prohibida, fabrica_vpn=no_llamar, dormir=no_llamar) == 1
+    assert "unos minutos" in caplog.text
+    assert e.linea == []
+    assert correos == []
