@@ -31,10 +31,17 @@ def test_solo_hay_archivo_del_esquema():
         consultas.ruta_consulta("maestros/precios.sql", "HBT_SDERIVADOS")
 
 
-def test_fuera_de_maestros_no_hay_archivo_por_esquema():
-    _escribir(config.QUERIES_DIR / "cartera" / "SEGUREX" / "cartera.sql", "SELECT 2")
-    comun = _escribir(config.QUERIES_DIR / "cartera" / "cartera.sql", "SELECT 1")
-    assert consultas.ruta_consulta("cartera/cartera.sql", "SEGUREX") == comun
+def test_cartera_tambien_tiene_archivo_por_esquema():
+    propio = _escribir(config.QUERIES_DIR / "cartera" / "SEGUREX" / "cartera.sql", "SELECT 2")
+    otro = _escribir(config.QUERIES_DIR / "cartera" / "HBT_SDERIVADOS" / "cartera.sql", "SELECT 3")
+    assert consultas.ruta_consulta("cartera/cartera.sql", "SEGUREX") == propio
+    assert consultas.ruta_consulta("cartera/cartera.sql", "HBT_SDERIVADOS") == otro
+
+
+def test_fuera_de_maestros_y_cartera_no_hay_archivo_por_esquema():
+    _escribir(config.QUERIES_DIR / "diagnostico" / "SEGUREX" / "listas_precios.sql", "SELECT 2")
+    comun = _escribir(config.QUERIES_DIR / "diagnostico" / "listas_precios.sql", "SELECT 1")
+    assert consultas.ruta_consulta("diagnostico/listas_precios.sql", "SEGUREX") == comun
 
 
 def test_falta_la_consulta():

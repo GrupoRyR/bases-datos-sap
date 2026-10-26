@@ -50,7 +50,7 @@ Con lo que dejan en `_CATALOGO` y `_DIAGNOSTICO`, revisa lo que las consultas ma
 - [ ] `@HBT_MUNICIPIO` existe en Derivados y trae los municipios.
 - [ ] `CRD1.County` guarda el código del municipio.
 - [ ] `activo`: que `validFor = 'N'` o `frozenFor = 'Y'` marque de verdad a los socios y artículos inactivos.
-- [ ] En Derivados, que las cuentas de cartera de la consulta sean las correctas.
+- [ ] La cartera de Derivados (`queries\cartera\HBT_SDERIVADOS`, cuentas 13050501 y 13051005) da las mismas cifras que el informe de cartera de SAP. Segurex usa 13050505 y 13051005 (`queries\cartera\SEGUREX`).
 - [ ] Los nombres de columna del archivo (`queries\archivo`) contra `_CATALOGO\<empresa>\columnas`.
 - [ ] El tamaño de `ADOC`, `ADO1`, `AJDT` y `AJD1` en `_CATALOGO\<empresa>\tablas` antes de activar `BASES_SAP_ARCHIVO_HISTORIAL_DOCUMENTOS`.
 

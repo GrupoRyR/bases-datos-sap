@@ -83,11 +83,42 @@ def test_precios_solo_lista_publica():
         assert "\"ListName\" = 'PÚBLICA'" in sql
 
 
-def test_cartera_trae_todas_las_etiquetas_del_esquema():
-    sql = _texto(QUERIES / PARTES["cartera"].consulta)
+CUENTAS_DE_CARTERA = {
+    "SEGUREX": ("13050505", "13051005"),
+    "HBT_SDERIVADOS": ("13050501", "13051005"),
+}
+
+
+def test_cartera_tiene_consulta_en_cada_esquema(monkeypatch):
+    monkeypatch.setattr(config, "QUERIES_DIR", QUERIES)
+    for esquema in ESQUEMAS:
+        ruta = consultas.ruta_consulta(PARTES["cartera"].consulta, esquema)
+        assert ruta == QUERIES / "cartera" / esquema / "cartera.sql"
+    assert not (QUERIES / "cartera" / "cartera.sql").exists()
+
+
+@pytest.mark.parametrize("esquema", ESQUEMAS)
+def test_cartera_trae_todas_las_etiquetas_del_esquema(esquema: str):
+    sql = _texto(QUERIES / "cartera" / esquema / "cartera.sql")
     for columna in PARTES["cartera"].columnas:
         assert f'"{columna.hana}"' in sql, columna.hana
     assert "GESTOR_CARTERA/etl/queries/cartera.sql" in sql
+
+
+@pytest.mark.parametrize("esquema, cuentas", CUENTAS_DE_CARTERA.items())
+def test_cartera_filtra_las_cuentas_de_su_empresa(esquema: str, cuentas: tuple[str, ...]):
+    codigo = _sin_comentarios(_texto(QUERIES / "cartera" / esquema / "cartera.sql"))
+    lista = ", ".join(f"'{c}'" for c in cuentas)
+    assert f'T0."Account" IN ({lista})' in codigo
+
+
+def test_cartera_de_las_dos_empresas_solo_difiere_en_las_cuentas():
+    def sin_cuentas(esquema: str) -> list[str]:
+        codigo = _sin_comentarios(_texto(QUERIES / "cartera" / esquema / "cartera.sql"))
+        codigo = re.sub(r'T0\."Account" IN \([^)]*\)', "", codigo)
+        return [linea for linea in codigo.splitlines() if linea.strip()]
+
+    assert sin_cuentas("SEGUREX") == sin_cuentas("HBT_SDERIVADOS")
 
 
 @pytest.mark.parametrize("archivo", [
@@ -99,7 +130,7 @@ def test_cartera_trae_todas_las_etiquetas_del_esquema():
     "maestros/contactos.sql",
     "maestros/clientes.sql",
     "maestros/proveedores.sql",
-    "cartera/cartera.sql",
+    "cartera/HBT_SDERIVADOS/cartera.sql",
     "diagnostico/listas_precios.sql",
 ])
 def test_lo_no_confirmado_esta_marcado(archivo: str):

@@ -16,20 +16,21 @@ import config
 from config import BOGOTA
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
+# Carpetas donde una empresa puede traer su propia versión de una consulta.
+CARPETAS_POR_ESQUEMA = ("maestros", "cartera")
 
 
 def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
-    """Ruta de una consulta relativa a robot/queries (ej: "maestros/precios.sql").
+    """Ruta de una consulta relativa a robot/queries (ej: "cartera/cartera.sql").
 
-    Para un archivo directo bajo maestros/, `maestros/<ESQUEMA>/<archivo>` gana
-    sobre `maestros/<archivo>` (la lista PÚBLICA puede llamarse distinto en cada
-    empresa).
+    Para un archivo directo bajo maestros/ o cartera/, `<carpeta>/<ESQUEMA>/<archivo>`
+    gana sobre `<carpeta>/<archivo>` (las cuentas de cartera cambian por empresa).
     """
     base = config.QUERIES_DIR  # se lee aquí: las pruebas lo cambian
     partes = PurePosixPath(nombre_relativo).parts
     candidatas: list[Path] = []
-    if len(partes) == 2 and partes[0] == "maestros" and esquema:
-        candidatas.append(base / "maestros" / esquema / partes[1])
+    if len(partes) == 2 and partes[0] in CARPETAS_POR_ESQUEMA and esquema:
+        candidatas.append(base / partes[0] / esquema / partes[1])
     candidatas.append(base.joinpath(*partes))
     for ruta in candidatas:
         if ruta.is_file():
