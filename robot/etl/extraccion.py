@@ -205,6 +205,56 @@ def _extraer_empresa(
         log.error("No se pudo leer HANA de %s: %s", empresa, exc)
 
 
+def sesion(
+    cfg: Config,
+    empresas: list[str],
+    paso: Extra,
+    *,
+    robot_vpn: Any = None,
+    conectar: Callable[..., Any] = hana.conectar,
+    sin_vpn: bool = False,
+) -> list[tuple[str, str]]:
+    """Una sesión de VPN sin trabajos de la API (archivo, catálogo, diagnóstico).
+
+    Sube la VPN, abre una conexión de HANA por empresa, corre `paso(conn, empresa)`
+    y baja la VPN en `finally`. `paso` solo lee: escribir es de la fase 2. Devuelve
+    los fallos de VPN y de conexión como (etapa, mensaje); los de cada tabla los
+    lleva el propio paso.
+    """
+    fallos: list[tuple[str, str]] = []
+    if not empresas:
+        return fallos
+    robot = None if sin_vpn else (robot_vpn or RobotVPN(cfg.vpn))
+    try:
+        if robot is None:
+            log.info("Se omite la gestión de la VPN (--sin-vpn).")
+        else:
+            try:
+                robot.conectar()
+            except VpnError as exc:
+                log.error("FALLO en la etapa VPN: %s", exc)
+                return [("VPN", mensaje_seguro(exc))]
+        for empresa in empresas:
+            empresa_cfg = cfg.hana.empresas.get(empresa)
+            if empresa_cfg is None:
+                fallos.append(("CONFIGURACION", f"Empresa sin configuración de HANA: {empresa}."))
+                continue
+            try:
+                with conectar(cfg.hana, empresa_cfg) as conn:
+                    paso(conn, empresa)
+            except Exception as exc:
+                etapa = "HANA" if isinstance(exc, hana.HanaError) else "EXTRACCION"
+                log.error("Falló la lectura de HANA de %s: %s", empresa, exc)
+                fallos.append((etapa, f"{empresa}: {mensaje_seguro(exc)}"))
+    finally:
+        if robot is not None:
+            try:
+                robot.desconectar()
+            except Exception:
+                log.exception("Falló al desconectar la VPN (se ignora).")
+    return fallos
+
+
 def extraer(
     cfg: Config,
     trabajos: list[Trabajo],
