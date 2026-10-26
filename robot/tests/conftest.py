@@ -1,6 +1,7 @@
 """Aislamiento de las pruebas: nunca se lee el robot/.env real ni se escribe en robot/logs."""
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -85,6 +86,30 @@ AHORA = datetime(2026, 10, 26, 2, 0, 5, tzinfo=config.BOGOTA)
 
 
 @pytest.fixture
+def candado_ajeno():
+    """Deja robot/state/robot.lock tomado por otro proceso (vigente a la hora AHORA)."""
+    def poner(tomado_en: datetime = AHORA, pid: int = 4242) -> Path:
+        ruta = config.STATE_DIR / "robot.lock"
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        ruta.write_text(json.dumps({"pid": pid, "tomado_en": tomado_en.isoformat()}), encoding="utf-8")
+        return ruta
+
+    return poner
+
+
+@pytest.fixture
+def correos(monkeypatch) -> list:
+    """Cada llamada a notificar.avisar_fallos queda como la lista de sus fallos."""
+    import notificar
+
+    enviados: list = []
+    monkeypatch.setattr(
+        notificar, "avisar_fallos", lambda cfg, fallos, detalle="": enviados.append(list(fallos))
+    )
+    return enviados
+
+
+@pytest.fixture
 def escenario(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """VPN, HANA y API falsas que comparten una línea de tiempo, y la carpeta en tmp.
 
@@ -137,3 +162,10 @@ def escenario(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
         csv_dir=cfg.csv_dir,
         ahora=lambda: AHORA,
     )
+
+
+@pytest.fixture
+def entorno(escenario, entorno_completo, monkeypatch) -> SimpleNamespace:
+    """El escenario con un .env completo (en variables) que apunta la carpeta al tmp."""
+    monkeypatch.setenv("BASES_SAP_CSV_DIR", str(escenario.csv_dir))
+    return escenario

@@ -119,10 +119,10 @@ Registry in `archivo.py`: carpeta, table, SQL file, mode (`foto` or `registro`),
 |---|---|---|---|---|
 | T1 | Robot base from the template (config, logging, VPN, HANA, alerts), requirements, pytest setup, `.env.example`, CI Python job | `feat/robot-base` | delegated writer (2+ non-trivial files) | PR #14 open |
 | T2 | HMAC signing with the contract vector and the API client with retries, gzip and a fake API | `feat/robot-api` | delegated writer | PR #15 open |
-| T3 | Parte schema, value serialization, MAESTROS, CARTERA, catalog and diagnostic queries, query loader | `feat/robot-consultas` | delegated writer | PR open |
-| T4 | Jobs, two-phase extraction and sending, folder layout and retention, nightly run and cartera photo | `feat/robot-corridas` | delegated writer | pending |
-| T5 | Archive categories (fotos, registros), `--archivo`, `--catalogo`, `--diagnostico` | `feat/robot-archivo` | delegated writer | pending |
-| T6 | Lock, blocked windows, request check script, scheduled tasks script, robot `LEEME.md` | `feat/robot-solicitudes` | delegated writer | pending |
+| T3 | Parte schema, value serialization, MAESTROS, CARTERA, catalog and diagnostic queries, query loader | `feat/robot-consultas` | delegated writer | PR #16 open |
+| T4 | Jobs, two-phase extraction and sending, folder layout and retention, nightly run and cartera photo | `feat/robot-corridas` | delegated writer | PR #19 open |
+| T5 | Archive categories (fotos, registros), `--archivo`, `--catalogo`, `--diagnostico` | `feat/robot-archivo` | delegated writer | PR #21 open |
+| T6 | Lock, blocked windows, request check script, scheduled tasks script, robot `LEEME.md` | `feat/robot-solicitudes` | delegated writer | PR open |
 
 ## Acceptance
 
@@ -160,6 +160,25 @@ Decision (user, 2026-10-26): `robot/` keeps Spanish identifiers and comments lik
 - Checks: `python -m pytest` 269 passed locally.
 - Contract notes for «Datos y API»: `precios.activo` has no rule (robot sends `true`); `municipios.codigo` and `direcciones.municipio_codigo` have no type (robot sends text); `direcciones` has no `activo` column, so the API keeps its own.
 
+- `code-review` (high): 1 fixed (case-insensitive keys), 1 no change (trim collisions already caught), 1 skipped (one bad SAP row fails the parte, as the contract requires).
+
+### T4 (done, PR #19)
+
+- Route: delegated writer. Commits `25fa139`, `5d8d287`, `70cdbf0`; review fixes `8d608bc` (HANA text kept out of /fallar), `32f4bef` (nightly takes requests after extraction).
+- Checks: `python -m pytest` 353 passed locally.
+
+### T5 (done, PR #21)
+
+- Route: delegated writer. Archive SQL, archive/catalog/diagnostic modules and modes in three commits.
+- `code-review` (high): 1 fixed by docs (load the registro history once by hand), 1 skipped pending the user (back-dated registro rows, e.g. a late ORTT rate).
+- Checks: `python -m pytest` 525 passed locally.
+
+### T6 (done)
+
+- Route: delegated writer. Lock and windows, the every-minute script, scheduled tasks and the full `robot/LEEME.md`; follow-ups: wait out a blocked window instead of skipping the run, retry the lock while Windows deletes it.
+- `code-review` (high): 1 fixed (lock PermissionError), 1 skipped (a long request run can reach the next window; the 15-minute margin is the guard).
+- Checks: `python -m pytest` 576 passed locally; PowerShell parse check of `instalar_tarea.ps1` with 0 errors.
+
 ## Next step
 
-T4 on `feat/robot-corridas`.
+User reviews and approves the merges bottom-up (#14 first, retargeting each next PR to `main`). Then the user runs `--catalogo` and `--diagnostico` against real SAP (plan §9, session 4) and the VALIDAR items are fixed.
