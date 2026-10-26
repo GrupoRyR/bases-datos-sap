@@ -176,7 +176,8 @@ class Bloqueo:
             pass
         try:
             return datetime.fromtimestamp(self.ruta.stat().st_mtime, BOGOTA)
-        except FileNotFoundError:
+        except OSError:
+            # Ya no está, o en Windows otro proceso lo está borrando (PermissionError).
             return None
 
     def _vencido(self) -> bool:

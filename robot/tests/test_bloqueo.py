@@ -182,3 +182,20 @@ def test_fin_de_franja_fuera_de_franja_es_el_mismo_momento() -> None:
     momento = datetime(2026, 10, 26, 2, 0, 5, tzinfo=BOGOTA)
 
     assert bloqueo.fin_de_franja(momento, ["00:00", "05:00"], 15) == momento
+
+
+def test_candado_que_se_esta_borrando_se_reintenta(tmp_path, monkeypatch) -> None:
+    ruta = tmp_path / "robot.lock"
+    ruta.write_text("no es json", encoding="utf-8")
+    candado = Bloqueo(ruta)
+    original = type(ruta).stat
+
+    def stat(self, *args, **kwargs):
+        if self == ruta:
+            ruta.unlink()  # el otro proceso termina de borrarlo
+            raise PermissionError("borrado pendiente")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(ruta), "stat", stat)
+
+    assert candado.tomar() is True
