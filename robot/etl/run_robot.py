@@ -24,6 +24,14 @@ Uso:
     python run_robot.py --archivo registros        # solo los registros del archivo
     python run_robot.py --catalogo                 # solo el catálogo
     python run_robot.py --diagnostico              # cifras de MAESTROS y CARTERA, sin enviar
+    python run_robot.py --completa --forzar        # no espera la franja bloqueada
+
+Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
+completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
+revisión de solicitudes que está terminando); el catálogo y el diagnóstico, que
+los corre el usuario, no esperan. Si la completa o el archivo arrancan dentro de
+una franja bloqueada de los otros robots (±15 minutos), esperan a que pase,
+salvo con --forzar.
 
 Salida: 0 todo bien, 1 algún fallo (se avisa por correo, salvo en el
 diagnóstico, que lo corre el usuario), 2 configuración incompleta, 130
@@ -35,10 +43,11 @@ import argparse
 import json
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Iterable
 
 import archivo
+import bloqueo
 import catalogo
 import config
 import diagnostico
@@ -55,6 +64,7 @@ from vpn import RobotVPN
 
 SOLICITUDES_POR_PAGINA = 20
 MAX_PAGINAS = 5
+ESPERA_CANDADO = timedelta(minutes=20)  # la nocturna y el domingo esperan a la revisión que termina
 
 log = registro.obtener("robot")
 
@@ -250,6 +260,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="Empresa a procesar (se puede repetir). Por defecto, todas.")
     parser.add_argument("--sin-vpn", action="store_true",
                         help="No gestionar la VPN (asume que ya está activa).")
+    parser.add_argument("--forzar", action="store_true",
+                        help="Correr la completa o el archivo aunque sea dentro de una franja "
+                             "bloqueada de los otros robots.")
     return parser
 
 
@@ -260,6 +273,7 @@ def main(
     fabrica_vpn: Callable[..., Any] = RobotVPN,
     conectar: Callable[..., Any] = hana.conectar,
     ahora: Callable[[], datetime] = config.ahora,
+    dormir: Callable[[float], None] = time.sleep,
 ) -> int:
     args = _parser().parse_args(argv)
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
@@ -289,7 +303,73 @@ def main(
             notificar.avisar_fallos(cfg.alertas, [("CONFIGURACION", str(exc))])
         return 2
 
+    programado = completa or modo.startswith("archivo")  # los modos de las tareas programadas
     avisar = modo != "diagnostico"  # el diagnóstico lo corre el usuario y ve el resumen
+    momento = ahora()
+    franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
+    if programado and franja:
+        mensaje = (f"Son las {momento:%H:%M}, dentro de la franja de las {franja} "
+                   f"(±{cfg.margen_franja_min} minutos) en que los otros robots usan la VPN")
+        if args.forzar:
+            log.warning("%s: se corre igual por --forzar.", mensaje)
+        else:
+            # Pasa cuando el PC prendió tarde (StartWhenAvailable): se espera a que la
+            # franja termine, antes de subir la VPN, en vez de perder la corrida.
+            try:
+                fin = bloqueo.fin_de_franja(momento, cfg.franjas, cfg.margen_franja_min)
+            except ValueError as exc:
+                log.error("%s", exc)
+                guardar_estado(estado="ERROR", modo=modo, etapa="FRANJA", error=str(exc))
+                notificar.avisar_fallos(cfg.alertas, [("FRANJA", str(exc))])
+                return 1
+            log.warning("%s: espero hasta las %s para no cruzarme con ellos.", mensaje, f"{fin:%H:%M}")
+            dormir((fin - momento).total_seconds())
+
+    candado = bloqueo.Bloqueo(reloj=ahora)
+    try:
+        if programado:
+            if not candado.tomar(dormir=dormir):
+                log.info("Otro proceso del robot tiene el candado (%s); espero hasta %s minutos.",
+                         candado.quien(), int(ESPERA_CANDADO.total_seconds() // 60))
+                if not candado.tomar(esperar=ESPERA_CANDADO, dormir=dormir):
+                    mensaje = (f"Otro proceso del robot no soltó el candado {candado.ruta} en "
+                               f"{int(ESPERA_CANDADO.total_seconds() // 60)} minutos ({candado.quien()}).")
+                    log.error(mensaje)
+                    guardar_estado(estado="ERROR", modo=modo, etapa="CANDADO", error=mensaje)
+                    notificar.avisar_fallos(cfg.alertas, [("CANDADO", mensaje)])
+                    return 1
+        elif not candado.tomar():
+            log.warning("El robot está ocupado con otra ejecución (%s). Intenta de nuevo en unos "
+                        "minutos.", candado.quien())
+            return 1
+    except KeyboardInterrupt:
+        log.warning("Ejecución cancelada por el usuario.")
+        return 130
+
+    try:
+        return _ejecutar(
+            cfg, args, modo, empresas, inicio, avisar=avisar, fabrica_api=fabrica_api,
+            fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora,
+        )
+    finally:
+        candado.soltar()
+
+
+def _ejecutar(
+    cfg: Config,
+    args: argparse.Namespace,
+    modo: str,
+    empresas: list[str],
+    inicio: float,
+    *,
+    avisar: bool,
+    fabrica_api: Callable[..., ApiCliente],
+    fabrica_vpn: Callable[..., Any],
+    conectar: Callable[..., Any],
+    ahora: Callable[[], datetime],
+) -> int:
+    """El modo pedido, con el candado ya tomado."""
+    completa = modo == "completa"
     trabajos: list[Trabajo] = []
     try:
         if completa:

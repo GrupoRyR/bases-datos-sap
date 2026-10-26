@@ -13,7 +13,7 @@ Devuelve los fallos como (etapa, mensaje), sin valores de SAP ni secretos.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Callable
 
 import config
@@ -94,7 +94,27 @@ def _guardar_csv(carpeta: Carpeta, r: Resultado, momento: datetime) -> None:
     for parte in t.partes:
         carpeta.guardar_corrida(t.conjunto, t.empresa, parte, r.columnas[parte], r.filas[parte], momento)
     if t.conjunto == "CARTERA" and t.tipo == "completa" and t.fecha_corte:
-        carpeta.guardar_historico_cartera(t.empresa, t.fecha_corte, r.columnas["cartera"], r.filas["cartera"])
+        columnas = r.columnas["cartera"]
+        carpeta.guardar_historico_cartera(
+            t.empresa, t.fecha_corte, columnas, foto_de_cartera(columnas, r.filas["cartera"], t.fecha_corte)
+        )
+
+
+def foto_de_cartera(columnas: list[str], filas: list[list[Any]], fecha_corte: str) -> list[list[Any]]:
+    """Filas de la foto diaria: los días de mora contra la fecha de corte (plan §4).
+
+    La consulta cuenta los días con la fecha de la corrida (las 02:00 de hoy);
+    la foto es el cierre de ayer, así que se cuentan contra la fecha de corte
+    para que no quede un día más vieja. La consulta no se cambia.
+    """
+    corte = date.fromisoformat(fecha_corte)
+    i_dias, i_vence = columnas.index("dias"), columnas.index("fecha_vencimiento")
+    foto = []
+    for fila in filas:
+        copia = list(fila)
+        copia[i_dias] = (corte - date.fromisoformat(fila[i_vence])).days
+        foto.append(copia)
+    return foto
 
 
 def _cerrar(api: ApiCliente, run_id: int, r: Resultado, lotes: list[Lote]) -> dict[str, Any]:

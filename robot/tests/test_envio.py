@@ -69,8 +69,18 @@ def test_completa_escribe_los_csv_y_la_foto_de_cartera(escenario):
         assert (raiz / "MAESTROS" / "SGX" / parte / "2026-10-26_0200.csv").is_file()
     corrida = raiz / "CARTERA" / "SGX" / "cartera" / "2026-10-26_0200.csv"
     historico = raiz / "CARTERA" / "SGX" / "historico" / "2026-10-25.csv"
-    assert _leer_csv(corrida)[0][0] == "codigo_sn"
-    assert historico.read_bytes() == corrida.read_bytes()
+    actual, foto = _leer_csv(corrida), _leer_csv(historico)
+    assert actual[0][0] == "codigo_sn"
+    assert foto[0] == actual[0] and len(foto) == len(actual)
+    # Plan §4: en la foto los días de mora se cuentan contra la fecha de corte
+    # (ayer), no contra la fecha de la corrida; lo demás queda igual.
+    i_dias, i_vence = actual[0].index("dias"), actual[0].index("fecha_vencimiento")
+    for fila_actual, fila_foto in zip(actual[1:], foto[1:]):
+        vence = date.fromisoformat(fila_actual[i_vence])
+        assert int(fila_foto[i_dias]) == (date(2026, 10, 25) - vence).days
+        assert [v for i, v in enumerate(fila_foto) if i != i_dias] == [
+            v for i, v in enumerate(fila_actual) if i != i_dias
+        ]
 
 
 def test_solicitud_no_escribe_foto_ni_conteo(escenario):
