@@ -82,3 +82,4 @@ Al cerrar una corrida `completa`, `Application\Apply\CountRun` compara por parte
 
 - La respuesta del cierre trae `conteo` (solo en la `completa`) y la corrida lo guarda.
 - `daily_counts` guarda el resultado del día (fecha de `extraida_en` en Bogotá), una fila por empresa y parte; si la corrida completa se repite el mismo día, la reemplaza. Es el criterio 3 de estabilidad del plan (§6), que el panel muestra; el panel lo leerá por un contrato de `Sap` cuando lo pida.
+- Un día sin filas de una empresa (su corrida completa falló o venció) **no** es un día estable: el panel debe exigir las filas de todas las partes de cada empresa y cruzarlas con `robot_runs`.
