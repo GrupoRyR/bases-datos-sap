@@ -51,3 +51,13 @@ Una corrida lleva un conjunto de una empresa (`robot_runs`, contrato §4). Estad
 - `POST /api/robot/v1/corridas/{id}/fallar` (`FailRun`): la marca `fallida` con el error del robot y descarta sus lotes.
 - Una corrida que pasa 30 minutos sin lotes queda `vencida`: al tocarla, al iniciar otra del mismo conjunto y empresa, y con `php artisan sap:vencer`, que el programador corre cada minuto.
 - Los errores del robot se responden con `Http\Exceptions\RobotRequestRejected`: 422 con `errors` (máximo 50), 409 con `estado` o `run_id`, 404 si la corrida no existe. El repositorio no trae mensajes de validación en español, así que el módulo escribe los suyos.
+
+## Lotes
+
+`POST /api/robot/v1/corridas/{id}/lotes` (`Application\Runs\ReceiveBatch`, contrato §4.2) guarda el lote en `robot_batches` hasta que la corrida cierra; nada llega a MAESTROS ni a CARTERA, así que un lote rechazado deja todo como estaba.
+
+- `batch` es entero desde 1, consecutivo en la corrida; el mismo `batch` con el mismo cuerpo (SHA-256 del JSON ya descomprimido) responde 200 con `duplicate`, y con otro cuerpo, 409.
+- `Domain\Batches\BatchRows` exige exactamente las columnas de la parte, en cualquier orden y sin repetir, y un valor por columna. Revisa tipos (enteros JSON, montos como texto con punto y hasta 2 decimales, booleanos, fechas, horas con zona), obligatorias no nulas ni vacías, texto de hasta 4.000 caracteres (el opcional se recorta al largo de su columna; la llave que no cabe se rechaza) y devuelve las filas en el orden de columnas de la parte, con las horas en Bogotá.
+- Una llave no se repite en la corrida, ni en el lote ni entre lotes (`robot_batch_keys`); CARTERA no tiene llave.
+- Un 422 cuenta en `lotes_rechazados` y la corrida sigue abierta. Cada lote aceptado extiende `abierta_hasta` 30 minutos.
+- El lote se guarda con la fila de la corrida bloqueada, así que no se cruza con su cierre ni con su vencimiento.
