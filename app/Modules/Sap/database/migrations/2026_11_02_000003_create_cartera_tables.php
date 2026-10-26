@@ -32,6 +32,10 @@ return new class extends Migration
 
     public function up(): void
     {
+        // See the MAESTROS tables migration: db:wipe leaves the connection
+        // disconnected and date columns need the server version.
+        DB::connection()->reconnectIfMissingConnection();
+
         Schema::create('cartera', function (Blueprint $table) {
             $this->receivables($table);
             $table->index(['empresa', 'slp_code']);

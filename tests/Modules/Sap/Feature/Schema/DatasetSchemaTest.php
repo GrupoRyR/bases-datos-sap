@@ -60,7 +60,8 @@ function inventedRow(Part $part, string $company, int|string $key = 'K1'): array
             'boolean' => true,
             'date' => '2026-10-25',
             'datetime' => '2026-10-25 09:15:02',
-            default => is_string($key) ? $key : 'K1',
+            // MySQL rejects a value longer than the column (direcciones.tipo is 1).
+            default => mb_substr(is_string($key) ? $key : 'K1', 0, $column->length ?? 255),
         };
     }
 

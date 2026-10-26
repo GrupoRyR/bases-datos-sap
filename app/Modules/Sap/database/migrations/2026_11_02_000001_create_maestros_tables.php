@@ -19,6 +19,11 @@ return new class extends Migration
 
     public function up(): void
     {
+        // db:wipe (tests) leaves the connection disconnected, and MySQL's
+        // grammar reads the server version for date columns without
+        // reconnecting. A no-op on a live connection.
+        DB::connection()->reconnectIfMissingConnection();
+
         $this->master('clientes', ['codigo'], fn (Blueprint $table) => $this->businessPartner($table));
         $this->master('proveedores', ['codigo'], fn (Blueprint $table) => $this->businessPartner($table));
 
