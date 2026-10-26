@@ -20,7 +20,7 @@ it('serves Core at the site root and the other modules under their key', functio
         ->call($this->app->getProvider($provider));
 
     expect($prefixes(CoreServiceProvider::class))->toBe(['', 'core'])
-        ->and($prefixes(SapServiceProvider::class))->toBe(['sap', 'sap'])
+        ->and($prefixes(SapServiceProvider::class))->toBe(['sap', ''])
         ->and($prefixes(PanelServiceProvider::class))->toBe(['panel', 'panel']);
 });
 
