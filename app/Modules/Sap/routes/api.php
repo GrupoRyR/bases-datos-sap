@@ -1,9 +1,12 @@
 <?php
 
+use App\Modules\Sap\Http\Controllers\Apps\AppRequestController;
+use App\Modules\Sap\Http\Controllers\Apps\StatusController;
 use App\Modules\Sap\Http\Controllers\Robot\CloseRunController;
 use App\Modules\Sap\Http\Controllers\Robot\FailRunController;
 use App\Modules\Sap\Http\Controllers\Robot\StartRunController;
 use App\Modules\Sap\Http\Controllers\Robot\StoreBatchController;
+use App\Modules\Sap\Http\Middleware\AuthenticateClientApp;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -17,4 +20,11 @@ Route::prefix('robot/v1')->name('robot.')->middleware('sap.robot')->group(functi
     Route::post('corridas/{run}/lotes', StoreBatchController::class)->whereNumber('run')->name('corridas.lotes');
     Route::post('corridas/{run}/cerrar', CloseRunController::class)->whereNumber('run')->name('corridas.cerrar');
     Route::post('corridas/{run}/fallar', FailRunController::class)->whereNumber('run')->name('corridas.fallar');
+});
+
+// The apps, each with its own key (contract section 7.4).
+Route::prefix('v1')->name('apps.')->middleware(['throttle:sap-apps', AuthenticateClientApp::class])->group(function () {
+    Route::post('solicitudes', [AppRequestController::class, 'store'])->name('solicitudes.store');
+    Route::get('solicitudes/{id}', [AppRequestController::class, 'show'])->whereNumber('id')->name('solicitudes.show');
+    Route::get('estado', StatusController::class)->name('estado');
 });

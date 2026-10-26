@@ -99,3 +99,13 @@ Una solicitud pide un conjunto completo o una parte de MAESTROS (`Contracts\Enum
 Nunca se rechaza. El botón del panel usa el contrato `Contracts\UpdateRequests`.
 
 El candado usa la caché de Laravel: en producción `CACHE_STORE` debe ser `database` o `file` (compartida entre procesos), nunca `array`. Si el candado no llega en 10 segundos, la solicitud se ubica igual (nunca se rechaza) y queda un aviso en el log.
+
+## API de las apps
+
+Cada app tiene su llave (`client_apps`): `bsap_` y 48 caracteres al azar; se guarda solo su SHA-256 y sus primeros 12 caracteres. Se crea con `php artisan sap:app "Nombre"` (la muestra una vez) o desde el panel por el contrato `Contracts\ClientAppKeys` (`issue`, `revoke`). Va en `Authorization: Bearer <llave>`; una llave revocada o desconocida recibe 401 `Llave inválida.` (`Http\Middleware\AuthenticateClientApp`). Límite: 60 peticiones por minuto por llave (las apps del mismo servidor comparten IP).
+
+| Ruta | Hace |
+|---|---|
+| `POST /api/v1/solicitudes` | Pide una actualización (`empresa`, `conjunto`, `parte`, `solicitado_por.correo` y `nombre`). 201 si creó una solicitud, 200 si se unió a una igual; responde `id`, `estado`, `correr_desde`, `empresa`, `conjunto`, `parte`. |
+| `GET /api/v1/solicitudes/{id}` | La solicitud con `tomada_en`, `terminada_en`, `error` y `solicitada_en`. Una app solo ve las solicitudes a las que se unió; las demás dan 404. |
+| `GET /api/v1/estado?empresa=SGX&conjunto=CARTERA` | Por cada parte, `actualizado_en`: la última vez que una corrida cerrada la aplicó (o `null`). |
