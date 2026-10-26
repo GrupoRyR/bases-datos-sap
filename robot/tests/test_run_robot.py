@@ -52,8 +52,10 @@ def test_completa_de_las_dos_empresas(entorno, correos):
         ("MAESTROS", "SDC", "completa", "cerrada"), ("CARTERA", "SDC", "completa", "cerrada"),
     ]
     revisar_fases(e.linea)
-    # Las solicitudes se piden antes de subir la VPN.
-    assert e.linea.index(("api", "tomar")) < e.linea.index(("vpn", "conectar"))
+    # Las solicitudes se toman con la VPN ya abajo y antes de abrir las corridas
+    # (vencen 30 minutos después de tomarlas, contrato §7.3).
+    assert e.linea.index(("vpn", "abajo")) < e.linea.index(("api", "tomar"))
+    assert e.linea.index(("api", "tomar")) < e.linea.index(("api", "iniciar"))
     assert e.vpn.conexiones == 1
     assert correos == []
     estado = _estado()
@@ -83,13 +85,42 @@ def test_completa_incluye_las_solicitudes_tomadas(entorno, correos):
     assert e.servidor.estado_solicitudes == {118: "terminada", 119: "terminada"}
 
 
-def test_solicitudes_de_otra_empresa_corren_como_solicitud(entorno, correos):
+def test_solicitudes_de_otra_empresa_quedan_tomadas(entorno, correos):
     e = entorno
     e.servidor.encolar_solicitud({"id": 7, "empresa": "SDC", "conjunto": "MAESTROS",
                                   "parte": "vendedores", "desde": {}})
     assert _main(e, "--completa", "--empresa", "SGX") == 0
-    assert _corridas(e)[-1] == ("MAESTROS", "SDC", "solicitud", "cerrada")
-    assert e.servidor.estado_solicitudes[7] == "terminada"
+    assert _corridas(e) == [
+        ("MAESTROS", "SGX", "completa", "cerrada"), ("CARTERA", "SGX", "completa", "cerrada"),
+    ]
+    assert e.hana.de("SDC") == []
+    # No se extrae: queda tomada y la API la vence.
+    assert e.servidor.estado_solicitudes[7] == "tomada"
+
+
+def test_solicitudes_tomadas_fallan_con_la_corrida_si_falla_la_vpn(entorno, correos):
+    e = entorno
+    e.servidor.encolar_solicitud({"id": 21, "empresa": "SGX", "conjunto": "CARTERA",
+                                  "parte": None, "desde": {}})
+    vpn = VpnFalsa(e.linea, fallar=True)
+    e.hana.vpn = vpn
+    assert _main(e, "--completa", vpn=vpn) == 1
+    assert e.linea.index(("vpn", "abajo")) < e.linea.index(("api", "tomar"))
+    assert e.servidor.corridas[2].solicitudes == [21]
+    assert e.servidor.estado_solicitudes[21] == "fallida"
+
+
+def test_solicitud_invalida_se_reporta_y_la_nocturna_sigue(entorno, correos):
+    e = entorno
+    e.servidor.encolar_solicitud({"id": 30, "empresa": "SGX", "conjunto": "INVENTARIO",
+                                  "parte": None, "desde": {}})
+    e.servidor.encolar_solicitud({"id": 31, "empresa": "SGX", "conjunto": "CARTERA",
+                                  "parte": None, "desde": {}})
+    assert _main(e, "--completa") == 1
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 4
+    assert e.servidor.corridas[2].solicitudes == [31]
+    assert [etapa for etapa, _ in correos[0]] == ["SOLICITUDES"]
+    assert "30" in correos[0][0][1]
 
 
 def test_toma_solicitudes_por_paginas(entorno, correos):

@@ -1,9 +1,12 @@
 """Robot de Bases de datos SAP: extrae de SAP HANA y envía a la API de la app.
 
 Flujo (dos fases, a propósito):
-    ANTES  - sin VPN:  pedir a la API las solicitudes tomadas (/solicitudes/tomar)
     FASE 1 - con VPN:  conectar Sophos -> todas las consultas de SAP -> bajar la VPN
-    FASE 2 - sin VPN:  CSV en BASES_SAP_CSV_DIR -> corridas en la API -> retención
+    FASE 2 - sin VPN:  tomar las solicitudes (/solicitudes/tomar) -> CSV en
+                       BASES_SAP_CSV_DIR -> corridas en la API -> retención
+
+Las solicitudes se toman después de extraer porque vencen 30 minutos después
+de tomarlas (contrato §7.3) y la fase 1 puede tardar más.
 
 Se separan porque el perfil VPN es de túnel completo (0.0.0.0/0): con la VPN
 arriba no hay salida a internet. Se extrae todo, se baja el túnel y recién ahí
@@ -23,8 +26,8 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import date, datetime, timezone
+from typing import Any, Callable, Iterable
 
 import config
 import envio
@@ -35,7 +38,7 @@ import registro
 from api import ApiCliente
 from carpeta import Carpeta
 from config import EMPRESAS, Config, ConfigError, cargar_config
-from trabajos import Trabajo, TrabajoInvalido, trabajos_completos
+from trabajos import Trabajo, TrabajoInvalido, trabajos_completos, trabajos_de_solicitudes
 from vpn import RobotVPN
 
 SOLICITUDES_POR_PAGINA = 20
@@ -67,8 +70,13 @@ def ejecutar_trabajos(
     conectar: Callable[..., Any] = hana.conectar,
     sin_vpn: bool = False,
     ahora: Callable[[], datetime] = config.ahora,
+    antes_de_enviar: Callable[[list[extraccion.Resultado]], None] | None = None,
 ) -> list[tuple[str, str]]:
-    """Fase 1 (extraer), fase 2 (CSV y API) y retención de la carpeta. Devuelve los fallos."""
+    """Fase 1 (extraer), fase 2 (CSV y API) y retención de la carpeta. Devuelve los fallos.
+
+    `antes_de_enviar(resultados)` corre con la VPN ya abajo, antes del envío
+    (la nocturna toma ahí las solicitudes).
+    """
     api = api or ApiCliente(cfg.api)
     carpeta = carpeta or Carpeta(cfg.csv_dir)
     momento = ahora()  # hora de la ejecución: nombre de los CSV
@@ -76,6 +84,8 @@ def ejecutar_trabajos(
     resultados = extraccion.extraer(
         cfg, trabajos, robot_vpn=robot_vpn, conectar=conectar, sin_vpn=sin_vpn, ahora=ahora
     )
+    if antes_de_enviar is not None:
+        antes_de_enviar(resultados)
     fallos = envio.enviar(api, carpeta, resultados, momento=momento, ahora=ahora)
     try:
         carpeta.purgar_corridas(momento.date())
@@ -86,7 +96,7 @@ def ejecutar_trabajos(
 
 
 def _tomar_solicitudes(api: ApiCliente) -> list[dict[str, Any]]:
-    """Solicitudes listas, sin VPN. Si la API falla, la nocturna sigue sin ellas."""
+    """Solicitudes listas, con la VPN abajo. Si la API falla, la nocturna sigue sin ellas."""
     tomadas: list[dict[str, Any]] = []
     for _ in range(MAX_PAGINAS):
         try:
@@ -102,6 +112,34 @@ def _tomar_solicitudes(api: ApiCliente) -> list[dict[str, Any]]:
     return tomadas
 
 
+def _asignar_solicitudes(
+    trabajos: Iterable[Trabajo], tomadas: list[dict[str, Any]], hoy: date
+) -> list[tuple[str, str]]:
+    """Pega cada solicitud tomada a la corrida completa de su empresa y conjunto (§7.3).
+
+    Ya no se extrae nada: una solicitud de una empresa que no está en esta
+    corrida queda tomada y la API la vence. Una inválida va a los fallos.
+    """
+    por_grupo = {(t.empresa, t.conjunto): t for t in trabajos}
+    fallos: list[tuple[str, str]] = []
+    for solicitud in tomadas:
+        try:
+            trabajos_de_solicitudes([solicitud], hoy)  # valida empresa, conjunto, parte y desde
+        except TrabajoInvalido as exc:
+            log.error("Solicitud inválida: %s", exc)
+            fallos.append(("SOLICITUDES", str(exc)))
+            continue
+        trabajo = por_grupo.get((solicitud["empresa"], solicitud["conjunto"]))
+        if trabajo is None:
+            log.warning(
+                "Solicitud %s (%s %s): esa empresa no está en esta corrida; queda tomada "
+                "y la API la vence.", solicitud.get("id"), solicitud["conjunto"], solicitud["empresa"],
+            )
+            continue
+        trabajo.solicitudes.append(solicitud["id"])
+    return fallos
+
+
 def _completa(
     cfg: Config,
     empresas: list[str],
@@ -114,17 +152,15 @@ def _completa(
 ) -> tuple[list[Trabajo], list[tuple[str, str]]]:
     api = fabrica_api(cfg.api)
     hoy = ahora().date()
-    fallos: list[tuple[str, str]] = []
-    tomadas = _tomar_solicitudes(api)
-    try:
-        trabajos = trabajos_completos(empresas, hoy, tomadas)
-    except TrabajoInvalido as exc:
-        # Esas solicitudes quedan tomadas y la API las vence; la nocturna corre igual.
-        log.error("Solicitudes inválidas: %s", exc)
-        fallos.append(("SOLICITUDES", str(exc)))
-        trabajos = trabajos_completos(empresas, hoy, [])
+    trabajos = trabajos_completos(empresas, hoy, [])
     log.info("Trabajos: %s.", ", ".join(t.nombre for t in trabajos))
-    fallos += ejecutar_trabajos(
+    fallos_solicitudes: list[tuple[str, str]] = []
+
+    def tomar(resultados: list[extraccion.Resultado]) -> None:
+        # Los resultados comparten los objetos Trabajo: las solicitudes llegan a la corrida.
+        fallos_solicitudes.extend(_asignar_solicitudes(trabajos, _tomar_solicitudes(api), hoy))
+
+    fallos = ejecutar_trabajos(
         cfg,
         trabajos,
         api=api,
@@ -132,8 +168,9 @@ def _completa(
         conectar=conectar,
         sin_vpn=sin_vpn,
         ahora=ahora,
+        antes_de_enviar=tomar,
     )
-    return trabajos, fallos
+    return trabajos, fallos_solicitudes + fallos
 
 
 def _parser() -> argparse.ArgumentParser:
