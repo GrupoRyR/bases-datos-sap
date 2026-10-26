@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import date, datetime
 
@@ -171,6 +172,21 @@ def test_parte_todo_vacia_falla_el_trabajo(escenario):
     [r] = _extraer(e, [trabajos_completos(["SDC"], HOY, [])[0]])
     assert r.etapa == "VALIDACION"
     assert "vendedores" in r.error and "0 filas" in r.error
+
+
+def test_proveedor_sin_nombre_no_frena_la_corrida(escenario, caplog):
+    e = escenario
+    e.hana.datos["SDC"]["proveedores"][0]["nombre"] = None
+    with caplog.at_level(logging.WARNING, logger="bases_sap.esquema"):
+        [r] = _extraer(e, [trabajos_completos(["SDC"], HOY, [])[0]])
+
+    assert r.error is None
+    codigos, nombres = _columna(r, "proveedores", "codigo"), _columna(r, "proveedores", "nombre")
+    assert nombres[0] == codigos[0] == "PSDC001"
+    assert nombres[1] == "Socio P2"
+    avisos = [x.getMessage() for x in caplog.records if x.levelno == logging.WARNING]
+    assert len(avisos) == 1 and "PSDC001 llegó sin nombre" in avisos[0]
+    assert r.conteo_sap["proveedores"] == 2
 
 
 def test_llave_repetida_falla_sin_mostrar_el_valor(escenario):

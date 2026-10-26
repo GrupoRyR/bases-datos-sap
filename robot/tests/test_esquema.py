@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
 import esquema
+from fake_hana import fila
 from esquema import (
     BOOL,
     ENTERO,
@@ -325,6 +327,42 @@ def test_preparar_filas_obligatoria_vacia():
                        [(1, "A", "Y"), (2, "   ", "Y")])
     mensaje = str(error.value)
     assert "marcas" in mensaje and "nombre" in mensaje and "fila 2" in mensaje
+
+
+def _socio_sin_nombre(parte: str, nombre) -> list[list]:
+    columnas = PARTES[parte].columnas
+    datos = fila(parte, 1, codigo="PE1008RP", nombre=nombre)
+    return preparar_filas(PARTES[parte], [c.hana for c in columnas], [tuple(datos[c.hana] for c in columnas)])
+
+
+@pytest.mark.parametrize("parte", ["clientes", "proveedores"])
+@pytest.mark.parametrize("nombre", [None, "", "   "])
+def test_socio_sin_nombre_usa_el_codigo_y_avisa(parte: str, nombre, caplog: pytest.LogCaptureFixture):
+    with caplog.at_level(logging.WARNING, logger="bases_sap.esquema"):
+        [resultado] = _socio_sin_nombre(parte, nombre)
+
+    nombres = PARTES[parte].nombres
+    assert resultado[nombres.index("codigo")] == "PE1008RP"
+    assert resultado[nombres.index("nombre")] == "PE1008RP"
+    assert resultado[nombres.index("activo")] is True  # el resto de la fila queda igual
+    [aviso] = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert parte in aviso.getMessage() and "fila 1" in aviso.getMessage()
+    assert "PE1008RP llegó sin nombre; se usa codigo como nombre" in aviso.getMessage()
+
+
+def test_socio_con_nombre_no_avisa(caplog: pytest.LogCaptureFixture):
+    with caplog.at_level(logging.WARNING, logger="bases_sap.esquema"):
+        [resultado] = _socio_sin_nombre("proveedores", " Proveedor Uno ")
+    assert resultado[PARTES["proveedores"].nombres.index("nombre")] == "Proveedor Uno"
+    assert caplog.records == []
+
+
+def test_otras_obligatorias_vacias_siguen_fallando_sin_respaldo():
+    # Solo el nombre de los socios tiene respaldo: un artículo sin nombre sigue frenando la parte.
+    columnas = PARTES["articulos"].columnas
+    datos = fila("articulos", 1, nombre=None)
+    with pytest.raises(ValorInvalido, match="nombre"):
+        preparar_filas(PARTES["articulos"], [c.hana for c in columnas], [tuple(datos[c.hana] for c in columnas)])
 
 
 def test_preparar_filas_valor_invalido_dice_parte_y_fila():
