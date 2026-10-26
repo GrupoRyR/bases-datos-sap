@@ -24,8 +24,8 @@ final class DecodeRobotBody
         $encoding = strtolower(trim((string) $request->header('Content-Encoding', '')));
         $body = $request->getContent();
 
-        if (! in_array($encoding, ['', 'identity', 'gzip'], true)) {
-            return response()->json(['message' => 'Codificación no soportada.'], 415);
+        if (! $request->isJson() || ! in_array($encoding, ['', 'identity', 'gzip'], true)) {
+            return response()->json(['message' => 'El cuerpo debe ser JSON, sin comprimir o en gzip.'], 415);
         }
 
         if ($encoding === 'gzip') {

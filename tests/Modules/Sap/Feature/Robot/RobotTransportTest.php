@@ -156,9 +156,13 @@ it('answers 400 to a broken gzip or a body that is not a JSON object', function 
     'a JSON string' => ['"hola"', false],
 ]);
 
-it('answers 415 to an encoding other than gzip', function () {
-    RobotClient::post($this, ROBOT_TEST_PATH, [], headers: ['Content-Encoding' => 'br'])->assertStatus(415);
-});
+it('answers 415 to an encoding other than gzip or a body that is not JSON', function (array $headers) {
+    RobotClient::post($this, ROBOT_TEST_PATH, [], headers: $headers)->assertStatus(415);
+})->with([
+    'brotli' => [['Content-Encoding' => 'br']],
+    'form' => [['Content-Type' => 'application/x-www-form-urlencoded']],
+    'no type' => [['Content-Type' => null]],
+]);
 
 it('limits the robot to the configured requests per minute per IP', function () {
     config(['sap.robot.requests_per_minute' => 2]);
