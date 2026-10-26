@@ -39,8 +39,7 @@ return new class extends Migration
         });
 
         Schema::create('cartera_fotos', function (Blueprint $table) {
-            $table->date('fecha_corte');
-            $this->receivables($table);
+            $this->receivables($table, photo: true);
             $table->index(['empresa', 'fecha_corte']);
         });
 
@@ -59,13 +58,19 @@ return new class extends Migration
     }
 
     /**
-     * The receivable columns plus the company, the run and the sync time.
+     * The receivable columns plus the company, the run and the sync time; a
+     * photo also carries its cut-off date.
      */
-    private function receivables(Blueprint $table): void
+    private function receivables(Blueprint $table, bool $photo = false): void
     {
         $table->id();
         // SGX or SDC.
         $table->string('empresa', 3);
+
+        if ($photo) {
+            // The day the photo stands for: the day before the nightly run.
+            $table->date('fecha_corte');
+        }
 
         $table->string('codigo_sn', 50);
         $table->integer('slp_code')->nullable();

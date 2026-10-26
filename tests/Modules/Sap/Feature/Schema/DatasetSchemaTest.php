@@ -95,6 +95,20 @@ it('keeps one row per company and key in every master table', function (Part $pa
     expect(fn () => $table->insert(inventedRow($part, 'SGX', $key)))->toThrow(QueryException::class);
 })->with(Part::forDataset(Dataset::Maestros));
 
+it('treats SAP keys that differ only in case as different rows', function () {
+    $addresses = DB::connection('maestros')->table('direcciones');
+    $address = fn (string $partner, string $name): array => [
+        ...inventedRow(Part::Addresses, 'SGX'),
+        'codigo_socio' => $partner,
+        'tipo' => 'S',
+        'nombre' => $name,
+    ];
+
+    $addresses->insert([$address('C001', 'Bodega'), $address('C001', 'BODEGA'), $address('c001', 'Bodega')]);
+
+    expect($addresses->count())->toBe(3);
+})->skip(fn () => DB::connection('maestros')->getDriverName() !== 'mysql', 'SQLite compares text with BINARY already; MySQL is checked in CI.');
+
 it('reads a master row through its view', function () {
     DB::connection('maestros')->table('clientes')->insert([
         ...inventedRow(Part::Customers, 'SGX', 'C800123456'),

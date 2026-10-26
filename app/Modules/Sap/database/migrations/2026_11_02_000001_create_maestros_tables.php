@@ -119,6 +119,17 @@ return new class extends Migration
             // SGX or SDC.
             $table->string('empresa', 3);
             $columns($table);
+
+            // SAP keys are case-sensitive; MySQL's default collation would
+            // fold "C001" and "c001" (or "Bodega" and "BODEGA") into one row.
+            if (Schema::getConnection()->getDriverName() === 'mysql') {
+                foreach ($table->getColumns() as $column) {
+                    if (in_array($column->get('name'), $key, true) && $column->get('type') === 'string') {
+                        $column->collation('utf8mb4_bin');
+                    }
+                }
+            }
+
             // False once SAP inactivates the row or a full run stops bringing it.
             $table->boolean('activo')->default(true);
             // Last change in SAP; only customers, suppliers and items bring it.
