@@ -205,8 +205,9 @@ def _maestro(
     return Parte(nombre, "MAESTROS", f"maestros/{nombre}.sql", columnas, llave, modo, incremental)
 
 
-# Orden de las partes: el del contrato §1. `precios` no tiene archivo común:
-# cada esquema trae el suyo en maestros/<ESQUEMA>/precios.sql (consultas.py).
+# Orden de las partes: el del contrato §1. `precios` trae todas las listas y
+# consultas.leer_parte() deja solo la pública de la empresa, por número. `cartera`
+# tiene un archivo por esquema, cartera/<ESQUEMA>/cartera.sql (consultas.ruta_consulta).
 PARTES: dict[str, Parte] = {
     parte.nombre: parte
     for parte in (

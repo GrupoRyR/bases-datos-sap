@@ -32,6 +32,8 @@ py -3.14 -m venv .venv
 1. Copia `.env.example` como `.env` en la carpeta `robot\`.
 2. TI llena las credenciales: la VPN, HANA (un usuario por empresa), la llave de la API y, si quieres alertas, el correo.
 
+3. Los precios salen de la lista pública de cada empresa, buscada por **número** (no por nombre): `HANA_SGX_LISTA_PRECIOS` (por defecto `1`) y `HANA_SDC_LISTA_PRECIOS` (vacía: Derivados todavía no tiene lista pública). Sin número, los precios de esa empresa no se pueden extraer y su corrida de MAESTROS falla con un mensaje que dice qué variable poner.
+
 El `.env` nunca se sube a Git. Los CSV quedan en `BASES_SAP_CSV_DIR`, fuera del repo.
 
 ## Primera ejecución con SAP real
@@ -46,7 +48,7 @@ Antes de programar las tareas, corre esto desde `robot\etl` (no envía nada a la
 Con lo que dejan en `_CATALOGO` y `_DIAGNOSTICO`, revisa lo que las consultas marcan como `VALIDAR CON DATOS REALES`:
 
 - [ ] `OITM` tiene la columna `UpdateTS` (hora del cambio, `HHMMSS`).
-- [ ] El nombre exacto de la lista **PÚBLICA** en `OPLN` de cada empresa (`_DIAGNOSTICO\<empresa>\listas_precios`).
+- [ ] El número de la lista de precios **pública** en `OPLN` de cada empresa (`_DIAGNOSTICO\<empresa>\listas_precios`). Segurex: la 1 (`LISTA PUBLICO`). Derivados todavía no tiene una definida.
 - [ ] `@HBT_MUNICIPIO` existe en Derivados y trae los municipios.
 - [ ] `CRD1.County` guarda el código del municipio.
 - [ ] `activo`: que `validFor = 'N'` o `frozenFor = 'Y'` marque de verdad a los socios y artículos inactivos.

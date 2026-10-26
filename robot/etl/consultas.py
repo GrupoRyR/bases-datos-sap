@@ -11,11 +11,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 import config
-from config import BOGOTA
+from config import BOGOTA, EmpresaHana
+
+if TYPE_CHECKING:
+    import esquema
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
+PARTE_PRECIOS = "precios"
 # Carpetas donde una empresa puede traer su propia versión de una consulta.
 CARPETAS_POR_ESQUEMA = ("maestros", "cartera")
 
@@ -68,6 +73,29 @@ def sql_por_socios(sql: str, n: int) -> str:
         raise ValueError("sql_por_socios necesita al menos un código de socio.")
     marcas = ", ".join("?" for _ in range(n))
     return _envolver(sql, f'X."codigo_socio" IN ({marcas})')
+
+
+def sql_lista_precios(sql: str, lista: int) -> str:
+    """Solo las filas de la lista de precios `lista` (parte precios, por número)."""
+    return _envolver(sql, f'X."lista_codigo" = {int(lista)}')
+
+
+def leer_parte(parte: "esquema.Parte", empresa: EmpresaHana) -> str:
+    """Consulta de una parte para una empresa, con el filtro propio de la empresa.
+
+    Hoy solo `precios` lo lleva: el archivo trae todas las listas y el robot se
+    queda con la pública de la empresa, por número (HANA_<EMPRESA>_LISTA_PRECIOS).
+    """
+    sql = leer(parte.consulta, empresa.esquema)
+    if parte.nombre != PARTE_PRECIOS:
+        return sql
+    if empresa.lista_precios is None:
+        raise config.ConfigError(
+            f"{empresa.codigo} no tiene lista de precios pública definida: pon su número en "
+            f"HANA_{empresa.codigo}_LISTA_PRECIOS (robot/.env). El número sale de "
+            f"_DIAGNOSTICO\\{empresa.codigo}\\listas_precios."
+        )
+    return sql_lista_precios(sql, empresa.lista_precios)
 
 
 def sql_contar(sql: str) -> str:

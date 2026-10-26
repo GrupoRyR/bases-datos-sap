@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 
 import pytest
@@ -44,9 +45,11 @@ def test_completa_de_las_dos_empresas(escenario):
 
     sgx_maestros, sgx_cartera = resultados[0], resultados[1]
     for parte in esquema.PARTES_POR_CONJUNTO["MAESTROS"]:
+        # Precios: solo la lista 1 (2 de las 3 filas de prueba).
+        esperadas = 2 if parte == "precios" else len(e.hana.datos["SGX"][parte])
         assert sgx_maestros.columnas[parte] == esquema.PARTES[parte].nombres
-        assert len(sgx_maestros.filas[parte]) == len(e.hana.datos["SGX"][parte])
-        assert sgx_maestros.conteo_sap[parte] == len(e.hana.datos["SGX"][parte])
+        assert len(sgx_maestros.filas[parte]) == esperadas
+        assert sgx_maestros.conteo_sap[parte] == esperadas
     assert sgx_cartera.conteo_sap == {"cartera": 3}
     assert sgx_cartera.columnas["cartera"][0] == "codigo_sn"
     # Solo consultas sin filtro y conteos, y cada conteo justo después de su parte.
@@ -186,6 +189,34 @@ def test_valor_invalido_falla_sin_mostrar_el_valor(escenario):
     assert r.etapa == "VALIDACION"
     assert "clientes" in r.error and "fila 2" in r.error and "grupo_codigo" in r.error
     assert "SECRETO-SAP" not in r.error
+
+
+def test_precios_trae_solo_la_lista_configurada_de_la_empresa(escenario):
+    e = escenario
+    e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=2)
+    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (0, 2)])
+
+    assert [r.error for r in resultados] == [None, None]
+    sgx, sdc = resultados
+    assert _columna(sgx, "precios", "lista_codigo") == [1, 1]
+    assert _columna(sdc, "precios", "lista_codigo") == [2]
+    assert (sgx.conteo_sap["precios"], sdc.conteo_sap["precios"]) == (2, 1)
+    # Se filtra por número, no por el nombre de la lista.
+    [consulta] = e.hana.de("SDC", "todo", "precios")
+    assert 'X."lista_codigo" = 2' in consulta.sql
+    assert "ListName\" =" not in consulta.sql
+
+
+def test_empresa_sin_lista_de_precios_falla_su_trabajo_con_un_mensaje_claro(escenario):
+    e = escenario
+    e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=None)
+    resultados = _extraer(e, trabajos_completos(["SDC"], HOY, []))
+
+    maestros, cartera = resultados
+    assert maestros.etapa == "CONFIGURACION"
+    assert "HANA_SDC_LISTA_PRECIOS" in maestros.error
+    assert cartera.error is None  # la cartera de la empresa no depende de los precios
+    assert not e.hana.de("SDC", parte="precios")
 
 
 def test_columna_faltante_falla_el_trabajo(escenario):

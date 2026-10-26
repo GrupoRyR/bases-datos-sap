@@ -23,6 +23,9 @@ BOGOTA = timezone(timedelta(hours=-5), "America/Bogota")
 
 EMPRESAS = ("SGX", "SDC")
 ESQUEMAS_POR_DEFECTO = {"SGX": "SEGUREX", "SDC": "HBT_SDERIVADOS"}
+# Número (OPLN.ListNum) de la lista de precios pública de cada empresa. Segurex:
+# la 1, «LISTA PUBLICO». Derivados todavía no tiene una definida.
+LISTAS_PRECIOS_POR_DEFECTO: dict[str, int | None] = {"SGX": 1, "SDC": None}
 CSV_DIR_POR_DEFECTO = r"C:\Users\Claude\Documents\CEREBRO\SAP\BASES_DE_DATOS"
 FRANJAS_POR_DEFECTO = "00:00,05:00,06:00,12:00,12:30"
 SOPHOS_CLI_POR_DEFECTO = r"C:\Program Files (x86)\Sophos\Connect\sccli.exe"
@@ -51,6 +54,18 @@ def _int(nombre: str, por_defecto: int, invalidos: list[str]) -> int:
     Un valor que no es número también usa el valor por defecto, pero queda en
     `invalidos` para que validar() lo reporte en vez de ignorarlo en silencio.
     """
+    valor = (os.getenv(nombre) or "").strip()
+    if not valor:
+        return por_defecto
+    try:
+        return int(valor)
+    except ValueError:
+        invalidos.append(f"{nombre}={valor}")
+        return por_defecto
+
+
+def _int_o_nada(nombre: str, por_defecto: int | None, invalidos: list[str]) -> int | None:
+    """Como `_int`, pero el valor por defecto puede ser None (la variable es opcional)."""
     valor = (os.getenv(nombre) or "").strip()
     if not valor:
         return por_defecto
@@ -97,6 +112,8 @@ class EmpresaHana:
     usuario: str
     password: str
     esquema: str
+    # Número de la lista de precios pública (OPLN.ListNum); None: la empresa no tiene.
+    lista_precios: int | None = None
 
 
 @dataclass(frozen=True)
@@ -244,6 +261,9 @@ def cargar_config(env_path: Path | None = None) -> Config:
                     usuario=_texto(f"HANA_{codigo}_USER"),
                     password=os.getenv(f"HANA_{codigo}_PASSWORD", ""),
                     esquema=_texto(f"HANA_{codigo}_SCHEMA", ESQUEMAS_POR_DEFECTO[codigo]),
+                    lista_precios=_int_o_nada(
+                        f"HANA_{codigo}_LISTA_PRECIOS", LISTAS_PRECIOS_POR_DEFECTO[codigo], invalidos
+                    ),
                 )
                 for codigo in EMPRESAS
             },

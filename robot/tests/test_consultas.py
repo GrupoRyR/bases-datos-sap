@@ -7,7 +7,8 @@ import pytest
 
 import config
 import consultas
-from config import ConfigError
+from config import ConfigError, EmpresaHana
+from esquema import PARTES
 
 
 def _escribir(ruta: Path, texto: str) -> Path:
@@ -77,6 +78,34 @@ def test_sql_por_socios():
     )
     with pytest.raises(ValueError):
         consultas.sql_por_socios(SQL, 0)
+
+
+def test_sql_lista_precios():
+    assert consultas.sql_lista_precios(SQL, 1) == (
+        f'SELECT X.* FROM (\n{SQL}\n) X WHERE X."lista_codigo" = 1'
+    )
+
+
+def _empresa(lista: int | None, esquema: str = "SEGUREX") -> EmpresaHana:
+    return EmpresaHana("SGX", "usuario", "clave", esquema, lista_precios=lista)
+
+
+def test_leer_parte_de_precios_filtra_por_el_numero_de_lista():
+    _escribir(config.QUERIES_DIR / "maestros" / "precios.sql", "SELECT 1 FROM DUMMY")
+    assert consultas.leer_parte(PARTES["precios"], _empresa(7)) == (
+        'SELECT X.* FROM (\nSELECT 1 FROM DUMMY\n) X WHERE X."lista_codigo" = 7'
+    )
+
+
+def test_leer_parte_de_precios_sin_lista_falla_diciendo_que_variable_poner():
+    _escribir(config.QUERIES_DIR / "maestros" / "precios.sql", "SELECT 1 FROM DUMMY")
+    with pytest.raises(ConfigError, match="HANA_SGX_LISTA_PRECIOS"):
+        consultas.leer_parte(PARTES["precios"], _empresa(None))
+
+
+def test_leer_parte_de_las_demas_partes_queda_igual():
+    _escribir(config.QUERIES_DIR / "maestros" / "marcas.sql", "SELECT 1 FROM DUMMY")
+    assert consultas.leer_parte(PARTES["marcas"], _empresa(None)) == "SELECT 1 FROM DUMMY"
 
 
 def test_sql_contar():

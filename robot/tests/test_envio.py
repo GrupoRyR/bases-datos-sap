@@ -41,7 +41,10 @@ def test_completa_cierra_las_cuatro_corridas(escenario):
     assert set(maestros.partes.values()) == {"todo"}
     assert maestros.fecha_corte is None
     assert maestros.extraida_en == "2026-10-26T02:00:05-05:00"
-    assert maestros.conteo_sap == {p: len(e.hana.datos["SGX"][p]) for p in maestros.partes}
+    # Precios: solo la lista 1 (2 de las 3 filas de prueba).
+    assert maestros.conteo_sap == {
+        p: 2 if p == "precios" else len(e.hana.datos["SGX"][p]) for p in maestros.partes
+    }
     assert maestros.total_filas() == maestros.conteo_sap
     cartera = corridas[1]
     assert cartera.fecha_corte == "2026-10-25"

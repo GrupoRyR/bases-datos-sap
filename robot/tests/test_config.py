@@ -176,6 +176,35 @@ def test_numero_invalido_falla_al_validar(
         cargar_config().validar()
 
 
+def test_lista_de_precios_por_defecto_solo_segurex() -> None:
+    cfg = cargar_config()
+
+    assert cfg.hana.empresas["SGX"].lista_precios == 1  # «LISTA PUBLICO»
+    assert cfg.hana.empresas["SDC"].lista_precios is None  # Derivados aún no define una
+
+
+def test_lista_de_precios_se_configura_por_empresa(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HANA_SGX_LISTA_PRECIOS", " 3 ")
+    monkeypatch.setenv("HANA_SDC_LISTA_PRECIOS", "12")
+
+    cfg = cargar_config()
+
+    assert cfg.hana.empresas["SGX"].lista_precios == 3
+    assert cfg.hana.empresas["SDC"].lista_precios == 12
+
+
+def test_lista_de_precios_invalida_falla_al_validar(
+    entorno_completo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HANA_SDC_LISTA_PRECIOS", "publica")
+
+    cfg = cargar_config()
+
+    assert cfg.hana.empresas["SDC"].lista_precios is None
+    with pytest.raises(ConfigError, match="HANA_SDC_LISTA_PRECIOS=publica"):
+        cfg.validar()
+
+
 def test_alertas_habilitadas_con_host_y_destinatarios(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALERTA_SMTP_HOST", "smtp.prueba.test")
     monkeypatch.setenv("ALERTA_DESTINATARIOS", "ti@prueba.test, otro@prueba.test,")

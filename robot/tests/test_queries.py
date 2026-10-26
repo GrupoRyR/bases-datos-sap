@@ -73,14 +73,15 @@ def test_cada_parte_de_maestros_tiene_consulta_en_cada_esquema(monkeypatch):
             assert consultas.leer(PARTES[nombre].consulta, esquema)
     for esquema in ESQUEMAS:
         ruta = consultas.ruta_consulta("maestros/precios.sql", esquema)
-        assert ruta == QUERIES / "maestros" / esquema / "precios.sql"
-    assert not (QUERIES / "maestros" / "precios.sql").exists()
+        assert ruta == QUERIES / "maestros" / "precios.sql"
+        assert not (QUERIES / "maestros" / esquema / "precios.sql").exists()
 
 
-def test_precios_solo_lista_publica():
-    for esquema in ESQUEMAS:
-        sql = _sin_comentarios(_texto(QUERIES / "maestros" / esquema / "precios.sql"))
-        assert "\"ListName\" = 'PÚBLICA'" in sql
+def test_precios_trae_todas_las_listas_y_no_filtra_por_nombre():
+    # La lista pública se elige por número desde el robot (consultas.leer_parte).
+    sql = _sin_comentarios(_texto(QUERIES / "maestros" / "precios.sql"))
+    assert "WHERE" not in sql.upper()
+    assert "ListName" in sql  # solo como columna lista_nombre
 
 
 CUENTAS_DE_CARTERA = {
@@ -123,8 +124,7 @@ def test_cartera_de_las_dos_empresas_solo_difiere_en_las_cuentas():
 
 @pytest.mark.parametrize("archivo", [
     "maestros/articulos.sql",
-    "maestros/SEGUREX/precios.sql",
-    "maestros/HBT_SDERIVADOS/precios.sql",
+    "maestros/precios.sql",
     "maestros/municipios.sql",
     "maestros/direcciones.sql",
     "maestros/contactos.sql",
