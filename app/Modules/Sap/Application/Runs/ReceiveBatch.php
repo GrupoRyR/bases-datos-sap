@@ -36,12 +36,10 @@ final class ReceiveBatch
             $this->refuse($run, ['batch' => 'Debe ser un entero desde 1.']);
         }
 
-        $previous = DB::table('robot_batches')->where('run_id', $run->id)->where('batch', $number)->first();
+        $duplicate = $this->resent($run, $number, $sha256);
 
-        if ($previous !== null) {
-            return $previous->sha256 === $sha256
-                ? ['batch' => $number, 'rows' => (int) $previous->rows_count, 'duplicate' => true]
-                : throw new RobotRequestRejected(409, 'Ese lote ya llegó con otro contenido.', ['estado' => $run->estado->value]);
+        if ($duplicate !== null) {
+            return $duplicate;
         }
 
         $part = Part::tryFrom(is_string($input['parte'] ?? null) ? $input['parte'] : '');
@@ -63,7 +61,7 @@ final class ReceiveBatch
         }
 
         try {
-            $this->store($run, $number, $part, $checked['rows'], $sha256);
+            return $this->store($run, $number, $part, $checked['rows'], $sha256);
         } catch (RobotRequestRejected $rejected) {
             // A repeated key is only found against the stored ones.
             if ($rejected->status === 422) {
@@ -72,27 +70,51 @@ final class ReceiveBatch
 
             throw $rejected;
         }
+    }
 
-        return ['batch' => $number, 'rows' => count($checked['rows'])];
+    /**
+     * The answer to a batch number the run already has: 200 with duplicate
+     * for the same body, 409 for another one; null for a new number.
+     *
+     * @return array{batch: int, rows: int, duplicate: true}|null
+     */
+    private function resent(Run $run, int $number, string $sha256): ?array
+    {
+        $previous = DB::table('robot_batches')->where('run_id', $run->id)->where('batch', $number)->first();
+
+        if ($previous === null) {
+            return null;
+        }
+
+        if ($previous->sha256 !== $sha256) {
+            throw new RobotRequestRejected(409, 'Ese lote ya llegó con otro contenido.', ['estado' => $run->estado->value]);
+        }
+
+        return ['batch' => $number, 'rows' => (int) $previous->rows_count, 'duplicate' => true];
     }
 
     /**
      * Saves the batch and its keys under a lock on the run, so batches of
-     * the same run and its close or expiry never interleave.
+     * the same run and its close or expiry never interleave. A copy of the
+     * same batch stored meanwhile (a resend racing the original) is a
+     * duplicate, not a conflict.
      *
      * @param  list<list<mixed>>  $rows
+     * @return array{batch: int, rows: int, duplicate?: true}
      */
-    private function store(Run $run, int $number, Part $part, array $rows, string $sha256): void
+    private function store(Run $run, int $number, Part $part, array $rows, string $sha256): array
     {
-        DB::transaction(function () use ($run, $number, $part, $rows, $sha256) {
+        return DB::transaction(function () use ($run, $number, $part, $rows, $sha256): array {
             $current = Run::query()->whereKey($run->id)->lockForUpdate()->firstOrFail();
 
             if ($current->estado !== RunState::Open) {
                 throw new RobotRequestRejected(409, 'La corrida ya no está abierta.', ['estado' => $current->estado->value]);
             }
 
-            if (DB::table('robot_batches')->where('run_id', $run->id)->where('batch', $number)->exists()) {
-                throw new RobotRequestRejected(409, 'Ese lote ya llegó con otro contenido.', ['estado' => $current->estado->value]);
+            $duplicate = $this->resent($current, $number, $sha256);
+
+            if ($duplicate !== null) {
+                return $duplicate;
             }
 
             if ($part->key() !== []) {
@@ -110,6 +132,8 @@ final class ReceiveBatch
             ]);
 
             $current->forceFill(['abierta_hasta' => now()->addMinutes(Run::IDLE_MINUTES)])->save();
+
+            return ['batch' => $number, 'rows' => count($rows)];
         });
     }
 

@@ -37,6 +37,7 @@ final class BatchRows
 
         /** @var list<string> $columns */
         $positions = array_flip($columns);
+        $keys = array_flip($part->key());
         $normalized = [];
         $errors = [];
 
@@ -47,7 +48,7 @@ final class BatchRows
                 $values = [];
 
                 foreach ($expected as $name => $column) {
-                    [$value, $error] = self::value($column, $row[$positions[$name]], in_array($name, $part->key(), true));
+                    [$value, $error] = self::value($column, $row[$positions[$name]], isset($keys[$name]));
                     $values[] = $value;
 
                     if ($error !== null) {
