@@ -4,14 +4,15 @@ name: CI
 on:
   # Only pull requests into main: a chained pull request that targets another pull request's
   # branch runs once it is retargeted to main and synced (a new push), not on every link.
+  # There is no second run after the merge into main, and pull requests that only change
+  # documentation skip CI: both save GitHub Actions minutes.
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
 
-# A new commit on a pull request cancels that pull request's older run. Each push to main
-# gets a group of its own (its commit), so main runs never wait for, replace or cancel
-# each other: every commit merged into main gets its own result.
+# A new commit on a pull request cancels that pull request's older run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
