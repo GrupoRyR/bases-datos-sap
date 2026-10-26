@@ -40,7 +40,7 @@ En `config/database.php` de tu app, una conexión por base que uses:
     'strict' => true,
     // Fuera de GoDaddy, con el certificado que entrega TI.
     'options' => extension_loaded('pdo_mysql') ? array_filter([
-        Pdo\Mysql::ATTR_SSL_CA => env('SAP_DB_SSL_CA'),
+        (PHP_VERSION_ID >= 80500 ? \Pdo\Mysql::ATTR_SSL_CA : \PDO::MYSQL_ATTR_SSL_CA) => env('SAP_DB_SSL_CA'),
     ]) : [],
 ],
 
