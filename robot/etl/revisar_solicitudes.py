@@ -84,7 +84,7 @@ def _avisar_con_limite(
 
 
 def _validas(
-    solicitudes: list[dict[str, Any]], hoy: date
+    solicitudes: list[dict[str, Any]], hoy: date, sin_precios: frozenset[str] = frozenset()
 ) -> tuple[list[Trabajo], list[tuple[str, str]]]:
     """Trabajos de las solicitudes válidas; cada inválida va a los fallos y la API la vence."""
     validas: list[dict[str, Any]] = []
@@ -97,7 +97,7 @@ def _validas(
             fallos.append(("SOLICITUDES", str(exc)))
             continue
         validas.append(solicitud)
-    return trabajos_de_solicitudes(validas, hoy), fallos
+    return trabajos_de_solicitudes(validas, hoy, sin_precios), fallos
 
 
 def _revisar(
@@ -125,7 +125,7 @@ def _revisar(
 
     inicio = time.monotonic()
     log.info("Solicitudes tomadas: %s.", ", ".join(str(s.get("id")) for s in solicitudes))
-    trabajos, fallos = _validas(solicitudes, ahora().date())
+    trabajos, fallos = _validas(solicitudes, ahora().date(), cfg.hana.sin_precios())
     if trabajos:
         log.info("Trabajos: %s.", ", ".join(t.nombre for t in trabajos))
         fallos += run_robot.ejecutar_trabajos(

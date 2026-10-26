@@ -53,6 +53,31 @@ def test_completa_de_las_dos_empresas(entorno, correos):
     assert "CSGX001" not in json.dumps(estado)
 
 
+def test_completa_sin_lista_de_precios_en_derivados_no_falla_y_no_pide_precios(entorno, correos, monkeypatch):
+    e = entorno
+    monkeypatch.delenv("HANA_SDC_LISTA_PRECIOS")  # Derivados todavía no tiene lista pública
+    assert _main(e, "--completa") == 0
+    assert _corridas(e) == [
+        ("MAESTROS", "SGX", "completa", "cerrada"), ("CARTERA", "SGX", "completa", "cerrada"),
+        ("MAESTROS", "SDC", "completa", "cerrada"), ("CARTERA", "SDC", "completa", "cerrada"),
+    ]
+    sgx, _, sdc, _ = e.servidor.corridas.values()
+    assert "precios" in sgx.partes and "precios" not in sdc.partes
+    assert not e.hana.de("SDC", parte="precios")
+    assert correos == []
+    assert _estado()["fallos"] == []
+
+
+def test_completa_deja_vencer_la_solicitud_de_solo_precios_de_derivados(entorno, correos, monkeypatch):
+    e = entorno
+    monkeypatch.delenv("HANA_SDC_LISTA_PRECIOS")
+    e.servidor.encolar_solicitud({"id": 50, "empresa": "SDC", "conjunto": "MAESTROS",
+                                  "parte": "precios", "desde": {}})
+    assert _main(e, "--completa") == 0
+    assert [c.solicitudes for c in e.servidor.corridas.values()] == [[], [], [], []]
+    assert e.servidor.estado_solicitudes == {50: "tomada"}  # la API la vence
+
+
 def test_una_sola_empresa(entorno, correos):
     assert _main(entorno, "--completa", "--empresa", "SDC") == 0
     assert _corridas(entorno) == [

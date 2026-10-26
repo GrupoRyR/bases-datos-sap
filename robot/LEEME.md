@@ -32,7 +32,7 @@ py -3.14 -m venv .venv
 1. Copia `.env.example` como `.env` en la carpeta `robot\`.
 2. TI llena las credenciales: la VPN, HANA (un usuario por empresa), la llave de la API y, si quieres alertas, el correo.
 
-3. Los precios salen de la lista pública de cada empresa, buscada por **número** (no por nombre): `HANA_SGX_LISTA_PRECIOS` (por defecto `1`) y `HANA_SDC_LISTA_PRECIOS` (vacía: Derivados todavía no tiene lista pública). Sin número, los precios de esa empresa no se pueden extraer y su corrida de MAESTROS falla con un mensaje que dice qué variable poner.
+3. Los precios salen de la lista pública de cada empresa, buscada por **número** (no por nombre): `HANA_SGX_LISTA_PRECIOS` (por defecto `1`) y `HANA_SDC_LISTA_PRECIOS` (vacía: Derivados todavía no tiene lista pública). Sin número, esa empresa manda su MAESTROS sin la parte `precios` (contrato §4.1): la nocturna no falla y no consulta precios. Una solicitud de solo precios de esa empresa falla con un mensaje que dice qué variable poner. Cuando Derivados defina su lista, pon su número en `HANA_SDC_LISTA_PRECIOS` y los precios vuelven solos.
 
 El `.env` nunca se sube a Git. Los CSV quedan en `BASES_SAP_CSV_DIR`, fuera del repo.
 

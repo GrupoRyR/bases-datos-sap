@@ -59,7 +59,7 @@ import registro
 from api import ApiCliente
 from carpeta import Carpeta
 from config import EMPRESAS, Config, ConfigError, cargar_config
-from trabajos import Trabajo, TrabajoInvalido, trabajos_completos, trabajos_de_solicitudes
+from trabajos import Trabajo, TrabajoInvalido, solo_precios, trabajos_completos, trabajos_de_solicitudes
 from vpn import RobotVPN
 
 SOLICITUDES_POR_PAGINA = 20
@@ -158,6 +158,12 @@ def _asignar_solicitudes(
             fallos.append(("SOLICITUDES", str(exc)))
             continue
         trabajo = por_grupo.get((solicitud["empresa"], solicitud["conjunto"]))
+        if trabajo is not None and solo_precios(solicitud) and "precios" not in trabajo.partes:
+            log.warning(
+                "Solicitud %s (%s): pide solo precios y esa empresa no los lleva en la corrida "
+                "completa (§4.1); queda tomada y la API la vence.", solicitud.get("id"), solicitud["empresa"],
+            )
+            continue
         if trabajo is None:
             log.warning(
                 "Solicitud %s (%s %s): esa empresa no está en esta corrida; queda tomada "
@@ -180,7 +186,7 @@ def _completa(
 ) -> tuple[list[Trabajo], list[tuple[str, str]]]:
     api = fabrica_api(cfg.api)
     hoy = ahora().date()
-    trabajos = trabajos_completos(empresas, hoy, [])
+    trabajos = trabajos_completos(empresas, hoy, [], cfg.hana.sin_precios())
     log.info("Trabajos: %s.", ", ".join(t.nombre for t in trabajos))
     fallos_solicitudes: list[tuple[str, str]] = []
 

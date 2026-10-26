@@ -123,6 +123,10 @@ class HanaConfig:
     timeout: int
     empresas: dict[str, EmpresaHana] = field(default_factory=dict)
 
+    def sin_precios(self) -> frozenset[str]:
+        """Empresas sin lista de precios pública: su MAESTROS va sin la parte precios."""
+        return frozenset(c for c, e in self.empresas.items() if e.lista_precios is None)
+
 
 @dataclass(frozen=True)
 class ApiConfig:
