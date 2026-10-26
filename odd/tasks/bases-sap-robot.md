@@ -117,9 +117,9 @@ Registry in `archivo.py`: carpeta, table, SQL file, mode (`foto` or `registro`),
 
 | ID | Task | Branch | Route | Status |
 |---|---|---|---|---|
-| T1 | Robot base from the template (config, logging, VPN, HANA, alerts), requirements, pytest setup, `.env.example`, CI Python job | `feat/robot-base` | delegated writer (2+ non-trivial files) | pending |
-| T2 | HMAC signing with the contract vector and the API client with retries, gzip and a fake API | `feat/robot-api` | delegated writer | pending |
-| T3 | Parte schema, value serialization, MAESTROS, CARTERA, catalog and diagnostic queries, query loader | `feat/robot-consultas` | delegated writer | pending |
+| T1 | Robot base from the template (config, logging, VPN, HANA, alerts), requirements, pytest setup, `.env.example`, CI Python job | `feat/robot-base` | delegated writer (2+ non-trivial files) | PR #14 open |
+| T2 | HMAC signing with the contract vector and the API client with retries, gzip and a fake API | `feat/robot-api` | delegated writer | PR #15 open |
+| T3 | Parte schema, value serialization, MAESTROS, CARTERA, catalog and diagnostic queries, query loader | `feat/robot-consultas` | delegated writer | PR open |
 | T4 | Jobs, two-phase extraction and sending, folder layout and retention, nightly run and cartera photo | `feat/robot-corridas` | delegated writer | pending |
 | T5 | Archive categories (fotos, registros), `--archivo`, `--catalogo`, `--diagnostico` | `feat/robot-archivo` | delegated writer | pending |
 | T6 | Lock, blocked windows, request check script, scheduled tasks script, robot `LEEME.md` | `feat/robot-solicitudes` | delegated writer | pending |
@@ -139,8 +139,27 @@ Registry in `archivo.py`: carpeta, table, SQL file, mode (`foto` or `registro`),
 
 ## Progress
 
-Not started.
+Decision (user, 2026-10-26): `robot/` keeps Spanish identifiers and comments like the template, an exception to the CLAUDE.md conventions.
+
+### T1 (done, PR #14)
+
+- Route: delegated writer. Commits `76281cc`, `c1252a2`, `5b90528`, review fixes `5d1f52c`.
+- Test first: tests failed with `ModuleNotFoundError` before the modules existed; review fixes had RED tests first.
+- `code-review` (high): 4 fixed (HANA error mapping, traceback redaction, invalid numbers, SMTP 465), 1 no change (Spanish code, user decision).
+- Checks: `python -m pytest` 52 passed locally; CI robot job green.
+
+### T2 (done, PR #15)
+
+- Route: delegated writer. Commits `ab59c91`, `8d07930`, review fixes `26377ce`.
+- Contract HMAC vector reproduced. `code-review` (high): 4 fixed (lost responses on iniciar/cerrar/fallar, 422 detail, redirects).
+- Checks: `python -m pytest` 100 passed locally.
+
+### T3 (done)
+
+- Route: delegated writer. Commits `d17232f`, `79a9cd7`, `601f4d9`.
+- Checks: `python -m pytest` 269 passed locally.
+- Contract notes for «Datos y API»: `precios.activo` has no rule (robot sends `true`); `municipios.codigo` and `direcciones.municipio_codigo` have no type (robot sends text); `direcciones` has no `activo` column, so the API keeps its own.
 
 ## Next step
 
-T1 on `feat/robot-base`.
+T4 on `feat/robot-corridas`.
