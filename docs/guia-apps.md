@@ -167,7 +167,9 @@ $solicitud = $respuesta->json(); // id, estado, correr_desde, empresa, conjunto,
 
 ### 2.4 Seguirla y mostrar el resultado
 
-Consulta `GET /api/v1/solicitudes/{id}` cada 15 o 30 segundos mientras esté `pendiente`, `en_cola` o `tomada`. Una app solo ve las solicitudes a las que se unió.
+Consulta `GET /api/v1/solicitudes/{id}` mientras esté `pendiente`, `en_cola` o `tomada`. Una app solo ve las solicitudes a las que se unió.
+
+El límite es de **60 peticiones por minuto por llave**, compartido por todos los usuarios de tu app. Así que la consulta la hace **el servidor de tu app**, no cada navegador: guarda el estado de cada `id` en caché unos 30 segundos y que todas las pantallas lean de ahí. Como las solicitudes iguales se unen, muchos usuarios esperando la misma actualización comparten un solo `id` y una sola consulta.
 
 | `estado` | Mensaje sugerido |
 |---|---|
