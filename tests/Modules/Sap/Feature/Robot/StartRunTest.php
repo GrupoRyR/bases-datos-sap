@@ -1,8 +1,15 @@
 <?php
 
+use App\Modules\Sap\Contracts\Enums\Company;
+use App\Modules\Sap\Contracts\Enums\Dataset;
+use App\Modules\Sap\Contracts\Enums\RequestScope;
+use App\Modules\Sap\Contracts\UpdateRequests;
 use App\Modules\Sap\Domain\Runs\RunState;
 use App\Modules\Sap\Models\Run;
+use App\Modules\Sap\Models\UpdateRequest;
+use Illuminate\Support\Arr;
 use Tests\Modules\Sap\Support\RobotClient;
+use Tests\TestCase;
 
 /*
 | Starting a run (docs/contrato-robot.md, section 4.1).
@@ -68,6 +75,59 @@ it('opens the nightly full runs of both datasets', function () {
     expect(Run::where('conjunto', 'CARTERA')->sole()->fecha_corte->toDateString())->toBe('2026-10-22');
 });
 
+it('lets Derivados leave the prices out of its full run, since it has no public price list', function () {
+    RobotClient::post($this, '/api/robot/v1/corridas', maestrosRequestRun([
+        'empresa' => 'SDC', 'tipo' => 'completa', 'partes' => Arr::except(allMaestrosInFull(), 'precios'),
+    ]))->assertCreated();
+
+    expect(Run::sole()->partes)->not->toHaveKey('precios')->toHaveCount(11);
+});
+
+/** @return array<string, string> The parts a whole MAESTROS request of Derivados brings when it has no prices. */
+function maestrosWithoutPrices(): array
+{
+    return ['clientes' => 'cambios', 'proveedores' => 'cambios', 'direcciones' => 'cambios', 'contactos' => 'cambios', 'articulos' => 'cambios']
+        + Arr::except(allMaestrosInFull(), ['clientes', 'proveedores', 'direcciones', 'contactos', 'articulos', 'precios']);
+}
+
+function takeMaestrosRequest(TestCase $test, Company $company, ?RequestScope $scope): int
+{
+    $id = app(UpdateRequests::class)->request($company, Dataset::Maestros, $scope, 'ana@segurex.com', 'Ana Ruiz')->id;
+    RobotClient::post($test, '/api/robot/v1/solicitudes/tomar', ['max' => 20])->assertOk();
+
+    return $id;
+}
+
+it('serves a whole MAESTROS request of Derivados without the prices it does not have', function () {
+    $request = takeMaestrosRequest($this, Company::Sdc, null);
+
+    RobotClient::post($this, '/api/robot/v1/corridas', maestrosRequestRun([
+        'empresa' => 'SDC', 'partes' => maestrosWithoutPrices(), 'solicitudes' => [$request],
+    ]))->assertCreated();
+
+    expect(UpdateRequest::find($request)->run_id)->toBe(Run::sole()->id);
+});
+
+it('still needs the prices in the run for a request of just the prices of Derivados, so it is answered', function () {
+    $request = takeMaestrosRequest($this, Company::Sdc, RequestScope::Prices);
+
+    RobotClient::post($this, '/api/robot/v1/corridas', maestrosRequestRun([
+        'empresa' => 'SDC', 'partes' => ['clientes' => 'cambios'], 'solicitudes' => [$request],
+    ]))->assertUnprocessable()->assertJsonValidationErrorFor('solicitudes');
+
+    RobotClient::post($this, '/api/robot/v1/corridas', maestrosRequestRun([
+        'empresa' => 'SDC', 'partes' => ['precios' => 'todo'], 'solicitudes' => [$request],
+    ]))->assertCreated();
+});
+
+it('still needs the prices in the run for a whole MAESTROS request of Segurex', function () {
+    $request = takeMaestrosRequest($this, Company::Sgx, null);
+
+    RobotClient::post($this, '/api/robot/v1/corridas', maestrosRequestRun([
+        'partes' => maestrosWithoutPrices(), 'solicitudes' => [$request],
+    ]))->assertUnprocessable()->assertJsonValidationErrorFor('solicitudes');
+});
+
 it('rejects what the contract does not allow with 422', function (array $overrides, string $field) {
     RobotClient::post($this, '/api/robot/v1/corridas', maestrosRequestRun($overrides))
         ->assertUnprocessable()
@@ -84,6 +144,8 @@ it('rejects what the contract does not allow with 422', function (array $overrid
     'no parts' => [['partes' => []], 'partes'],
     'full run missing a part' => [['tipo' => 'completa', 'partes' => ['clientes' => 'todo']], 'partes'],
     'full run with changes' => [['tipo' => 'completa', 'partes' => ['clientes' => 'cambios'] + allMaestrosInFull()], 'partes.clientes'],
+    'full run of Segurex without prices' => [['tipo' => 'completa', 'partes' => Arr::except(allMaestrosInFull(), 'precios')], 'partes'],
+    'full run of Derivados without another part' => [['empresa' => 'SDC', 'tipo' => 'completa', 'partes' => Arr::except(allMaestrosInFull(), 'marcas')], 'partes'],
     'cut-off date in MAESTROS' => [['fecha_corte' => '2026-10-22'], 'fecha_corte'],
     'time without offset' => [['extraida_en' => '2026-10-23T10:41:30'], 'extraida_en'],
     'requests that are not ids' => [['solicitudes' => ['118']], 'solicitudes'],
