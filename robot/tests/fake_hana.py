@@ -9,6 +9,18 @@ los envoltorios de consultas.py:
 - `X."actualizado_en_sap" >= ?`       -> filas con esa hora o posterior;
 - `X."codigo_socio" IN (?, ...)`      -> filas de esos socios.
 
+Las consultas del archivo, del catálogo y del diagnóstico (robot/queries/archivo,
+catalogo y diagnostico) también se reconocen por su texto; sus filas salen de
+`HanaFalsa.archivo[empresa][clave]` (clave = ruta sin .sql, ej:
+"archivo/AUDITORIA/USR5"), con las columnas que lista el SELECT del archivo, y
+se aplica el envoltorio de los registros de archivo.py:
+
+- `X."<col>" >= ? AND X."<col>" < ?`  -> filas con desde <= col < hasta;
+- `X."<col>" < ?`                     -> filas con col < hasta.
+
+Un SELECT armado por el robot para una tabla @HBT_* se reconoce por su FROM y
+devuelve solo las columnas que pide (clave = nombre de la tabla).
+
 Las pruebas deben apuntar config.QUERIES_DIR a robot/queries (QUERIES), porque
 conftest lo mueve a tmp.
 
@@ -17,6 +29,7 @@ La VPN falsa, la HANA falsa y ApiFalsa (fake_api.py) escriben en una misma
 """
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -44,9 +57,75 @@ ESQUEMAS = {"SGX": "SEGUREX", "SDC": "HBT_SDERIVADOS"}
 @dataclass(frozen=True)
 class Ejecucion:
     empresa: str
-    tipo: str  # todo | cambios | socios | contar
-    parte: str
+    tipo: str  # todo | cambios | socios | contar | registro
+    parte: str  # parte, clave de archivo/catálogo/diagnóstico o tabla @HBT_*
     params: tuple
+    sql: str = field(default="", compare=False, repr=False)
+
+
+OTRAS_CARPETAS = ("archivo", "catalogo", "diagnostico")
+_RE_HBT = re.compile(r'FROM "(@HBT\w*)" T0')
+_RE_REGISTRO_DESDE = re.compile(r'X\."([^"]+)" >= \? AND X\."\1" < \?')
+_RE_REGISTRO_HASTA = re.compile(r'X\."([^"]+)" < \?')
+
+
+def columnas_select(sql: str) -> list[str]:
+    """Columnas del SELECT de un archivo simple: el último identificador entre comillas
+    de cada elemento entre SELECT y FROM."""
+    codigo = re.sub(r"--[^\n]*", "", sql)
+    m = re.search(r"\bSELECT\b(.*?)\bFROM\b", codigo, flags=re.IGNORECASE | re.DOTALL)
+    assert m, f"Sin SELECT ... FROM: {sql[:80]!r}"
+    return [re.findall(r'"([^"]+)"', item)[-1] for item in m.group(1).split(",")]
+
+
+def datos_archivo(empresa: str) -> dict[str, list[dict]]:
+    """Filas de ejemplo del archivo, el catálogo y el diagnóstico (AHORA = 2026-10-26)."""
+    def ingreso(dia: date, n: int) -> dict[str, Any]:
+        return {"UserCode": f"u{empresa}{n}", "Date": dia, "Time": 800 + n, "Action": "I",
+                "ClientName": f"PC{n}"}
+
+    def columna(tabla: str, nombre: str, posicion: int) -> dict[str, Any]:
+        return {"TABLE_NAME": tabla, "COLUMN_NAME": nombre, "POSITION": posicion}
+
+    return {
+        "archivo/AUDITORIA/USR5": [
+            ingreso(date(2026, 9, 30), 1), ingreso(date(2026, 10, 24), 2),
+            ingreso(date(2026, 10, 25), 3), ingreso(date(2026, 10, 26), 4),  # hoy: no se toma
+        ],
+        "archivo/CONTABILIDAD/ORTT": [
+            {"RateDate": date(2026, 10, 25), "Currency": "USD", "Rate": Decimal("4100.5000")},
+            {"RateDate": date(2026, 10, 26), "Currency": "USD", "Rate": Decimal("4101")},
+        ],
+        "archivo/USUARIOS_Y_PERMISOS/OUSR": [
+            {"USERID": 1, "USER_CODE": "manager", "U_NAME": "Gerente", "E_Mail": "g@prueba.local",
+             "SUPERUSER": "Y", "Locked": "N", "Department": -2, "Branch": -2},
+        ],
+        "archivo/hbt_tablas": [{"TABLE_NAME": "@HBT_CONFIG"}, {"TABLE_NAME": "@HBT_MUNICIPIO"}],
+        "archivo/hbt_columnas": [
+            columna("@HBT_CONFIG", "U_Valor", 4), columna("@HBT_CONFIG", "Code", 1),
+            columna("@HBT_CONFIG", "Name", 2), columna("@HBT_CONFIG", "U_PASSWORD", 3),
+            columna("@HBT_CONFIG", "U_ClaveApi", 5),
+            columna("@HBT_MUNICIPIO", "Code", 1), columna("@HBT_MUNICIPIO", "Name", 2),
+        ],
+        "@HBT_CONFIG": [{"Code": "1", "Name": "Ajuste", "U_PASSWORD": "no-debe-salir",
+                         "U_Valor": "10", "U_ClaveApi": "tampoco"}],
+        "@HBT_MUNICIPIO": [{"Code": "05001", "Name": "Medellín"}],
+        "catalogo/tablas": [
+            {"TABLE_NAME": "OCRD", "RECORD_COUNT": 120, "TABLE_SIZE": 4096, "IS_COLUMN_TABLE": "TRUE"},
+            {"TABLE_NAME": "ADOC", "RECORD_COUNT": 9000000, "TABLE_SIZE": 2 ** 31,
+             "IS_COLUMN_TABLE": "TRUE"},
+        ],
+        "catalogo/campos_usuario": [{"TableID": "OCRD", "FieldID": 0, "AliasID": "Canal"}],
+        "catalogo/tablas_usuario": [{"TableName": "HBT_CONFIG", "Descr": "Configuración"}],
+        "catalogo/columnas": [
+            columna("OCRD", "CardCode", 1), columna("OINV", "DocTotal", 30),
+            columna("ZZZ_AJENA", "Algo", 1), columna("@HBT_CONFIG", "Code", 1),
+            columna("USR5", "UserCode", 1),
+        ],
+        "diagnostico/listas_precios": [
+            {"ListNum": 1, "ListName": "PÚBLICA", "BASE_NUM": 1, "Factor": Decimal("1"), "ValidFor": "Y"},
+        ],
+    }
 
 
 # --- Datos de prueba ---------------------------------------------------------
@@ -177,6 +256,9 @@ class _Cursor:
             raise AssertionError("Consulta a HANA con la VPN abajo.")
         parte = h.identificar(sql, self.esquema)
         params = tuple(params or ())
+        if parte not in esquema.PARTES:
+            self._otra(sql, parte, params)
+            return
         if sql.lstrip().upper().startswith("SELECT COUNT(*)"):
             tipo = "contar"
         elif 'X."actualizado_en_sap" >= ?' in sql:
@@ -185,7 +267,7 @@ class _Cursor:
             tipo = "socios"
         else:
             tipo = "todo"
-        h.ejecutadas.append(Ejecucion(self.empresa, tipo, parte, params))
+        h.ejecutadas.append(Ejecucion(self.empresa, tipo, parte, params, sql))
         h.linea.append(("hana", "consulta", self.empresa, parte, tipo))
         if (self.empresa, parte) in h.partes_que_fallan:
             raise RuntimeError(h.texto_de_falla)
@@ -205,6 +287,27 @@ class _Cursor:
         alias = [c.hana for c in esquema.PARTES[parte].columnas if c.nombre not in quitar]
         self.description = [(a,) for a in alias]
         self._filas = [tuple(f.get(a) for a in alias) for f in filas]
+
+    def _otra(self, sql: str, clave: str, params: tuple) -> None:
+        """Consultas del archivo, del catálogo, del diagnóstico y de tablas @HBT_*."""
+        h = self.hana
+        desde = _RE_REGISTRO_DESDE.search(sql)
+        hasta = _RE_REGISTRO_HASTA.search(sql)
+        tipo = "registro" if (desde or hasta) else "todo"
+        h.ejecutadas.append(Ejecucion(self.empresa, tipo, clave, params, sql))
+        h.linea.append(("hana", "consulta", self.empresa, clave, tipo))
+        if (self.empresa, clave) in h.partes_que_fallan:
+            raise RuntimeError(h.texto_de_falla)
+        filas = list(h.archivo.get(self.empresa, {}).get(clave, []))
+        if desde:
+            col = desde.group(1)
+            filas = [f for f in filas if col in f and params[0] <= f[col] < params[1]]
+        elif hasta:
+            col = hasta.group(1)
+            filas = [f for f in filas if col in f and f[col] < params[0]]
+        columnas = columnas_select(sql if clave.startswith("@") else h.otras[clave])
+        self.description = [(c,) for c in columnas]
+        self._filas = [tuple(f.get(c) for c in columnas) for f in filas]
 
     def fetchmany(self, n: int) -> list[tuple]:
         lote, self._filas = self._filas[:n], self._filas[n:]
@@ -234,7 +337,19 @@ class HanaFalsa:
     partes_que_fallan: set[tuple[str, str]] = field(default_factory=set)
     texto_de_falla: str = "falla simulada de la consulta"  # texto del driver en una falla
     columnas_que_faltan: dict[tuple[str, str], set[str]] = field(default_factory=dict)
+    archivo: dict[str, dict[str, list[dict]]] = field(default_factory=dict)  # empresa -> clave -> filas
     _textos: dict[str, dict[str, str]] = field(default_factory=dict)
+    _otras: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def otras(self) -> dict[str, str]:
+        """Texto de cada consulta del archivo, el catálogo y el diagnóstico, por clave."""
+        if not self._otras:
+            for carpeta in OTRAS_CARPETAS:
+                for ruta in sorted((QUERIES / carpeta).rglob("*.sql")):
+                    clave = ruta.relative_to(QUERIES).with_suffix("").as_posix()
+                    self._otras[clave] = consultas.leer(f"{clave}.sql", "")
+        return self._otras
 
     @contextmanager
     def conectar(self, cfg_hana: HanaConfig, empresa: EmpresaHana) -> Iterator[ConexionFalsa]:
@@ -254,10 +369,14 @@ class HanaFalsa:
                 nombre: consultas.leer(parte.consulta, esquema_db)
                 for nombre, parte in esquema.PARTES.items()
             }
-        encontradas = [n for n, texto in self._textos[esquema_db].items() if texto in sql]
+        textos = {**self.otras, **self._textos[esquema_db]}
+        encontradas = [n for n, texto in textos.items() if texto in sql]
         if not encontradas:
+            m = _RE_HBT.search(sql)
+            if m:
+                return m.group(1)
             raise AssertionError(f"SQL que no sale de ningún archivo de robot/queries: {sql[:80]!r}")
-        return max(encontradas, key=lambda n: len(self._textos[esquema_db][n]))
+        return max(encontradas, key=lambda n: len(textos[n]))
 
     def de(self, empresa: str, tipo: str | None = None, parte: str | None = None) -> list[Ejecucion]:
         return [

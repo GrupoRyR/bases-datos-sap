@@ -88,19 +88,22 @@ AHORA = datetime(2026, 10, 26, 2, 0, 5, tzinfo=config.BOGOTA)
 def escenario(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """VPN, HANA y API falsas que comparten una línea de tiempo, y la carpeta en tmp.
 
-    Las consultas son las reales de robot/queries. Cada CSV escrito queda en la
-    línea como ("csv", ruta) para revisar las dos fases con revisar_fases().
+    Las consultas son las reales de robot/queries. Cada CSV escrito o ampliado
+    queda en la línea como ("csv", ruta) para revisar las dos fases con revisar_fases().
     """
     import carpeta
     import esquema
     from api import ApiCliente
     from fake_api import ApiFalsa
-    from fake_hana import QUERIES, HanaFalsa, VpnFalsa, config_de_prueba, datos_empresa
+    from fake_hana import QUERIES, HanaFalsa, VpnFalsa, config_de_prueba, datos_archivo, datos_empresa
 
     monkeypatch.setattr(config, "QUERIES_DIR", QUERIES)
     linea: list = []
     vpn = VpnFalsa(linea)
-    hana = HanaFalsa({e: datos_empresa(e) for e in config.EMPRESAS}, linea=linea, vpn=vpn)
+    hana = HanaFalsa(
+        {e: datos_empresa(e) for e in config.EMPRESAS}, linea=linea, vpn=vpn,
+        archivo={e: datos_archivo(e) for e in config.EMPRESAS},
+    )
     servidor = ApiFalsa(
         linea=linea, columnas_por_parte={n: p.nombres for n, p in esquema.PARTES.items()}
     )
@@ -110,12 +113,18 @@ def escenario(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
         return ApiCliente(cfg_api, transporte=servidor, reloj=servidor.reloj, dormir=lambda s: None)
 
     escribir = carpeta.escribir_csv
+    anexar = carpeta.anexar_csv
 
     def espia(ruta, columnas, filas):
         linea.append(("csv", Path(ruta)))
         return escribir(ruta, columnas, filas)
 
+    def espia_anexar(ruta, columnas, filas):
+        linea.append(("csv", Path(ruta)))
+        return anexar(ruta, columnas, filas)
+
     monkeypatch.setattr(carpeta, "escribir_csv", espia)
+    monkeypatch.setattr(carpeta, "anexar_csv", espia_anexar)
     return SimpleNamespace(
         linea=linea,
         vpn=vpn,

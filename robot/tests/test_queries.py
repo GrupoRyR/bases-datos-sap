@@ -111,3 +111,60 @@ def test_catalogo_y_diagnostico_existen():
                     "catalogo/tablas_usuario.sql", "catalogo/columnas.sql",
                     "diagnostico/listas_precios.sql"):
         assert (QUERIES / archivo).is_file(), archivo
+
+
+# --- Archivo (plan §5) --------------------------------------------------------------
+
+ARCHIVO = sorted((QUERIES / "archivo").rglob("*.sql"))
+TABLAS_ARCHIVO = [r for r in ARCHIVO if r.parent != QUERIES / "archivo"]
+CABECERA_ARCHIVO = (
+    "VALIDAR CON DATOS REALES: columnas tomadas de la documentación de SAP B1; "
+    r"confirmarlas con _CATALOGO\<empresa>\columnas antes de la primera extracción"
+)
+OHEM_PERMITIDAS = {"empID", "firstName", "middleName", "lastName", "jobTitle", "position", "dept", "email"}
+RE_CLAVE = re.compile(r"PASS|PWD|CLAVE", re.IGNORECASE)
+
+
+def _columnas(sql: str) -> list[str]:
+    """Columnas T0."X" / T1."X" del SELECT (sin comentarios)."""
+    seleccion = re.search(r"\bSELECT\b(.*?)\bFROM\b", _sin_comentarios(sql), re.DOTALL | re.IGNORECASE)
+    assert seleccion
+    return re.findall(r'\bT\d\."([^"]+)"', seleccion.group(1))
+
+
+def test_hay_consultas_de_archivo():
+    assert len(TABLAS_ARCHIVO) == 55
+    assert {r.name for r in ARCHIVO if r.parent == QUERIES / "archivo"} == {
+        "hbt_tablas.sql", "hbt_columnas.sql",
+    }
+
+
+@pytest.mark.parametrize("ruta", TABLAS_ARCHIVO, ids=_id)
+def test_cada_archivo_lee_su_tabla_con_columnas_listadas(ruta: Path):
+    sql = _texto(ruta)
+    assert CABECERA_ARCHIVO in sql
+    codigo = _sin_comentarios(sql)
+    assert re.search(rf'FROM "{re.escape(ruta.stem)}" T0\b', codigo)
+    columnas = _columnas(sql)
+    assert columnas and len(columnas) == len(set(columnas)), "columnas repetidas"
+    assert "ORDER BY" in codigo
+
+
+@pytest.mark.parametrize("tabla", ["OUSR", "AUSR"])
+def test_usuarios_sin_columnas_de_claves(tabla: str):
+    [ruta] = [r for r in TABLAS_ARCHIVO if r.stem == tabla]
+    for columna in _columnas(_texto(ruta)):
+        assert not RE_CLAVE.search(columna), columna
+
+
+def test_ohem_solo_nombre_cargo_area_y_correo():
+    sql = _texto(QUERIES / "archivo" / "ORGANIZACION" / "OHEM.sql")
+    assert set(_columnas(sql)) == OHEM_PERMITIDAS
+
+
+def test_hbt_descubre_tablas_y_columnas_sin_parametros():
+    for nombre in ("hbt_tablas.sql", "hbt_columnas.sql"):
+        codigo = _sin_comentarios(_texto(QUERIES / "archivo" / nombre))
+        assert "CURRENT_SCHEMA" in codigo
+        assert "LIKE '@HBT%'" in codigo
+    assert '"POSITION"' in _texto(QUERIES / "archivo" / "hbt_columnas.sql")
