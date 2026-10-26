@@ -2,6 +2,7 @@
 
 namespace App\Modules\Sap\Application\Runs;
 
+use App\Modules\Sap\Domain\Runs\RunState;
 use App\Modules\Sap\Http\Exceptions\RobotRequestRejected;
 use App\Modules\Sap\Models\Run;
 
@@ -30,7 +31,7 @@ final class OpenRuns
      */
     public function expireIdle(): int
     {
-        return Run::where('estado', 'abierta')
+        return Run::where('estado', RunState::Open)
             ->where('abierta_hasta', '<=', now())
             ->get()
             ->filter(fn (Run $run): bool => $run->expireIfIdle())

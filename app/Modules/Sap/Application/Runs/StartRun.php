@@ -12,6 +12,7 @@ use App\Modules\Sap\Domain\Values\SapTime;
 use App\Modules\Sap\Http\Exceptions\RobotRequestRejected;
 use App\Modules\Sap\Models\Run;
 use Illuminate\Database\UniqueConstraintViolationException;
+use LogicException;
 
 /**
  * Opens a run (docs/contrato-robot.md, section 4.1): one dataset of one
@@ -61,25 +62,34 @@ final class StartRun
 
         $this->expireIdleRun($dataset, $company);
 
-        try {
-            return Run::create([
-                'conjunto' => $dataset,
-                'empresa' => $company,
-                'tipo' => $type,
-                'partes' => $parts,
-                'solicitudes' => $requests,
-                'fecha_corte' => $cutOff,
-                'extraida_en' => $extractedAt,
-                'estado' => RunState::Open,
-                'abierta_lock' => Run::lockFor($dataset, $company),
-                'abierta_hasta' => now()->addMinutes(Run::IDLE_MINUTES),
-                'robot_key' => $robotKey,
-            ]);
-        } catch (UniqueConstraintViolationException) {
-            $open = Run::where('abierta_lock', Run::lockFor($dataset, $company))->first();
+        $attributes = [
+            'conjunto' => $dataset,
+            'empresa' => $company,
+            'tipo' => $type,
+            'partes' => $parts,
+            'solicitudes' => $requests,
+            'fecha_corte' => $cutOff,
+            'extraida_en' => $extractedAt,
+            'estado' => RunState::Open,
+            'abierta_lock' => Run::lockFor($dataset, $company),
+            'robot_key' => $robotKey,
+        ];
 
-            throw new RobotRequestRejected(409, 'Ya hay una corrida abierta de ese conjunto y empresa.', ['run_id' => $open?->id]);
+        // The second try covers the run holding the lock finishing between
+        // the refused insert and the lookup.
+        foreach ([1, 2] as $attempt) {
+            try {
+                return Run::create([...$attributes, 'abierta_hasta' => now()->addMinutes(Run::IDLE_MINUTES)]);
+            } catch (UniqueConstraintViolationException) {
+                $open = Run::where('abierta_lock', $attributes['abierta_lock'])->first();
+
+                if ($open !== null || $attempt === 2) {
+                    throw new RobotRequestRejected(409, 'Ya hay una corrida abierta de ese conjunto y empresa.', ['run_id' => $open?->id]);
+                }
+            }
         }
+
+        throw new LogicException('Unreachable: every attempt returns or throws.');
     }
 
     /**

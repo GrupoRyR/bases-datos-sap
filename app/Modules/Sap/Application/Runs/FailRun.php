@@ -26,7 +26,9 @@ final class FailRun
             ]);
         }
 
-        $run->finish(RunState::Failed, $error);
+        if (! $run->finish(RunState::Failed, $error)) {
+            throw new RobotRequestRejected(409, 'La corrida ya no está abierta.', ['estado' => $run->estado->value]);
+        }
 
         return $run;
     }

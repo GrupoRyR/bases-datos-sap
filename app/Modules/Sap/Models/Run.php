@@ -82,11 +82,22 @@ final class Run extends Model
 
     /**
      * Ends the run as failed, expired or closed: frees its dataset and
-     * company for the next run and discards its batches.
+     * company for the next run and discards its batches. The run row is
+     * locked first, so a batch, a close or the scheduler racing for the same
+     * run cannot both win. Returns false (and reloads the run) if it was no
+     * longer open.
      */
-    public function finish(RunState $state, ?string $error = null): void
+    public function finish(RunState $state, ?string $error = null): bool
     {
-        DB::transaction(function () use ($state, $error) {
+        return DB::transaction(function () use ($state, $error): bool {
+            $current = self::query()->whereKey($this->id)->lockForUpdate()->firstOrFail();
+
+            if ($current->estado !== RunState::Open) {
+                $this->setRawAttributes($current->getAttributes(), true);
+
+                return false;
+            }
+
             $this->forceFill([
                 'estado' => $state,
                 'error' => $error,
@@ -96,6 +107,8 @@ final class Run extends Model
 
             DB::table('robot_batch_keys')->where('run_id', $this->id)->delete();
             DB::table('robot_batches')->where('run_id', $this->id)->delete();
+
+            return true;
         });
     }
 
@@ -108,8 +121,6 @@ final class Run extends Model
             return false;
         }
 
-        $this->finish(RunState::Expired, 'Pasaron '.self::IDLE_MINUTES.' minutos sin recibir lotes.');
-
-        return true;
+        return $this->finish(RunState::Expired, 'Pasaron '.self::IDLE_MINUTES.' minutos sin recibir lotes.');
     }
 }
