@@ -45,6 +45,15 @@ PARTES_POR_SOLICITUD = {
     ("MAESTROS", "catalogos"): {"grupos_clientes", "condiciones_pago", "municipios"},
 }
 
+
+
+def _partes_que_necesita(conjunto: str, parte: str | None, omitibles: set[str]) -> set[str]:
+    """Partes que la corrida debe traer para una solicitud (§7.1). Pedir todo el conjunto
+    no exige las partes que la empresa puede omitir (§4.1); pedir solo esas sí."""
+    pedidas = PARTES_POR_SOLICITUD[(conjunto, parte)]
+    return pedidas - omitibles if len(pedidas) > 1 else pedidas
+
+
 _RE_KEY = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 _RE_NONCE = re.compile(r"^[0-9a-f]{32}$")
 _RE_FIRMA = re.compile(r"^sha256=[0-9a-f]{64}$")
@@ -317,7 +326,11 @@ class ApiFalsa:
         for parte, modo in partes.items():
             if parte not in PARTES[conjunto] or modo not in ("todo", "cambios"):
                 raise _rechazo(f"Parte o modo inválido: {parte}.", f"partes.{parte}")
-        if tipo == "completa" and (set(partes) != set(PARTES[conjunto]) or set(partes.values()) != {"todo"}):
+        # Contrato §4.1: Derivados no tiene lista de precios pública y puede omitir precios.
+        omitibles = {"precios"} if (empresa, conjunto) == ("SDC", "MAESTROS") else set()
+        if tipo == "completa" and (
+            not set(PARTES[conjunto]) - omitibles <= set(partes) or set(partes.values()) != {"todo"}
+        ):
             raise _rechazo("Una corrida completa lleva todas las partes en modo todo.", "partes")
         if not isinstance(solicitudes, list):
             raise _rechazo("solicitudes debe ser una lista.", "solicitudes")
@@ -327,7 +340,7 @@ class ApiFalsa:
                 solicitud is None
                 or self.estado_solicitudes.get(sid) != "tomada"
                 or (solicitud["empresa"], solicitud["conjunto"]) != (empresa, conjunto)
-                or not PARTES_POR_SOLICITUD[(conjunto, solicitud.get("parte"))] <= set(partes)
+                or not _partes_que_necesita(conjunto, solicitud.get("parte"), omitibles) <= set(partes)
             ):
                 raise _rechazo(f"La solicitud {sid} no corresponde a esta corrida.", "solicitudes")
         fecha_corte = datos.get("fecha_corte")

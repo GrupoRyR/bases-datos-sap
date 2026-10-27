@@ -50,7 +50,7 @@ final class StartRun
             $this->fail('tipo', 'Tipo desconocido: solo completa o solicitud.');
         }
 
-        $parts = $dataset ? $this->parts($input['partes'] ?? null, $dataset, $type) : [];
+        $parts = $dataset ? $this->parts($input['partes'] ?? null, $dataset, $type, $company) : [];
         $requests = $this->requests($input['solicitudes'] ?? []);
         $cutOff = $dataset ? $this->cutOff($input['fecha_corte'] ?? null, $dataset) : null;
         $extractedAt = SapTime::parse($input['extraida_en'] ?? null);
@@ -105,7 +105,7 @@ final class StartRun
     /**
      * @return array<string, string> Each part and its mode.
      */
-    private function parts(mixed $parts, Dataset $dataset, ?RunType $type): array
+    private function parts(mixed $parts, Dataset $dataset, ?RunType $type, ?Company $company): array
     {
         if (! is_array($parts) || $parts === [] || array_is_list($parts)) {
             $this->fail('partes', 'Debe traer al menos una parte con su modo.');
@@ -134,11 +134,38 @@ final class StartRun
             }
         }
 
-        if ($type === RunType::Full && array_diff(array_map(fn (Part $part): string => $part->value, Part::forDataset($dataset)), array_keys($parts)) !== []) {
+        if ($type === RunType::Full && array_diff($this->required($dataset, $company), array_keys($parts)) !== []) {
             $this->fail('partes', 'Una corrida completa trae todas las partes del conjunto.');
         }
 
         return $valid;
+    }
+
+    /**
+     * The parts a full run must bring: all of the dataset's, except those the
+     * company has no data for (Derivados has no public price list).
+     *
+     * @return list<string>
+     */
+    private function required(Dataset $dataset, ?Company $company): array
+    {
+        $omittable = $this->omittable($company);
+
+        return array_values(array_map(
+            fn (Part $part): string => $part->value,
+            array_filter(Part::forDataset($dataset), fn (Part $part): bool => ! in_array($part, $omittable, true)),
+        ));
+    }
+
+    /**
+     * Parts a company may leave out of a full run (docs/contrato-robot.md, section 4.1).
+     * Leaving one out changes nothing for it: no rows are inactivated.
+     *
+     * @return list<Part>
+     */
+    private function omittable(?Company $company): array
+    {
+        return $company === Company::Sdc ? [Part::Prices] : [];
     }
 
     /**
@@ -168,7 +195,14 @@ final class StartRun
 
         foreach ($ids as $id) {
             $request = $found->get($id);
-            $asked = $request === null ? [] : array_map(fn (Part $part): string => $part->value, RequestScope::partsFor($request->conjunto, $request->parte));
+            $askedParts = $request === null ? [] : RequestScope::partsFor($request->conjunto, $request->parte);
+            // A request for the whole dataset does not need the parts the company may omit;
+            // one for just those parts still does, so it is answered (the robot fails it).
+            $omitted = $request?->parte === null ? $this->omittable($company) : [];
+            $asked = array_values(array_map(
+                fn (Part $part): string => $part->value,
+                array_filter($askedParts, fn (Part $part): bool => ! in_array($part, $omitted, true)),
+            ));
 
             // A request already linked belongs to another open run.
             if ($request === null || $request->estado !== RequestState::Taken || $request->run_id !== null || $request->empresa !== $company

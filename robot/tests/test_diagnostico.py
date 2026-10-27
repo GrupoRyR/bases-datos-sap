@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
 from pathlib import Path
 
 import diagnostico
@@ -45,6 +46,29 @@ def test_resumen_con_filas_conteos_y_activos(escenario):
     listas = _fila(resumen, "SGX", "listas_precios")
     assert (listas["filas"], listas["conteo_sap"], listas["error"]) == ("1", "", "")
     revisar_fases(e.linea)
+
+
+def test_precios_del_diagnostico_son_solo_la_lista_de_la_empresa(escenario):
+    e = escenario
+    _, fallos = _correr(e, ("SGX",))
+    assert fallos == []
+    precios = _fila(_resumen(e), "SGX", "precios")
+    assert (precios["filas"], precios["conteo_sap"], precios["error"]) == ("2", "2", "")
+
+
+def test_empresa_sin_lista_de_precios_se_omite_sin_ser_un_fallo(escenario):
+    e = escenario
+    e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=None)
+    _, fallos = _correr(e, ("SDC",))
+    assert fallos == []
+    resumen = _resumen(e)
+    precios = _fila(resumen, "SDC", "precios")
+    assert precios["error"].startswith("Omitida") and "HANA_SDC_LISTA_PRECIOS" in precios["error"]
+    assert (precios["filas"], precios["conteo_sap"]) == ("", "")
+    assert not e.hana.de("SDC", parte="precios")
+    # Las demás partes y las listas de OPLN (para elegir el número) siguen saliendo.
+    assert _fila(resumen, "SDC", "cartera")["error"] == ""
+    assert _fila(resumen, "SDC", "listas_precios")["filas"] == "1"
 
 
 def test_archivos_de_datos_por_parte(escenario):

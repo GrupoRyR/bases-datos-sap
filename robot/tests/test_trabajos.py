@@ -139,6 +139,67 @@ def test_completa_de_las_dos_empresas():
     assert trabajos[1].fecha_corte == "2026-10-25"
 
 
+SIN_PRECIOS = frozenset({"SDC"})
+
+
+def test_completa_de_la_empresa_sin_lista_de_precios_no_lleva_precios():
+    sgx_m, _, sdc_m, sdc_c = trabajos_completos(["SGX", "SDC"], HOY, [], SIN_PRECIOS)
+    assert "precios" in sgx_m.partes
+    assert "precios" not in sdc_m.partes
+    assert list(sdc_m.partes) == [p for p in esquema.PARTES_POR_CONJUNTO["MAESTROS"] if p != "precios"]
+    assert set(sdc_m.partes.values()) == {"todo"}
+    assert sdc_c.partes == {"cartera": "todo"}
+
+
+def test_solicitud_de_todo_maestros_de_la_empresa_sin_precios_no_los_pide():
+    [sdc, sgx] = trabajos_de_solicitudes([_sol(1, empresa="SDC", parte=None), _sol(2, parte=None)], HOY, SIN_PRECIOS)
+    assert "precios" not in sdc.partes and "clientes" in sdc.partes
+    assert "precios" in sgx.partes
+
+
+def test_solicitud_de_solo_precios_de_la_empresa_sin_ellos_los_conserva_para_fallar_con_mensaje():
+    [t] = trabajos_de_solicitudes([_sol(1, empresa="SDC", parte="precios")], HOY, SIN_PRECIOS)
+    assert t.partes == {"precios": "todo"}
+
+
+def test_solicitud_de_solo_precios_no_arrastra_a_la_de_todo_maestros_de_su_empresa():
+    maestros, precios = trabajos_de_solicitudes(
+        [_sol(1, empresa="SDC", parte="precios"), _sol(2, empresa="SDC", parte=None)], HOY, SIN_PRECIOS
+    )
+    assert (maestros.solicitudes, "precios" in maestros.partes) == ([2], False)
+    assert (precios.solicitudes, precios.partes) == ([1], {"precios": "todo"})
+
+
+def test_solicitudes_de_solo_precios_de_la_misma_empresa_comparten_su_trabajo():
+    [t] = trabajos_de_solicitudes(
+        [_sol(1, empresa="SDC", parte="precios"), _sol(2, empresa="SDC", parte="precios")], HOY, SIN_PRECIOS
+    )
+    assert t.solicitudes == [1, 2]
+
+
+def test_solicitud_de_solo_precios_de_empresa_con_lista_sigue_en_su_grupo():
+    [t] = trabajos_de_solicitudes(
+        [_sol(1, parte="precios"), _sol(2, parte=None)], HOY, SIN_PRECIOS
+    )
+    assert t.solicitudes == [1, 2] and "precios" in t.partes
+
+
+def test_completa_deja_la_solicitud_de_solo_precios_como_trabajo_aparte():
+    trabajos = trabajos_completos(["SGX", "SDC"], HOY, [
+        _sol(30, empresa="SDC", parte="precios"),
+        _sol(31, empresa="SDC", parte=None),
+    ], SIN_PRECIOS)
+    assert [(t.empresa, t.conjunto, t.tipo, t.solicitudes) for t in trabajos] == [
+        ("SGX", "MAESTROS", "completa", []),
+        ("SGX", "CARTERA", "completa", []),
+        ("SDC", "MAESTROS", "completa", [31]),
+        ("SDC", "CARTERA", "completa", []),
+        ("SDC", "MAESTROS", "solicitud", [30]),
+    ]
+    assert "precios" not in trabajos[2].partes
+    assert trabajos[4].partes == {"precios": "todo"}
+
+
 def test_completa_adjunta_las_solicitudes_tomadas():
     trabajos = trabajos_completos(["SGX", "SDC"], HOY, [
         _sol(10, parte="clientes", desde={"clientes": None}),

@@ -23,7 +23,7 @@ import consultas
 import esquema
 import hana
 from carpeta import DIAGNOSTICO, Carpeta, texto_crudo
-from config import Config
+from config import Config, EmpresaHana
 from extraccion import mensaje_seguro
 from registro import obtener
 
@@ -71,12 +71,18 @@ class Diagnostico:
     # --- FASE 1 -----------------------------------------------------------
 
     def __call__(self, conn: Any, empresa: str) -> None:
-        esquema_db = self.cfg.hana.empresas[empresa].esquema
+        empresa_cfg = self.cfg.hana.empresas[empresa]
+        esquema_db = empresa_cfg.esquema
         for parte in esquema.PARTES.values():
             p = ParteDiagnostico(empresa, parte.conjunto, parte.nombre)
             self.partes.append(p)
+            if parte.nombre == esquema.PRECIOS and empresa_cfg.sin_precios:
+                # Como en la corrida real (contrato §4.1): no se pide y no es un fallo.
+                p.error = (f"Omitida: {empresa} no tiene lista de precios pública "
+                           f"({empresa_cfg.variable_lista_precios}).")
+                continue
             try:
-                self._leer_parte(conn, esquema_db, parte, p)
+                self._leer_parte(conn, empresa_cfg, parte, p)
             except Exception as exc:
                 self._fallo(p, exc)
         p = ParteDiagnostico(empresa, "DIAGNOSTICO", LISTAS_PRECIOS)
@@ -89,10 +95,10 @@ class Diagnostico:
         except Exception as exc:
             self._fallo(p, exc)
 
-    def _leer_parte(self, conn: Any, esquema_db: str, parte: esquema.Parte, p: ParteDiagnostico) -> None:
+    def _leer_parte(self, conn: Any, empresa_cfg: EmpresaHana, parte: esquema.Parte, p: ParteDiagnostico) -> None:
         etiqueta = f"{p.empresa} {parte.nombre} (diagnóstico)"
-        sql = consultas.leer(parte.consulta, esquema_db)
-        columnas, datos = hana.ejecutar(conn, sql, etiqueta, esquema_db)
+        sql = consultas.leer_parte(parte, empresa_cfg)
+        columnas, datos = hana.ejecutar(conn, sql, etiqueta, empresa_cfg.esquema)
         # Si la validación falla, igual se guardan las filas crudas para revisarlas.
         p.columnas, p.filas = columnas, [[texto_crudo(v) for v in f] for f in datos]
         p.conteo_sap = hana.contar(conn, consultas.sql_contar(sql), f"{etiqueta} conteo")

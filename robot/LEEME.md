@@ -32,6 +32,8 @@ py -3.14 -m venv .venv
 1. Copia `.env.example` como `.env` en la carpeta `robot\`.
 2. TI llena las credenciales: la VPN, HANA (un usuario por empresa), la llave de la API y, si quieres alertas, el correo.
 
+3. Los precios salen de la lista pública de cada empresa, buscada por **número** (no por nombre): `HANA_SGX_LISTA_PRECIOS` (por defecto `1`) y `HANA_SDC_LISTA_PRECIOS` (vacía: Derivados todavía no tiene lista pública). Sin número, esa empresa manda su MAESTROS sin la parte `precios` (contrato §4.1): la nocturna no falla y no consulta precios. Una solicitud de solo precios de esa empresa falla al instante, en la nocturna o en la revisión de cada minuto, con un mensaje que dice qué variable poner; no arrastra a las solicitudes de todo MAESTROS de la misma empresa. Cuando Derivados defina su lista, pon su número en `HANA_SDC_LISTA_PRECIOS` y los precios vuelven solos.
+
 El `.env` nunca se sube a Git. Los CSV quedan en `BASES_SAP_CSV_DIR`, fuera del repo.
 
 ## Primera ejecución con SAP real
@@ -46,11 +48,11 @@ Antes de programar las tareas, corre esto desde `robot\etl` (no envía nada a la
 Con lo que dejan en `_CATALOGO` y `_DIAGNOSTICO`, revisa lo que las consultas marcan como `VALIDAR CON DATOS REALES`:
 
 - [ ] `OITM` tiene la columna `UpdateTS` (hora del cambio, `HHMMSS`).
-- [ ] El nombre exacto de la lista **PÚBLICA** en `OPLN` de cada empresa (`_DIAGNOSTICO\<empresa>\listas_precios`).
+- [ ] El número de la lista de precios **pública** en `OPLN` de cada empresa (`_DIAGNOSTICO\<empresa>\listas_precios`). Segurex: la 1 (`LISTA PUBLICO`). Derivados todavía no tiene una definida.
 - [ ] `@HBT_MUNICIPIO` existe en Derivados y trae los municipios.
 - [ ] `CRD1.County` guarda el código del municipio.
 - [ ] `activo`: que `validFor = 'N'` o `frozenFor = 'Y'` marque de verdad a los socios y artículos inactivos.
-- [ ] En Derivados, que las cuentas de cartera de la consulta sean las correctas.
+- [ ] La cartera de Derivados (`queries\cartera\HBT_SDERIVADOS`, cuentas 13050501 y 13051005) da las mismas cifras que el informe de cartera de SAP. Segurex usa 13050505 y 13051005 (`queries\cartera\SEGUREX`). Cartera no tiene consulta común: si `HANA_<EMPRESA>_SCHEMA` apunta a otro esquema, el robot falla con «No hay consulta de cartera para el esquema X» hasta que agregues `queries\cartera\X\cartera.sql`.
 - [ ] Los nombres de columna del archivo (`queries\archivo`) contra `_CATALOGO\<empresa>\columnas`.
 - [ ] El tamaño de `ADOC`, `ADO1`, `AJDT` y `AJD1` en `_CATALOGO\<empresa>\tablas` antes de activar `BASES_SAP_ARCHIVO_HISTORIAL_DOCUMENTOS`.
 
@@ -129,6 +131,7 @@ Las categorías del archivo (`AUDITORIA`, `CONTABILIDAD`, `USUARIOS_Y_PERMISOS`,
 ## Registro y estado
 
 - `robot\logs\robot.log`: el detalle de cada ejecución (rota a los 5 MB). Las contraseñas nunca se escriben. Una revisión de solicitudes sin trabajo no escribe nada.
+- Un cliente o proveedor que llega de SAP sin nombre no frena la corrida: se envía con su código como nombre y queda un aviso (`WARNING ... llegó sin nombre`) en el log, para que TI le ponga el nombre en SAP.
 - `robot\state\ultima_ejecucion.json`: cómo terminó la última ejecución. Nunca lleva datos de SAP.
 - `robot\state\robot.lock`: el candado, mientras el robot corre.
 

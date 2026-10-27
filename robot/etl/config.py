@@ -23,6 +23,9 @@ BOGOTA = timezone(timedelta(hours=-5), "America/Bogota")
 
 EMPRESAS = ("SGX", "SDC")
 ESQUEMAS_POR_DEFECTO = {"SGX": "SEGUREX", "SDC": "HBT_SDERIVADOS"}
+# Número (OPLN.ListNum) de la lista de precios pública de cada empresa. Segurex:
+# la 1, «LISTA PUBLICO». Derivados todavía no tiene una definida.
+LISTAS_PRECIOS_POR_DEFECTO: dict[str, int | None] = {"SGX": 1, "SDC": None}
 CSV_DIR_POR_DEFECTO = r"C:\Users\Claude\Documents\CEREBRO\SAP\BASES_DE_DATOS"
 FRANJAS_POR_DEFECTO = "00:00,05:00,06:00,12:00,12:30"
 SOPHOS_CLI_POR_DEFECTO = r"C:\Program Files (x86)\Sophos\Connect\sccli.exe"
@@ -61,6 +64,23 @@ def _int(nombre: str, por_defecto: int, invalidos: list[str]) -> int:
         return por_defecto
 
 
+def _int_o_nada(nombre: str, por_defecto: int | None, invalidos: list[str]) -> int | None:
+    """Como `_int`, pero el valor por defecto puede ser None (la variable es opcional)."""
+    valor = (os.getenv(nombre) or "").strip()
+    if not valor:
+        return por_defecto
+    try:
+        return int(valor)
+    except ValueError:
+        invalidos.append(f"{nombre}={valor}")
+        return por_defecto
+
+
+def variable_lista_precios(empresa: str) -> str:
+    """Nombre de la variable con el número de la lista de precios pública de la empresa."""
+    return f"HANA_{empresa}_LISTA_PRECIOS"
+
+
 def _texto(nombre: str, por_defecto: str = "") -> str:
     """Valor sin espacios; si la variable falta o está vacía, el valor por defecto."""
     return (os.getenv(nombre) or "").strip() or por_defecto
@@ -97,6 +117,25 @@ class EmpresaHana:
     usuario: str
     password: str
     esquema: str
+    # Número de la lista de precios pública (OPLN.ListNum); None: la empresa no tiene.
+    lista_precios: int | None = None
+
+    @property
+    def variable_lista_precios(self) -> str:
+        return variable_lista_precios(self.codigo)
+
+    @property
+    def sin_precios(self) -> bool:
+        """Sin lista pública no se piden precios: su MAESTROS va sin la parte precios (contrato §4.1)."""
+        return self.lista_precios is None
+
+    def error_sin_precios(self) -> ConfigError:
+        """Lo que falla cuando, aun así, alguien pide los precios de esta empresa."""
+        return ConfigError(
+            f"{self.codigo} no tiene lista de precios pública definida: pon su número en "
+            f"{self.variable_lista_precios} (robot/.env). El número sale de "
+            f"_DIAGNOSTICO\\{self.codigo}\\listas_precios."
+        )
 
 
 @dataclass(frozen=True)
@@ -105,6 +144,10 @@ class HanaConfig:
     port: int
     timeout: int
     empresas: dict[str, EmpresaHana] = field(default_factory=dict)
+
+    def sin_precios(self) -> frozenset[str]:
+        """Códigos de las empresas sin lista de precios pública."""
+        return frozenset(c for c, e in self.empresas.items() if e.sin_precios)
 
 
 @dataclass(frozen=True)
@@ -244,6 +287,9 @@ def cargar_config(env_path: Path | None = None) -> Config:
                     usuario=_texto(f"HANA_{codigo}_USER"),
                     password=os.getenv(f"HANA_{codigo}_PASSWORD", ""),
                     esquema=_texto(f"HANA_{codigo}_SCHEMA", ESQUEMAS_POR_DEFECTO[codigo]),
+                    lista_precios=_int_o_nada(
+                        variable_lista_precios(codigo), LISTAS_PRECIOS_POR_DEFECTO[codigo], invalidos
+                    ),
                 )
                 for codigo in EMPRESAS
             },

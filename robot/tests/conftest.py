@@ -73,6 +73,7 @@ def entorno_completo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "HANA_SGX_PASSWORD": "clave-sgx-prueba",
         "HANA_SDC_USER": "usuario-sdc",
         "HANA_SDC_PASSWORD": "clave-sdc-prueba",
+        "HANA_SDC_LISTA_PRECIOS": "1",
         "BASES_SAP_API_URL": "https://bases.prueba.test/",
         "BASES_SAP_ROBOT_KEY_ID": "r2026a",
         "BASES_SAP_ROBOT_SECRET": "secreto-robot-de-prueba",

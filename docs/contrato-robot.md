@@ -84,7 +84,7 @@ Una corrida lleva un conjunto de una empresa. Los datos de una corrida no se ven
 - `partes`: cada parte que traerá la corrida y su modo:
   - `todo`: llegan todas las filas que hay en SAP. Al cerrar, las filas de esa parte y empresa que no llegaron quedan inactivas (`activo = false`). Nunca se borran.
   - `cambios`: llegan solo las filas que cambiaron (§5.1). Al cerrar, no se inactiva nada por ausencia.
-- En una corrida `completa` todas las partes del conjunto van, y van en modo `todo`.
+- En una corrida `completa` todas las partes del conjunto van, y van en modo `todo`. Única excepción: `SDC` (Derivados) todavía no tiene una lista de precios pública, así que su corrida `completa` de `MAESTROS` puede omitir `precios`; al cerrar no se inactiva nada por esa ausencia. `SGX` siempre la envía.
 - `solicitudes`: ids de las solicitudes que atiende (§7). Vacío en una corrida `completa` sin solicitudes. Cada id debe estar `tomada`, ser de la misma empresa y conjunto, y pedir partes incluidas en `partes`; si no, 422.
 - `fecha_corte`: solo en `CARTERA`. En la `completa` nocturna, el día anterior; en una `solicitud`, hoy.
 - `extraida_en`: cuándo terminó la consulta a SAP.
@@ -232,7 +232,7 @@ Tipos: `slp_code`, `total_plazos`, `no_plazo` y `dias`, enteros; las `fecha_*`, 
 | `MAESTROS` | `vendedores` | `vendedores` |
 | `MAESTROS` | `catalogos` | `grupos_clientes`, `condiciones_pago`, `municipios` |
 
-Cada solicitud es de una empresa (`SGX` o `SDC`).
+Cada solicitud es de una empresa (`SGX` o `SDC`). Una solicitud de `MAESTROS` completo de `SDC` se atiende sin `precios` en la corrida (§4.1); una solicitud de solo `precios` sí los necesita en `partes`, y el robot la falla si la empresa no tiene lista.
 
 ### 7.2 Estados
 

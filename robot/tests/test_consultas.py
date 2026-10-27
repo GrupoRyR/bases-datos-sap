@@ -7,7 +7,8 @@ import pytest
 
 import config
 import consultas
-from config import ConfigError
+from config import ConfigError, EmpresaHana
+from esquema import PARTES
 
 
 def _escribir(ruta: Path, texto: str) -> Path:
@@ -31,10 +32,25 @@ def test_solo_hay_archivo_del_esquema():
         consultas.ruta_consulta("maestros/precios.sql", "HBT_SDERIVADOS")
 
 
-def test_fuera_de_maestros_no_hay_archivo_por_esquema():
+def test_cartera_tambien_tiene_archivo_por_esquema():
+    propio = _escribir(config.QUERIES_DIR / "cartera" / "SEGUREX" / "cartera.sql", "SELECT 2")
+    otro = _escribir(config.QUERIES_DIR / "cartera" / "HBT_SDERIVADOS" / "cartera.sql", "SELECT 3")
+    assert consultas.ruta_consulta("cartera/cartera.sql", "SEGUREX") == propio
+    assert consultas.ruta_consulta("cartera/cartera.sql", "HBT_SDERIVADOS") == otro
+
+
+def test_cartera_de_un_esquema_sin_consulta_falla_claro_aunque_haya_otra_comun():
+    _escribir(config.QUERIES_DIR / "cartera" / "cartera.sql", "SELECT 1")
     _escribir(config.QUERIES_DIR / "cartera" / "SEGUREX" / "cartera.sql", "SELECT 2")
-    comun = _escribir(config.QUERIES_DIR / "cartera" / "cartera.sql", "SELECT 1")
-    assert consultas.ruta_consulta("cartera/cartera.sql", "SEGUREX") == comun
+    with pytest.raises(ConfigError, match="No hay consulta de cartera para el esquema SEGUREX_PRUEBA") as exc:
+        consultas.ruta_consulta("cartera/cartera.sql", "SEGUREX_PRUEBA")
+    assert "robot/queries/cartera/SEGUREX_PRUEBA/cartera.sql" in str(exc.value)
+
+
+def test_fuera_de_maestros_y_cartera_no_hay_archivo_por_esquema():
+    _escribir(config.QUERIES_DIR / "diagnostico" / "SEGUREX" / "listas_precios.sql", "SELECT 2")
+    comun = _escribir(config.QUERIES_DIR / "diagnostico" / "listas_precios.sql", "SELECT 1")
+    assert consultas.ruta_consulta("diagnostico/listas_precios.sql", "SEGUREX") == comun
 
 
 def test_falta_la_consulta():
@@ -70,6 +86,34 @@ def test_sql_por_socios():
     )
     with pytest.raises(ValueError):
         consultas.sql_por_socios(SQL, 0)
+
+
+def test_sql_lista_precios():
+    assert consultas.sql_lista_precios(SQL, 1) == (
+        f'SELECT X.* FROM (\n{SQL}\n) X WHERE X."lista_codigo" = 1'
+    )
+
+
+def _empresa(lista: int | None, esquema: str = "SEGUREX") -> EmpresaHana:
+    return EmpresaHana("SGX", "usuario", "clave", esquema, lista_precios=lista)
+
+
+def test_leer_parte_de_precios_filtra_por_el_numero_de_lista():
+    _escribir(config.QUERIES_DIR / "maestros" / "precios.sql", "SELECT 1 FROM DUMMY")
+    assert consultas.leer_parte(PARTES["precios"], _empresa(7)) == (
+        'SELECT X.* FROM (\nSELECT 1 FROM DUMMY\n) X WHERE X."lista_codigo" = 7'
+    )
+
+
+def test_leer_parte_de_precios_sin_lista_falla_diciendo_que_variable_poner():
+    _escribir(config.QUERIES_DIR / "maestros" / "precios.sql", "SELECT 1 FROM DUMMY")
+    with pytest.raises(ConfigError, match="HANA_SGX_LISTA_PRECIOS"):
+        consultas.leer_parte(PARTES["precios"], _empresa(None))
+
+
+def test_leer_parte_de_las_demas_partes_queda_igual():
+    _escribir(config.QUERIES_DIR / "maestros" / "marcas.sql", "SELECT 1 FROM DUMMY")
+    assert consultas.leer_parte(PARTES["marcas"], _empresa(None)) == "SELECT 1 FROM DUMMY"
 
 
 def test_sql_contar():

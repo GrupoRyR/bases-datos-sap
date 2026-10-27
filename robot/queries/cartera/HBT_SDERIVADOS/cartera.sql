@@ -2,12 +2,14 @@
 -- COPIA del gestor de cartera: GESTOR_CARTERA/etl/queries/cartera.sql
 -- Conjunto CARTERA, parte cartera (docs/contrato-robot.md §6). Las etiquetas
 -- ("Código SN"...) se traducen a las columnas del contrato en robot/etl/esquema.py.
--- NO se edita aquí: si cambia, se copia de nuevo desde el gestor, completa,
--- debajo de este bloque. Corre tal cual en el Query Manager de SAP B1, en
--- SEGUREX y en HBT_SDERIVADOS (sin parámetros; el esquema lo pone la conexión).
--- VALIDAR CON DATOS REALES: en HBT_SDERIVADOS, que las cuentas de cartera sean
--- también 13050505 y 13051005 y que la consulta dé las mismas cifras que el
--- informe de cartera de SAP de Derivados.
+-- NO se edita aquí, salvo la lista de cuentas de cartera de esta empresa: si
+-- cambia el gestor, se copia de nuevo, completa, debajo de este bloque y se
+-- vuelve a poner esa lista. Corre tal cual en el Query Manager de SAP B1, en
+-- el esquema HBT_SDERIVADOS (sin parámetros; el esquema lo pone la conexión).
+-- Hay un archivo por esquema porque las cuentas de cartera cambian por empresa:
+-- SEGUREX usa 13050505 y 13051005; HBT_SDERIVADOS usa 13050501 y 13051005.
+-- VALIDAR CON DATOS REALES: que la cartera de Derivados dé las mismas cifras que
+-- el informe de cartera de SAP de Derivados (robot --diagnostico).
 -- ============================================================================
 -- Consulta de cartera SEGUREX (SAP Business One sobre HANA)
 -- Base: consulta original entregada por el negocio.
@@ -121,7 +123,7 @@ FROM (
         SELECT "TransId", "DocTotal", "VatSum" FROM "ORIN"
     ) T5 ON T0."TransId" = T5."TransId"
     WHERE T1."CardType" = 'C'
-      AND T0."Account" IN ('13050505', '13051005')
+      AND T0."Account" IN ('13050501', '13051005')
       AND (T0."BalDueDeb" - T0."BalDueCred") <> 0
 ) X
 ORDER BY X."Nombre SN", X."Fecha vencimiento"

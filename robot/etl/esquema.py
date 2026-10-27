@@ -19,6 +19,9 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Iterable, Literal, Sequence
 
 from config import BOGOTA
+from registro import obtener
+
+log = obtener("esquema")
 
 TEXTO, ENTERO, MONTO, FECHA, HORA, BOOL = "texto", "entero", "monto", "fecha", "hora", "bool"
 
@@ -38,6 +41,8 @@ class Columna:
     tipo: str
     # Obligatoria: no puede llegar nula ni vacía (contrato §4.2).
     requerida: bool = False
+    # Si llega vacía, se usa el valor de esta otra columna del contrato (y se avisa en el log).
+    respaldo: str = ""
 
 
 @dataclass(frozen=True)
@@ -57,14 +62,16 @@ class Parte:
         return [c.nombre for c in self.columnas]
 
 
-def _m(nombre: str, tipo: str = TEXTO, requerida: bool = False) -> Columna:
+def _m(nombre: str, tipo: str = TEXTO, requerida: bool = False, respaldo: str = "") -> Columna:
     """Columna de MAESTROS: el alias del SQL es el nombre del contrato."""
-    return Columna(nombre, nombre, tipo, requerida)
+    return Columna(nombre, nombre, tipo, requerida, respaldo)
 
 
+# Un socio sin nombre en SAP (pasó con un proveedor de Derivados) no frena la corrida:
+# se envía con su código como nombre y preparar_filas() lo anota como aviso.
 _SOCIO = (
     _m("codigo", requerida=True),
-    _m("nombre", requerida=True),
+    _m("nombre", requerida=True, respaldo="codigo"),
     _m("nombre_extranjero"),
     _m("nit"),
     _m("grupo_codigo", ENTERO),
@@ -205,8 +212,11 @@ def _maestro(
     return Parte(nombre, "MAESTROS", f"maestros/{nombre}.sql", columnas, llave, modo, incremental)
 
 
-# Orden de las partes: el del contrato §1. `precios` no tiene archivo común:
-# cada esquema trae el suyo en maestros/<ESQUEMA>/precios.sql (consultas.py).
+PRECIOS = "precios"
+
+# Orden de las partes: el del contrato §1. `precios` trae todas las listas y
+# consultas.leer_parte() deja solo la pública de la empresa, por número. `cartera`
+# tiene un archivo por esquema, cartera/<ESQUEMA>/cartera.sql (consultas.ruta_consulta).
 PARTES: dict[str, Parte] = {
     parte.nombre: parte
     for parte in (
@@ -217,7 +227,7 @@ PARTES: dict[str, Parte] = {
         _maestro("articulos", _ARTICULOS, modo="cambios", incremental=True),
         _maestro("grupos_articulos", _catalogo()),
         _maestro("marcas", _catalogo()),
-        _maestro("precios", _PRECIOS, ("articulo_codigo",)),
+        _maestro(PRECIOS, _PRECIOS, ("articulo_codigo",)),
         _maestro("vendedores", _VENDEDORES),
         _maestro("grupos_clientes", _catalogo()),
         _maestro("condiciones_pago", _catalogo(
@@ -433,6 +443,8 @@ def preparar_filas(
         for columna, posicion in zip(parte.columnas, posiciones):
             try:
                 valor = serializar(fila[posicion], columna.tipo, columna.nombre)
+                if valor is None and columna.respaldo:
+                    valor = _con_respaldo(parte, columna, numero, fila, posiciones)
             except ValorInvalido as exc:
                 raise ValorInvalido(f"Parte {parte.nombre}, fila {numero}: {exc}") from exc
             if valor is None and columna.requerida:
@@ -446,6 +458,22 @@ def preparar_filas(
     if parte.llave:
         _revisar_llave(parte, salida)
     return salida
+
+
+def _con_respaldo(
+    parte: Parte, columna: Columna, numero: int, fila: Sequence[Any], posiciones: list[int]
+) -> Any:
+    """Valor de la columna de respaldo, con un aviso en el log; None si también viene vacía."""
+    nombres = parte.nombres
+    i = nombres.index(columna.respaldo)
+    valor = serializar(fila[posiciones[i]], parte.columnas[i].tipo, columna.respaldo)
+    if valor is not None:
+        # El código no es un secreto y el log es local: TI necesita saber cuál socio es.
+        log.warning(
+            "Parte %s, fila %d: %s llegó sin %s; se usa %s como %s.",
+            parte.nombre, numero, valor, columna.nombre, columna.respaldo, columna.nombre,
+        )
+    return valor
 
 
 def _revisar_llave(parte: Parte, filas: list[list[Any]]) -> None:

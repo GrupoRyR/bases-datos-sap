@@ -7,7 +7,8 @@ los envoltorios de consultas.py:
 
 - `SELECT COUNT(*) FROM (...)`         -> una fila con el conteo;
 - `X."actualizado_en_sap" >= ?`       -> filas con esa hora o posterior;
-- `X."codigo_socio" IN (?, ...)`      -> filas de esos socios.
+- `X."codigo_socio" IN (?, ...)`      -> filas de esos socios;
+- `X."lista_codigo" = N`              -> filas de la lista de precios N.
 
 Las consultas del archivo, del catálogo y del diagnóstico (robot/queries/archivo,
 catalogo y diagnostico) también se reconocen por su texto; sus filas salen de
@@ -67,6 +68,7 @@ OTRAS_CARPETAS = ("archivo", "catalogo", "diagnostico")
 _RE_HBT = re.compile(r'FROM "(@HBT\w*)" T0')
 _RE_REGISTRO_DESDE = re.compile(r'X\."([^"]+)" >= \? AND X\."\1" < \?')
 _RE_REGISTRO_HASTA = re.compile(r'X\."([^"]+)" < \?')
+_RE_LISTA_PRECIOS = re.compile(r'X\."lista_codigo" = (\d+)')
 
 
 def columnas_select(sql: str) -> list[str]:
@@ -189,6 +191,11 @@ def datos_empresa(empresa: str, clientes: int = 3, proveedores: int = 2) -> dict
     for parte in esquema.PARTES:
         if parte not in datos:
             datos[parte] = [fila(parte, i) for i in (1, 2)]
+    # Dos artículos en la lista 1 (la pública de la prueba) y uno en otra lista.
+    datos["precios"] = [
+        fila("precios", 1, lista_codigo=1), fila("precios", 2, lista_codigo=1),
+        fila("precios", 3, lista_codigo=2),
+    ]
     datos["cartera"] = [fila("cartera", i) for i in (1, 2, 3)]
     return datos
 
@@ -201,7 +208,9 @@ def config_de_prueba(csv_dir: Path) -> Config:
             port=30015,
             timeout=60,
             empresas={
-                codigo: EmpresaHana(codigo, f"usuario-{codigo}", f"clave-{codigo}-prueba", esquema_db)
+                codigo: EmpresaHana(
+                    codigo, f"usuario-{codigo}", f"clave-{codigo}-prueba", esquema_db, lista_precios=1
+                )
                 for codigo, esquema_db in ESQUEMAS.items()
             },
         ),
@@ -278,6 +287,9 @@ class _Cursor:
         if 'X."codigo_socio" IN (' in sql:
             codigos = set(params)
             filas = [f for f in filas if f["codigo_socio"] in codigos]
+        lista = _RE_LISTA_PRECIOS.search(sql)
+        if lista:
+            filas = [f for f in filas if f["lista_codigo"] == int(lista.group(1))]
 
         if tipo == "contar":
             self.description = [("COUNT(*)",)]

@@ -88,6 +88,24 @@ def test_corre_las_solicitudes_y_suelta_el_candado(entorno, correos):
     assert (_estado()["estado"], _estado()["modo"]) == ("OK", "solicitudes")
 
 
+def test_derivados_sin_lista_de_precios_atiende_todo_maestros_y_falla_solo_precios(entorno, correos, monkeypatch):
+    e = entorno
+    monkeypatch.delenv("HANA_SDC_LISTA_PRECIOS")  # Derivados todavía no tiene lista pública
+    e.servidor.encolar_solicitud({"id": 60, "empresa": "SDC", "conjunto": "MAESTROS", "parte": None,
+                                  "desde": {"clientes": None, "proveedores": None, "articulos": None}})
+    assert _revisar(e) == 0
+    [corrida] = e.servidor.corridas.values()
+    assert corrida.estado == "cerrada" and "precios" not in corrida.partes
+    assert e.servidor.estado_solicitudes == {60: "terminada"}
+
+    e.servidor.encolar_solicitud({"id": 61, "empresa": "SDC", "conjunto": "MAESTROS", "parte": "precios",
+                                  "desde": {}})
+    assert _revisar(e) == 1
+    assert e.servidor.estado_solicitudes[61] == "fallida"
+    assert [etapa for etapa, _ in correos[0]] == ["CONFIGURACION"]
+    assert "HANA_SDC_LISTA_PRECIOS" in correos[0][0][1]
+
+
 def test_falla_dentro_de_una_corrida_avisa_una_vez(entorno, correos):
     e = entorno
     e.servidor.encolar_solicitud({"id": 5, "empresa": "SGX", "conjunto": "CARTERA",

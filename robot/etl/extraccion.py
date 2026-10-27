@@ -20,7 +20,7 @@ import config
 import consultas
 import esquema
 import hana
-from config import Config
+from config import Config, ConfigError, EmpresaHana
 from registro import obtener
 from trabajos import Trabajo
 from vpn import RobotVPN, VpnError
@@ -85,7 +85,7 @@ def mensaje_seguro(exc: BaseException) -> str:
         return str(exc).split(" (", 1)[0]
     if isinstance(exc, hana.HanaError):
         return _hana_seguro(str(exc).strip())
-    if isinstance(exc, (esquema.ColumnasInesperadas, VpnError, FalloTrabajo)):
+    if isinstance(exc, (esquema.ColumnasInesperadas, VpnError, FalloTrabajo, ConfigError)):
         return str(exc).strip()
     return f"Error inesperado ({type(exc).__name__}); revisa robot/logs/robot.log."
 
@@ -93,6 +93,8 @@ def mensaje_seguro(exc: BaseException) -> str:
 def _etapa(exc: BaseException) -> str:
     if isinstance(exc, FalloTrabajo):
         return exc.etapa
+    if isinstance(exc, ConfigError):
+        return "CONFIGURACION"
     if isinstance(exc, (esquema.LlaveRepetida, esquema.ValorInvalido, esquema.ColumnasInesperadas)):
         return "VALIDACION"
     if isinstance(exc, hana.HanaError):
@@ -129,8 +131,16 @@ def _hijas(conn: Any, esquema_db: str, trabajo: Trabajo, parte: esquema.Parte, s
     return columnas, filas
 
 
-def _extraer_trabajo(conn: Any, esquema_db: str, r: Resultado, ahora: Callable[[], datetime]) -> None:
+def resultado_fallido(trabajo: Trabajo, exc: BaseException) -> Resultado:
+    """Resultado de un trabajo que ya se sabe que falla, sin consultar HANA (envio lo reporta)."""
+    r = Resultado(trabajo)
+    r.fallar(_etapa(exc), mensaje_seguro(exc))
+    return r
+
+
+def _extraer_trabajo(conn: Any, empresa_cfg: EmpresaHana, r: Resultado, ahora: Callable[[], datetime]) -> None:
     t = r.trabajo
+    esquema_db = empresa_cfg.esquema
     completa = t.tipo == "completa"
     if completa:
         r.conteo_sap = {}
@@ -138,7 +148,7 @@ def _extraer_trabajo(conn: Any, esquema_db: str, r: Resultado, ahora: Callable[[
 
     for nombre, modo in t.partes.items():
         parte = esquema.PARTES[nombre]
-        sql = consultas.leer(parte.consulta, esquema_db)
+        sql = consultas.leer_parte(parte, empresa_cfg)
         if nombre in esquema.HIJAS_DE_SOCIO:
             columnas, datos = _hijas(conn, esquema_db, t, parte, sql, codigos)
         elif modo == "cambios" and t.desde.get(nombre) is not None:
@@ -188,7 +198,7 @@ def _extraer_empresa(
         with conectar(cfg.hana, empresa_cfg) as conn:
             for r in resultados:
                 try:
-                    _extraer_trabajo(conn, empresa_cfg.esquema, r, ahora)
+                    _extraer_trabajo(conn, empresa_cfg, r, ahora)
                 except Exception as exc:
                     r.fallar(_etapa(exc), mensaje_seguro(exc))
                     log.error("Falló la extracción de %s: %s", r.trabajo.nombre, exc)
