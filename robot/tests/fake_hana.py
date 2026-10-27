@@ -41,6 +41,7 @@ from typing import Any, Iterator
 import consultas
 import esquema
 from config import (
+    CUENTAS_CARTERA_POR_DEFECTO,
     AlertaConfig,
     ApiConfig,
     Config,
@@ -209,7 +210,8 @@ def config_de_prueba(csv_dir: Path) -> Config:
             timeout=60,
             empresas={
                 codigo: EmpresaHana(
-                    codigo, f"usuario-{codigo}", f"clave-{codigo}-prueba", esquema_db, lista_precios=1
+                    codigo, f"usuario-{codigo}", f"clave-{codigo}-prueba", esquema_db, lista_precios=1,
+                    cuentas_cartera=CUENTAS_CARTERA_POR_DEFECTO[codigo],
                 )
                 for codigo, esquema_db in ESQUEMAS.items()
             },

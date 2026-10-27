@@ -33,6 +33,7 @@ py -3.14 -m venv .venv
 2. TI llena las credenciales: la VPN, HANA (un usuario por empresa), la llave de la API y, si quieres alertas, el correo.
 
 3. Los precios salen de la lista pública de cada empresa, buscada por **número** (no por nombre): `HANA_SGX_LISTA_PRECIOS` (por defecto `1`) y `HANA_SDC_LISTA_PRECIOS` (vacía: Derivados todavía no tiene lista pública). Sin número, esa empresa manda su MAESTROS sin la parte `precios` (contrato §4.1): la nocturna no falla y no consulta precios. Una solicitud de solo precios de esa empresa falla al instante, en la nocturna o en la revisión de cada minuto, con un mensaje que dice qué variable poner; no arrastra a las solicitudes de todo MAESTROS de la misma empresa. Cuando Derivados defina su lista, pon su número en `HANA_SDC_LISTA_PRECIOS` y los precios vuelven solos.
+4. La cartera sale de las cuentas contables de cada empresa: `HANA_SGX_CUENTAS_CARTERA` (por defecto `13050505,13051005`) y `HANA_SDC_CUENTAS_CARTERA` (por defecto `13050501,13051005`), separadas por coma y solo dígitos. Casi nunca hay que tocarlas.
 
 El `.env` nunca se sube a Git. Los CSV quedan en `BASES_SAP_CSV_DIR`, fuera del repo.
 
@@ -52,7 +53,7 @@ Con lo que dejan en `_CATALOGO` y `_DIAGNOSTICO`, revisa lo que las consultas ma
 - [ ] `@HBT_MUNICIPIO` existe en Derivados y trae los municipios.
 - [ ] `CRD1.County` guarda el código del municipio.
 - [ ] `activo`: que `validFor = 'N'` o `frozenFor = 'Y'` marque de verdad a los socios y artículos inactivos.
-- [ ] La cartera de Derivados (`queries\cartera\HBT_SDERIVADOS`, cuentas 13050501 y 13051005) da las mismas cifras que el informe de cartera de SAP. Segurex usa 13050505 y 13051005 (`queries\cartera\SEGUREX`). Cartera no tiene consulta común: si `HANA_<EMPRESA>_SCHEMA` apunta a otro esquema, el robot falla con «No hay consulta de cartera para el esquema X» hasta que agregues `queries\cartera\X\cartera.sql`.
+- [ ] La cartera de Derivados (cuentas 13050501 y 13051005) da las mismas cifras que el informe de cartera de SAP. Segurex usa 13050505 y 13051005. La consulta es una sola (`queries\cartera\cartera.sql`) y el robot se queda con las cuentas de cada empresa.
 - [ ] Los nombres de columna del archivo (`queries\archivo`) contra `_CATALOGO\<empresa>\columnas`.
 - [ ] El tamaño de `ADOC`, `ADO1`, `AJDT` y `AJD1` en `_CATALOGO\<empresa>\tablas` antes de activar `BASES_SAP_ARCHIVO_HISTORIAL_DOCUMENTOS`.
 
