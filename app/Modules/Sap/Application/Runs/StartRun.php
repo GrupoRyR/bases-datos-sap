@@ -198,7 +198,7 @@ final class StartRun
             $askedParts = $request === null ? [] : RequestScope::partsFor($request->conjunto, $request->parte);
             // A request for the whole dataset does not need the parts the company may omit;
             // one for just those parts still does, so it is answered (the robot fails it).
-            $omitted = count($askedParts) > 1 ? $this->omittable($company) : [];
+            $omitted = $request?->parte === null ? $this->omittable($company) : [];
             $asked = array_values(array_map(
                 fn (Part $part): string => $part->value,
                 array_filter($askedParts, fn (Part $part): bool => ! in_array($part, $omitted, true)),
