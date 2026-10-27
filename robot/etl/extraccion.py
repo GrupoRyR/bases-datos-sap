@@ -131,6 +131,13 @@ def _hijas(conn: Any, esquema_db: str, trabajo: Trabajo, parte: esquema.Parte, s
     return columnas, filas
 
 
+def resultado_fallido(trabajo: Trabajo, exc: BaseException) -> Resultado:
+    """Resultado de un trabajo que ya se sabe que falla, sin consultar HANA (envio lo reporta)."""
+    r = Resultado(trabajo)
+    r.fallar(_etapa(exc), mensaje_seguro(exc))
+    return r
+
+
 def _extraer_trabajo(conn: Any, empresa_cfg: EmpresaHana, r: Resultado, ahora: Callable[[], datetime]) -> None:
     t = r.trabajo
     esquema_db = empresa_cfg.esquema

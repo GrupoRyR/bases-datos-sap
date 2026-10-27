@@ -14,8 +14,6 @@ from typing import Any, Collection, Iterable
 import esquema
 from config import BOGOTA, EMPRESAS
 
-PRECIOS = "precios"
-
 
 class TrabajoInvalido(ValueError):
     """Una solicitud con empresa, conjunto, parte o desde que el contrato no admite."""
@@ -100,12 +98,28 @@ def _desde(grupo: list[tuple[dict[str, Any], tuple[str, ...]]], parte: str) -> s
 
 def solo_precios(solicitud: dict[str, Any]) -> bool:
     """La solicitud pide únicamente la parte precios (no todo MAESTROS)."""
-    return solicitud.get("conjunto") == "MAESTROS" and solicitud.get("parte") == PRECIOS
+    return solicitud.get("conjunto") == "MAESTROS" and solicitud.get("parte") == esquema.PRECIOS
 
 
 def sin_precios_en_la_corrida(empresa: str, conjunto: str, sin_precios: Collection[str]) -> bool:
     """Si la corrida de MAESTROS de esa empresa no lleva la parte precios (contrato §4.1)."""
     return conjunto == "MAESTROS" and empresa in sin_precios
+
+
+def separar_solo_precios(
+    solicitudes: list[dict[str, Any]], sin_precios: Collection[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(resto, solo_precios_sin_lista): las de solo precios de una empresa sin lista van aparte.
+
+    Esas no caben en la corrida de su empresa, que va sin precios: llevan su propio
+    trabajo, que falla con el aviso de qué variable falta sin arrastrar a las demás.
+    """
+    resto: list[dict[str, Any]] = []
+    aparte: list[dict[str, Any]] = []
+    for solicitud in solicitudes:
+        sin_lista = solo_precios(solicitud) and solicitud.get("empresa") in sin_precios
+        (aparte if sin_lista else resto).append(solicitud)
+    return resto, aparte
 
 
 def trabajos_de_solicitudes(
@@ -114,9 +128,15 @@ def trabajos_de_solicitudes(
     """Agrupa las solicitudes tomadas por empresa y conjunto: una corrida por grupo (§7.3).
 
     Una empresa sin lista de precios pública (`sin_precios`) no pide precios en una
-    solicitud de todo MAESTROS. Una solicitud de solo precios sí los lleva: la
-    extracción la falla con el aviso de qué variable falta, y la solicitud pasa a fallida.
+    solicitud de todo MAESTROS. Una de solo precios va en su propio trabajo.
     """
+    resto, aparte = separar_solo_precios(solicitudes, sin_precios)
+    return _agrupar(resto, hoy, sin_precios) + _agrupar(aparte, hoy, ())
+
+
+def _agrupar(
+    solicitudes: list[dict[str, Any]], hoy: date, sin_precios: Collection[str]
+) -> list[Trabajo]:
     grupos: dict[tuple[str, str], list[tuple[dict[str, Any], tuple[str, ...]]]] = {}
     for solicitud in solicitudes:
         partes = _partes_de(solicitud)
@@ -126,8 +146,8 @@ def trabajos_de_solicitudes(
     trabajos: list[Trabajo] = []
     for (empresa, conjunto), grupo in grupos.items():
         partes = _ordenar(p for _, ps in grupo for p in ps)
-        if sin_precios_en_la_corrida(empresa, conjunto, sin_precios) and not any(solo_precios(s) for s, _ in grupo):
-            partes = [p for p in partes if p != PRECIOS]
+        if sin_precios_en_la_corrida(empresa, conjunto, sin_precios):
+            partes = [p for p in partes if p != esquema.PRECIOS]
         modos = _modos(partes)
         desde = {
             p: _desde(grupo, p)
@@ -161,14 +181,8 @@ def trabajos_completos(
     corrida y queda como trabajo de solicitud aparte.
     """
     empresas = list(dict.fromkeys(empresas))
-    por_aparte: list[dict[str, Any]] = []
-    en_la_completa: list[dict[str, Any]] = []
-    for s in solicitudes_tomadas:
-        aparte = solo_precios(s) and s.get("empresa") in sin_precios and s.get("empresa") in empresas
-        (por_aparte if aparte else en_la_completa).append(s)
-    por_grupo = {
-        (t.empresa, t.conjunto): t for t in trabajos_de_solicitudes(en_la_completa, hoy, sin_precios)
-    }
+    resto, aparte = separar_solo_precios(solicitudes_tomadas, sin_precios)
+    por_grupo = {(t.empresa, t.conjunto): t for t in _agrupar(resto, hoy, sin_precios)}
     ayer = (hoy - timedelta(days=1)).isoformat()
 
     trabajos: list[Trabajo] = []
@@ -181,11 +195,11 @@ def trabajos_completos(
                 tipo="completa",
                 partes={
                     p: "todo" for p in esquema.PARTES_POR_CONJUNTO[conjunto]
-                    if not (p == PRECIOS and sin_precios_en_la_corrida(empresa, conjunto, sin_precios))
+                    if not (p == esquema.PRECIOS and sin_precios_en_la_corrida(empresa, conjunto, sin_precios))
                 },
                 solicitudes=list(de_solicitud.solicitudes) if de_solicitud else [],
                 fecha_corte=ayer if conjunto == "CARTERA" else None,
             ))
     trabajos.extend(por_grupo.values())
-    trabajos.extend(trabajos_de_solicitudes(por_aparte, hoy, sin_precios))
+    trabajos.extend(_agrupar(aparte, hoy, ()))
     return trabajos

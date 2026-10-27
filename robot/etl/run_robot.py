@@ -58,8 +58,8 @@ import notificar
 import registro
 from api import ApiCliente
 from carpeta import Carpeta
-from config import EMPRESAS, Config, ConfigError, cargar_config
-from trabajos import Trabajo, TrabajoInvalido, solo_precios, trabajos_completos, trabajos_de_solicitudes
+from config import EMPRESAS, Config, ConfigError, HanaConfig, cargar_config
+from trabajos import Trabajo, TrabajoInvalido, separar_solo_precios, trabajos_completos, trabajos_de_solicitudes
 from vpn import RobotVPN
 
 SOLICITUDES_POR_PAGINA = 20
@@ -141,15 +141,18 @@ def _tomar_solicitudes(api: ApiCliente) -> list[dict[str, Any]]:
 
 
 def _asignar_solicitudes(
-    trabajos: Iterable[Trabajo], tomadas: list[dict[str, Any]], hoy: date
-) -> list[tuple[str, str]]:
+    trabajos: Iterable[Trabajo], tomadas: list[dict[str, Any]], hoy: date, hana: HanaConfig
+) -> tuple[list[tuple[str, str]], list[extraccion.Resultado]]:
     """Pega cada solicitud tomada a la corrida completa de su empresa y conjunto (§7.3).
 
     Ya no se extrae nada: una solicitud de una empresa que no está en esta
-    corrida queda tomada y la API la vence. Una inválida va a los fallos.
+    corrida queda tomada y la API la vence. Una inválida va a los fallos. Una de
+    solo precios de una empresa sin lista no cabe en su corrida (va sin precios):
+    sale como resultado ya fallido, para que se envíe fallida con el motivo.
     """
     por_grupo = {(t.empresa, t.conjunto): t for t in trabajos}
     fallos: list[tuple[str, str]] = []
+    validas: list[dict[str, Any]] = []
     for solicitud in tomadas:
         try:
             trabajos_de_solicitudes([solicitud], hoy)  # valida empresa, conjunto, parte y desde
@@ -157,13 +160,14 @@ def _asignar_solicitudes(
             log.error("Solicitud inválida: %s", exc)
             fallos.append(("SOLICITUDES", str(exc)))
             continue
+        validas.append(solicitud)
+    resto, aparte = separar_solo_precios(validas, hana.sin_precios())
+    fallidos = [
+        extraccion.resultado_fallido(t, hana.empresas[t.empresa].error_sin_precios())
+        for t in trabajos_de_solicitudes(aparte, hoy)
+    ]
+    for solicitud in resto:
         trabajo = por_grupo.get((solicitud["empresa"], solicitud["conjunto"]))
-        if trabajo is not None and solo_precios(solicitud) and "precios" not in trabajo.partes:
-            log.warning(
-                "Solicitud %s (%s): pide solo precios y esa empresa no los lleva en la corrida "
-                "completa (§4.1); queda tomada y la API la vence.", solicitud.get("id"), solicitud["empresa"],
-            )
-            continue
         if trabajo is None:
             log.warning(
                 "Solicitud %s (%s %s): esa empresa no está en esta corrida; queda tomada "
@@ -171,7 +175,7 @@ def _asignar_solicitudes(
             )
             continue
         trabajo.solicitudes.append(solicitud["id"])
-    return fallos
+    return fallos, fallidos
 
 
 def _completa(
@@ -192,7 +196,9 @@ def _completa(
 
     def tomar(resultados: list[extraccion.Resultado]) -> None:
         # Los resultados comparten los objetos Trabajo: las solicitudes llegan a la corrida.
-        fallos_solicitudes.extend(_asignar_solicitudes(trabajos, _tomar_solicitudes(api), hoy))
+        fallos, fallidos = _asignar_solicitudes(trabajos, _tomar_solicitudes(api), hoy, cfg.hana)
+        fallos_solicitudes.extend(fallos)
+        resultados.extend(fallidos)
 
     fallos = ejecutar_trabajos(
         cfg,

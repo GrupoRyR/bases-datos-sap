@@ -76,6 +76,11 @@ def _int_o_nada(nombre: str, por_defecto: int | None, invalidos: list[str]) -> i
         return por_defecto
 
 
+def variable_lista_precios(empresa: str) -> str:
+    """Nombre de la variable con el número de la lista de precios pública de la empresa."""
+    return f"HANA_{empresa}_LISTA_PRECIOS"
+
+
 def _texto(nombre: str, por_defecto: str = "") -> str:
     """Valor sin espacios; si la variable falta o está vacía, el valor por defecto."""
     return (os.getenv(nombre) or "").strip() or por_defecto
@@ -115,6 +120,23 @@ class EmpresaHana:
     # Número de la lista de precios pública (OPLN.ListNum); None: la empresa no tiene.
     lista_precios: int | None = None
 
+    @property
+    def variable_lista_precios(self) -> str:
+        return variable_lista_precios(self.codigo)
+
+    @property
+    def sin_precios(self) -> bool:
+        """Sin lista pública no se piden precios: su MAESTROS va sin la parte precios (contrato §4.1)."""
+        return self.lista_precios is None
+
+    def error_sin_precios(self) -> ConfigError:
+        """Lo que falla cuando, aun así, alguien pide los precios de esta empresa."""
+        return ConfigError(
+            f"{self.codigo} no tiene lista de precios pública definida: pon su número en "
+            f"{self.variable_lista_precios} (robot/.env). El número sale de "
+            f"_DIAGNOSTICO\\{self.codigo}\\listas_precios."
+        )
+
 
 @dataclass(frozen=True)
 class HanaConfig:
@@ -124,8 +146,8 @@ class HanaConfig:
     empresas: dict[str, EmpresaHana] = field(default_factory=dict)
 
     def sin_precios(self) -> frozenset[str]:
-        """Empresas sin lista de precios pública: su MAESTROS va sin la parte precios."""
-        return frozenset(c for c, e in self.empresas.items() if e.lista_precios is None)
+        """Códigos de las empresas sin lista de precios pública."""
+        return frozenset(c for c, e in self.empresas.items() if e.sin_precios)
 
 
 @dataclass(frozen=True)
@@ -266,7 +288,7 @@ def cargar_config(env_path: Path | None = None) -> Config:
                     password=os.getenv(f"HANA_{codigo}_PASSWORD", ""),
                     esquema=_texto(f"HANA_{codigo}_SCHEMA", ESQUEMAS_POR_DEFECTO[codigo]),
                     lista_precios=_int_o_nada(
-                        f"HANA_{codigo}_LISTA_PRECIOS", LISTAS_PRECIOS_POR_DEFECTO[codigo], invalidos
+                        variable_lista_precios(codigo), LISTAS_PRECIOS_POR_DEFECTO[codigo], invalidos
                     ),
                 )
                 for codigo in EMPRESAS

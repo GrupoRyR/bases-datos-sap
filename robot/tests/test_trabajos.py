@@ -162,6 +162,28 @@ def test_solicitud_de_solo_precios_de_la_empresa_sin_ellos_los_conserva_para_fal
     assert t.partes == {"precios": "todo"}
 
 
+def test_solicitud_de_solo_precios_no_arrastra_a_la_de_todo_maestros_de_su_empresa():
+    maestros, precios = trabajos_de_solicitudes(
+        [_sol(1, empresa="SDC", parte="precios"), _sol(2, empresa="SDC", parte=None)], HOY, SIN_PRECIOS
+    )
+    assert (maestros.solicitudes, "precios" in maestros.partes) == ([2], False)
+    assert (precios.solicitudes, precios.partes) == ([1], {"precios": "todo"})
+
+
+def test_solicitudes_de_solo_precios_de_la_misma_empresa_comparten_su_trabajo():
+    [t] = trabajos_de_solicitudes(
+        [_sol(1, empresa="SDC", parte="precios"), _sol(2, empresa="SDC", parte="precios")], HOY, SIN_PRECIOS
+    )
+    assert t.solicitudes == [1, 2]
+
+
+def test_solicitud_de_solo_precios_de_empresa_con_lista_sigue_en_su_grupo():
+    [t] = trabajos_de_solicitudes(
+        [_sol(1, parte="precios"), _sol(2, parte=None)], HOY, SIN_PRECIOS
+    )
+    assert t.solicitudes == [1, 2] and "precios" in t.partes
+
+
 def test_completa_deja_la_solicitud_de_solo_precios_como_trabajo_aparte():
     trabajos = trabajos_completos(["SGX", "SDC"], HOY, [
         _sol(30, empresa="SDC", parte="precios"),

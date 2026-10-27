@@ -212,6 +212,8 @@ def _maestro(
     return Parte(nombre, "MAESTROS", f"maestros/{nombre}.sql", columnas, llave, modo, incremental)
 
 
+PRECIOS = "precios"
+
 # Orden de las partes: el del contrato §1. `precios` trae todas las listas y
 # consultas.leer_parte() deja solo la pública de la empresa, por número. `cartera`
 # tiene un archivo por esquema, cartera/<ESQUEMA>/cartera.sql (consultas.ruta_consulta).
@@ -225,7 +227,7 @@ PARTES: dict[str, Parte] = {
         _maestro("articulos", _ARTICULOS, modo="cambios", incremental=True),
         _maestro("grupos_articulos", _catalogo()),
         _maestro("marcas", _catalogo()),
-        _maestro("precios", _PRECIOS, ("articulo_codigo",)),
+        _maestro(PRECIOS, _PRECIOS, ("articulo_codigo",)),
         _maestro("vendedores", _VENDEDORES),
         _maestro("grupos_clientes", _catalogo()),
         _maestro("condiciones_pago", _catalogo(

@@ -11,35 +11,41 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
 
 import config
 from config import BOGOTA, EmpresaHana
-
-if TYPE_CHECKING:
-    import esquema
+from esquema import PRECIOS, Parte
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
-PARTE_PRECIOS = "precios"
 # Carpetas donde una empresa puede traer su propia versión de una consulta.
 CARPETAS_POR_ESQUEMA = ("maestros", "cartera")
+# Carpetas sin consulta común: cada esquema trae la suya (las cuentas de cartera cambian por empresa).
+CARPETAS_SOLO_POR_ESQUEMA = ("cartera",)
 
 
 def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
-    """Ruta de una consulta relativa a robot/queries (ej: "cartera/cartera.sql").
+    """Ruta de una consulta relativa a robot/queries (ej: "maestros/precios.sql").
 
     Para un archivo directo bajo maestros/ o cartera/, `<carpeta>/<ESQUEMA>/<archivo>`
-    gana sobre `<carpeta>/<archivo>` (las cuentas de cartera cambian por empresa).
+    gana sobre `<carpeta>/<archivo>`. Bajo cartera/ no hay consulta común: sin la del
+    esquema, falla en vez de correr la de otra empresa.
     """
     base = config.QUERIES_DIR  # se lee aquí: las pruebas lo cambian
     partes = PurePosixPath(nombre_relativo).parts
+    por_esquema = len(partes) == 2 and partes[0] in CARPETAS_POR_ESQUEMA
     candidatas: list[Path] = []
-    if len(partes) == 2 and partes[0] in CARPETAS_POR_ESQUEMA and esquema:
+    if por_esquema and esquema:
         candidatas.append(base / partes[0] / esquema / partes[1])
-    candidatas.append(base.joinpath(*partes))
+    if not (por_esquema and partes[0] in CARPETAS_SOLO_POR_ESQUEMA):
+        candidatas.append(base.joinpath(*partes))
     for ruta in candidatas:
         if ruta.is_file():
             return ruta
+    if por_esquema and partes[0] in CARPETAS_SOLO_POR_ESQUEMA:
+        raise config.ConfigError(
+            f"No hay consulta de {partes[0]} para el esquema {esquema or 'sin esquema'}: "
+            f"agrega robot/queries/{partes[0]}/{esquema or '<ESQUEMA>'}/{partes[1]}."
+        )
     raise config.ConfigError(
         "No existe la consulta "
         + " ni ".join(str(r) for r in candidatas)
@@ -80,21 +86,17 @@ def sql_lista_precios(sql: str, lista: int) -> str:
     return _envolver(sql, f'X."lista_codigo" = {int(lista)}')
 
 
-def leer_parte(parte: "esquema.Parte", empresa: EmpresaHana) -> str:
+def leer_parte(parte: Parte, empresa: EmpresaHana) -> str:
     """Consulta de una parte para una empresa, con el filtro propio de la empresa.
 
     Hoy solo `precios` lo lleva: el archivo trae todas las listas y el robot se
     queda con la pública de la empresa, por número (HANA_<EMPRESA>_LISTA_PRECIOS).
     """
     sql = leer(parte.consulta, empresa.esquema)
-    if parte.nombre != PARTE_PRECIOS:
+    if parte.nombre != PRECIOS:
         return sql
     if empresa.lista_precios is None:
-        raise config.ConfigError(
-            f"{empresa.codigo} no tiene lista de precios pública definida: pon su número en "
-            f"HANA_{empresa.codigo}_LISTA_PRECIOS (robot/.env). El número sale de "
-            f"_DIAGNOSTICO\\{empresa.codigo}\\listas_precios."
-        )
+        raise empresa.error_sin_precios()
     return sql_lista_precios(sql, empresa.lista_precios)
 
 
