@@ -205,6 +205,35 @@ def test_lista_de_precios_invalida_falla_al_validar(
         cfg.validar()
 
 
+def test_cuentas_de_cartera_por_defecto_son_las_de_cada_empresa() -> None:
+    cfg = cargar_config()
+
+    assert cfg.hana.empresas["SGX"].cuentas_cartera == ("13050505", "13051005")
+    assert cfg.hana.empresas["SDC"].cuentas_cartera == ("13050501", "13051005")
+
+
+def test_cuentas_de_cartera_se_configuran_por_empresa(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HANA_SDC_CUENTAS_CARTERA", " 13050501 , 13051005,13059999 ")
+
+    cfg = cargar_config()
+
+    assert cfg.hana.empresas["SDC"].cuentas_cartera == ("13050501", "13051005", "13059999")
+    assert cfg.hana.empresas["SGX"].cuentas_cartera == ("13050505", "13051005")
+
+
+@pytest.mark.parametrize("valor", ["13050501;", "13050501') OR ('1'='1", "cartera", ","])
+def test_cuentas_de_cartera_invalidas_fallan_al_validar(
+    entorno_completo: Path, monkeypatch: pytest.MonkeyPatch, valor: str
+) -> None:
+    monkeypatch.setenv("HANA_SDC_CUENTAS_CARTERA", valor)
+
+    cfg = cargar_config()
+
+    assert cfg.hana.empresas["SDC"].cuentas_cartera == ("13050501", "13051005")
+    with pytest.raises(ConfigError, match="HANA_SDC_CUENTAS_CARTERA="):
+        cfg.validar()
+
+
 def test_alertas_habilitadas_con_host_y_destinatarios(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALERTA_SMTP_HOST", "smtp.prueba.test")
     monkeypatch.setenv("ALERTA_DESTINATARIOS", "ti@prueba.test, otro@prueba.test,")

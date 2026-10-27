@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -84,42 +86,115 @@ def test_precios_trae_todas_las_listas_y_no_filtra_por_nombre():
     assert "ListName" in sql  # solo como columna lista_nombre
 
 
+CARTERA = QUERIES / "cartera" / "cartera.sql"
 CUENTAS_DE_CARTERA = {
-    "SEGUREX": ("13050505", "13051005"),
-    "HBT_SDERIVADOS": ("13050501", "13051005"),
+    "SGX": ("13050505", "13051005"),
+    "SDC": ("13050501", "13051005"),
 }
 
 
-def test_cartera_tiene_consulta_en_cada_esquema(monkeypatch):
+def test_cartera_es_una_sola_consulta_para_todos_los_esquemas(monkeypatch):
     monkeypatch.setattr(config, "QUERIES_DIR", QUERIES)
+    assert sorted(p.name for p in (QUERIES / "cartera").iterdir()) == ["cartera.sql"]
     for esquema in ESQUEMAS:
-        ruta = consultas.ruta_consulta(PARTES["cartera"].consulta, esquema)
-        assert ruta == QUERIES / "cartera" / esquema / "cartera.sql"
-    assert not (QUERIES / "cartera" / "cartera.sql").exists()
+        assert consultas.ruta_consulta(PARTES["cartera"].consulta, esquema) == CARTERA
 
 
-@pytest.mark.parametrize("esquema", ESQUEMAS)
-def test_cartera_trae_todas_las_etiquetas_del_esquema(esquema: str):
-    sql = _texto(QUERIES / "cartera" / esquema / "cartera.sql")
+def test_cartera_trae_todas_las_etiquetas():
+    sql = _texto(CARTERA)
     for columna in PARTES["cartera"].columnas:
         assert f'"{columna.hana}"' in sql, columna.hana
     assert "GESTOR_CARTERA/etl/queries/cartera.sql" in sql
 
 
-@pytest.mark.parametrize("esquema, cuentas", CUENTAS_DE_CARTERA.items())
-def test_cartera_filtra_las_cuentas_de_su_empresa(esquema: str, cuentas: tuple[str, ...]):
-    codigo = _sin_comentarios(_texto(QUERIES / "cartera" / esquema / "cartera.sql"))
+def test_cartera_no_filtra_por_cuenta_y_trae_la_etiqueta_para_filtrar_afuera():
+    codigo = _sin_comentarios(_texto(CARTERA))
+    assert not re.search(r'"Account"\s+(IN|=)', codigo), "el filtro por cuenta lo pone el robot"
+    assert 'T0."Account"                                      AS "Cuenta visible"' in codigo
+
+
+# --- Cartera: filtrar por cuenta afuera da lo mismo que dentro ---------------------------
+#
+# La consulta única trae todas las cuentas y el robot se queda con las de la empresa
+# (consultas.sql_cuentas). Se prueba contra los datos de un SQLite en memoria, con
+# DAYS_BETWEEN de HANA como función propia, que la consulta de antes (con el
+# `AND T0."Account" IN (...)` dentro del WHERE) y la de ahora dan las mismas filas.
+
+_FILTRO_DE_ANTES = 'WHERE T1."CardType" = \'C\'\n'
+
+
+def _sqlite_con_cartera() -> sqlite3.Connection:
+    con = sqlite3.connect(":memory:")
+    con.create_function(
+        "DAYS_BETWEEN", 2, lambda a, b: (date.fromisoformat(b) - date.fromisoformat(a)).days
+    )
+    con.executescript("""
+        CREATE TABLE "JDT1" ("TransId" INT, "Line_ID" INT, "Account" TEXT, "ShortName" TEXT,
+            "TransType" INT, "BaseRef" TEXT, "Ref1" TEXT, "Ref2" TEXT, "RefDate" TEXT,
+            "DueDate" TEXT, "TaxDate" TEXT, "Debit" REAL, "Credit" REAL,
+            "BalDueDeb" REAL, "BalDueCred" REAL);
+        CREATE TABLE "OCRD" ("CardCode" TEXT, "CardName" TEXT, "LicTradNum" TEXT, "CardType" TEXT,
+            "GroupCode" INT, "SlpCode" INT, "City" TEXT, "CreditLine" REAL, "GroupNum" INT);
+        CREATE TABLE "OCRG" ("GroupCode" INT, "GroupName" TEXT);
+        CREATE TABLE "OSLP" ("SlpCode" INT, "SlpName" TEXT, "Email" TEXT);
+        CREATE TABLE "OCTG" ("GroupNum" INT, "PymntGroup" TEXT);
+        CREATE TABLE "OINV" ("TransId" INT, "DocTotal" REAL, "VatSum" REAL);
+        CREATE TABLE "ORIN" ("TransId" INT, "DocTotal" REAL, "VatSum" REAL);
+        INSERT INTO "OCRG" VALUES (1, 'Mayoristas');
+        INSERT INTO "OSLP" VALUES (7, 'Ana', 'ANA@PRUEBA.TEST');
+        INSERT INTO "OCTG" VALUES (1, 'Neto 30');
+        INSERT INTO "OCRD" VALUES ('C1', 'Cliente uno', '900', 'C', 1, 7, 'Bogotá', 1000, 1);
+        INSERT INTO "OCRD" VALUES ('C2', 'Cliente dos', '901', 'C', 1, NULL, 'Cali', 0, 1);
+        INSERT INTO "OCRD" VALUES ('P1', 'Proveedor', '902', 'S', 1, NULL, 'Cali', 0, 1);
+        INSERT INTO "OINV" VALUES (100, 119, 19);
+        INSERT INTO "ORIN" VALUES (101, 119, 19);
+    """)
+    # (TransId, cuenta, socio, debe, haber, saldo debe, saldo haber, vence)
+    asientos = [
+        (100, "13050505", "C1", 119, 0, 119, 0, "2026-08-01"),  # solo Segurex
+        (101, "13050505", "C2", 0, 119, 0, 119, "2026-09-15"),  # nota crédito, solo Segurex
+        (102, "13050501", "C1", 50, 0, 50, 0, "2026-07-01"),    # solo Derivados
+        (103, "13050501", "C2", 70, 0, 20, 0, "2026-10-30"),
+        (104, "13051005", "C1", 30, 0, 30, 0, "2026-06-01"),    # las dos empresas
+        (105, "13051005", "C2", 40, 0, 0, 0, "2026-06-01"),     # sin saldo: no sale
+        (106, "13059999", "C1", 10, 0, 10, 0, "2026-06-01"),    # otra cuenta por cobrar
+        (107, "13050505", "P1", 10, 0, 10, 0, "2026-06-01"),    # de un proveedor: no sale
+    ]
+    for linea, (trans, cuenta, socio, debe, haber, saldo_debe, saldo_haber, vence) in enumerate(asientos):
+        con.execute(
+            'INSERT INTO "JDT1" VALUES (?, ?, ?, ?, 13, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (trans, linea, cuenta, socio, f"B{trans}", f"R{trans}", f"X{trans}", "2026-05-01",
+             vence, "2026-05-01", debe, haber, saldo_debe, saldo_haber),
+        )
+    return con
+
+
+def _filas(con: sqlite3.Connection, sql: str) -> list[tuple]:
+    return sorted(con.execute(sql).fetchall(), key=repr)
+
+
+@pytest.mark.parametrize("empresa, cuentas", CUENTAS_DE_CARTERA.items())
+def test_filtrar_las_cuentas_afuera_da_lo_mismo_que_dentro(empresa: str, cuentas: tuple[str, ...]):
+    sql = _texto(CARTERA).rstrip()
     lista = ", ".join(f"'{c}'" for c in cuentas)
-    assert f'T0."Account" IN ({lista})' in codigo
+    assert _FILTRO_DE_ANTES in sql
+    de_antes = sql.replace(_FILTRO_DE_ANTES, f'{_FILTRO_DE_ANTES}      AND T0."Account" IN ({lista})\n')
+    con = _sqlite_con_cartera()
+
+    de_ahora = _filas(con, consultas.sql_cuentas(sql, cuentas))
+
+    assert de_ahora == _filas(con, de_antes)
+    assert de_ahora, "la prueba necesita filas"
+    posicion = [d[0] for d in con.execute(de_antes).description].index("Cuenta visible")
+    assert {fila[posicion] for fila in de_ahora} <= set(cuentas)
 
 
-def test_cartera_de_las_dos_empresas_solo_difiere_en_las_cuentas():
-    def sin_cuentas(esquema: str) -> list[str]:
-        codigo = _sin_comentarios(_texto(QUERIES / "cartera" / esquema / "cartera.sql"))
-        codigo = re.sub(r'T0\."Account" IN \([^)]*\)', "", codigo)
-        return [linea for linea in codigo.splitlines() if linea.strip()]
-
-    assert sin_cuentas("SEGUREX") == sin_cuentas("HBT_SDERIVADOS")
+def test_las_dos_empresas_ven_cuentas_distintas_en_la_misma_consulta():
+    sql, con = _texto(CARTERA).rstrip(), _sqlite_con_cartera()
+    sgx = _filas(con, consultas.sql_cuentas(sql, CUENTAS_DE_CARTERA["SGX"]))
+    sdc = _filas(con, consultas.sql_cuentas(sql, CUENTAS_DE_CARTERA["SDC"]))
+    assert len(sgx) == 3 and len(sdc) == 3  # SGX: 100, 101, 104; SDC: 102, 103, 104
+    assert set(sgx) & set(sdc) == {fila for fila in sgx if "13051005" in fila}
 
 
 @pytest.mark.parametrize("archivo", [
@@ -130,7 +205,7 @@ def test_cartera_de_las_dos_empresas_solo_difiere_en_las_cuentas():
     "maestros/contactos.sql",
     "maestros/clientes.sql",
     "maestros/proveedores.sql",
-    "cartera/HBT_SDERIVADOS/cartera.sql",
+    "cartera/cartera.sql",
     "diagnostico/listas_precios.sql",
 ])
 def test_lo_no_confirmado_esta_marcado(archivo: str):

@@ -223,6 +223,18 @@ def test_precios_trae_solo_la_lista_configurada_de_la_empresa(escenario):
     assert "ListName\" =" not in consulta.sql
 
 
+def test_cartera_pide_las_cuentas_de_cada_empresa_con_la_misma_consulta(escenario):
+    e = escenario
+    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (1, 3)])
+
+    assert [r.error for r in resultados] == [None, None]
+    [sgx] = e.hana.de("SGX", "todo", "cartera")
+    [sdc] = e.hana.de("SDC", "todo", "cartera")
+    assert 'X."Cuenta visible" IN (\'13050505\', \'13051005\')' in sgx.sql
+    assert 'X."Cuenta visible" IN (\'13050501\', \'13051005\')' in sdc.sql
+    assert sgx.sql.split(" WHERE X.")[0] == sdc.sql.split(" WHERE X.")[0]
+
+
 def test_empresa_sin_lista_de_precios_falla_su_trabajo_con_un_mensaje_claro(escenario):
     e = escenario
     e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=None)

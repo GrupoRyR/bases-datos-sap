@@ -184,22 +184,6 @@ def test_solicitud_de_solo_precios_de_empresa_con_lista_sigue_en_su_grupo():
     assert t.solicitudes == [1, 2] and "precios" in t.partes
 
 
-def test_completa_deja_la_solicitud_de_solo_precios_como_trabajo_aparte():
-    trabajos = trabajos_completos(["SGX", "SDC"], HOY, [
-        _sol(30, empresa="SDC", parte="precios"),
-        _sol(31, empresa="SDC", parte=None),
-    ], SIN_PRECIOS)
-    assert [(t.empresa, t.conjunto, t.tipo, t.solicitudes) for t in trabajos] == [
-        ("SGX", "MAESTROS", "completa", []),
-        ("SGX", "CARTERA", "completa", []),
-        ("SDC", "MAESTROS", "completa", [31]),
-        ("SDC", "CARTERA", "completa", []),
-        ("SDC", "MAESTROS", "solicitud", [30]),
-    ]
-    assert "precios" not in trabajos[2].partes
-    assert trabajos[4].partes == {"precios": "todo"}
-
-
 def test_completa_adjunta_las_solicitudes_tomadas():
     trabajos = trabajos_completos(["SGX", "SDC"], HOY, [
         _sol(10, parte="clientes", desde={"clientes": None}),

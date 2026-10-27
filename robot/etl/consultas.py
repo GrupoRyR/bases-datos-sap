@@ -17,36 +17,24 @@ from config import BOGOTA, EmpresaHana
 from esquema import PRECIOS, Parte
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
-# Carpetas sin consulta común: cada esquema trae la suya (las cuentas de cartera cambian por empresa).
-CARPETAS_SOLO_POR_ESQUEMA = ("cartera",)
-# Carpetas donde una empresa puede traer su propia versión de una consulta.
-CARPETAS_POR_ESQUEMA = ("maestros", *CARPETAS_SOLO_POR_ESQUEMA)
 
 
 def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
     """Ruta de una consulta relativa a robot/queries (ej: "maestros/precios.sql").
 
-    Para un archivo directo bajo maestros/ o cartera/, `<carpeta>/<ESQUEMA>/<archivo>`
-    gana sobre `<carpeta>/<archivo>`. Bajo cartera/ no hay consulta común: sin la del
-    esquema, falla en vez de correr la de otra empresa.
+    Para un archivo directo bajo maestros/, `maestros/<ESQUEMA>/<archivo>` gana sobre
+    `maestros/<archivo>` (ninguna parte lo usa hoy: las que cambian por empresa, como
+    los precios y la cartera, se filtran afuera con la configuración de la empresa).
     """
     base = config.QUERIES_DIR  # se lee aquí: las pruebas lo cambian
     partes = PurePosixPath(nombre_relativo).parts
-    por_esquema = len(partes) == 2 and partes[0] in CARPETAS_POR_ESQUEMA
-    solo_esquema = por_esquema and partes[0] in CARPETAS_SOLO_POR_ESQUEMA
     candidatas: list[Path] = []
-    if por_esquema and esquema:
-        candidatas.append(base / partes[0] / esquema / partes[1])
-    if not solo_esquema:
-        candidatas.append(base.joinpath(*partes))
+    if len(partes) == 2 and partes[0] == "maestros" and esquema:
+        candidatas.append(base / "maestros" / esquema / partes[1])
+    candidatas.append(base.joinpath(*partes))
     for ruta in candidatas:
         if ruta.is_file():
             return ruta
-    if solo_esquema:
-        raise config.ConfigError(
-            f"No hay consulta de {partes[0]} para el esquema {esquema or 'sin esquema'}: "
-            f"agrega robot/queries/{partes[0]}/{esquema or '<ESQUEMA>'}/{partes[1]}."
-        )
     raise config.ConfigError(
         "No existe la consulta "
         + " ni ".join(str(r) for r in candidatas)
@@ -87,18 +75,37 @@ def sql_lista_precios(sql: str, lista: int) -> str:
     return _envolver(sql, f'X."lista_codigo" = {int(lista)}')
 
 
+def sql_cuentas(sql: str, cuentas: tuple[str, ...]) -> str:
+    """Solo las filas de esas cuentas contables (parte cartera).
+
+    Filtra por la etiqueta `Cuenta visible` (JDT1.Account), que la consulta ya trae. Las
+    cuentas son solo dígitos (config._cuentas), así que van como texto sin riesgo.
+    """
+    lista = ", ".join(f"'{cuenta}'" for cuenta in cuentas)
+    return _envolver(sql, f'X."Cuenta visible" IN ({lista})')
+
+
 def leer_parte(parte: Parte, empresa: EmpresaHana) -> str:
     """Consulta de una parte para una empresa, con el filtro propio de la empresa.
 
-    Hoy solo `precios` lo lleva: el archivo trae todas las listas y el robot se
-    queda con la pública de la empresa, por número (HANA_<EMPRESA>_LISTA_PRECIOS).
+    Dos partes cambian por empresa y lo hacen afuera del archivo, que es uno solo y
+    corre tal cual en el Query Manager: `precios` trae todas las listas y el robot se
+    queda con la pública, por número (HANA_<EMPRESA>_LISTA_PRECIOS); `cartera` trae
+    todas las cuentas y se queda con las de la empresa (HANA_<EMPRESA>_CUENTAS_CARTERA).
     """
     sql = leer(parte.consulta, empresa.esquema)
-    if parte.nombre != PRECIOS:
-        return sql
-    if empresa.lista_precios is None:
-        raise empresa.error_sin_precios()
-    return sql_lista_precios(sql, empresa.lista_precios)
+    if parte.nombre == PRECIOS:
+        if empresa.lista_precios is None:
+            raise empresa.error_sin_precios()
+        return sql_lista_precios(sql, empresa.lista_precios)
+    if parte.conjunto == "CARTERA":
+        if not empresa.cuentas_cartera:
+            raise config.ConfigError(
+                f"{empresa.codigo} no tiene cuentas de cartera: pon sus números separados por coma en "
+                f"{empresa.variable_cuentas_cartera} (robot/.env)."
+            )
+        return sql_cuentas(sql, empresa.cuentas_cartera)
+    return sql
 
 
 def sql_contar(sql: str) -> str:

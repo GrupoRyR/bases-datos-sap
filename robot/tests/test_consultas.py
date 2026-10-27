@@ -32,22 +32,14 @@ def test_solo_hay_archivo_del_esquema():
         consultas.ruta_consulta("maestros/precios.sql", "HBT_SDERIVADOS")
 
 
-def test_cartera_tambien_tiene_archivo_por_esquema():
-    propio = _escribir(config.QUERIES_DIR / "cartera" / "SEGUREX" / "cartera.sql", "SELECT 2")
-    otro = _escribir(config.QUERIES_DIR / "cartera" / "HBT_SDERIVADOS" / "cartera.sql", "SELECT 3")
-    assert consultas.ruta_consulta("cartera/cartera.sql", "SEGUREX") == propio
-    assert consultas.ruta_consulta("cartera/cartera.sql", "HBT_SDERIVADOS") == otro
-
-
-def test_cartera_de_un_esquema_sin_consulta_falla_claro_aunque_haya_otra_comun():
-    _escribir(config.QUERIES_DIR / "cartera" / "cartera.sql", "SELECT 1")
+def test_cartera_es_un_solo_archivo_para_cualquier_esquema():
+    comun = _escribir(config.QUERIES_DIR / "cartera" / "cartera.sql", "SELECT 1")
     _escribir(config.QUERIES_DIR / "cartera" / "SEGUREX" / "cartera.sql", "SELECT 2")
-    with pytest.raises(ConfigError, match="No hay consulta de cartera para el esquema SEGUREX_PRUEBA") as exc:
-        consultas.ruta_consulta("cartera/cartera.sql", "SEGUREX_PRUEBA")
-    assert "robot/queries/cartera/SEGUREX_PRUEBA/cartera.sql" in str(exc.value)
+    for esquema in ("SEGUREX", "HBT_SDERIVADOS", "SEGUREX_PRUEBA"):
+        assert consultas.ruta_consulta("cartera/cartera.sql", esquema) == comun
 
 
-def test_fuera_de_maestros_y_cartera_no_hay_archivo_por_esquema():
+def test_fuera_de_maestros_no_hay_archivo_por_esquema():
     _escribir(config.QUERIES_DIR / "diagnostico" / "SEGUREX" / "listas_precios.sql", "SELECT 2")
     comun = _escribir(config.QUERIES_DIR / "diagnostico" / "listas_precios.sql", "SELECT 1")
     assert consultas.ruta_consulta("diagnostico/listas_precios.sql", "SEGUREX") == comun
@@ -94,8 +86,16 @@ def test_sql_lista_precios():
     )
 
 
-def _empresa(lista: int | None, esquema: str = "SEGUREX") -> EmpresaHana:
-    return EmpresaHana("SGX", "usuario", "clave", esquema, lista_precios=lista)
+def test_sql_cuentas():
+    assert consultas.sql_cuentas(SQL, ("13050505", "13051005")) == (
+        f'SELECT X.* FROM (\n{SQL}\n) X WHERE X."Cuenta visible" IN (\'13050505\', \'13051005\')'
+    )
+
+
+def _empresa(
+    lista: int | None, esquema: str = "SEGUREX", cuentas: tuple[str, ...] = ("13050505",)
+) -> EmpresaHana:
+    return EmpresaHana("SGX", "usuario", "clave", esquema, lista_precios=lista, cuentas_cartera=cuentas)
 
 
 def test_leer_parte_de_precios_filtra_por_el_numero_de_lista():
@@ -109,6 +109,19 @@ def test_leer_parte_de_precios_sin_lista_falla_diciendo_que_variable_poner():
     _escribir(config.QUERIES_DIR / "maestros" / "precios.sql", "SELECT 1 FROM DUMMY")
     with pytest.raises(ConfigError, match="HANA_SGX_LISTA_PRECIOS"):
         consultas.leer_parte(PARTES["precios"], _empresa(None))
+
+
+def test_leer_parte_de_cartera_filtra_por_las_cuentas_de_la_empresa():
+    _escribir(config.QUERIES_DIR / "cartera" / "cartera.sql", "SELECT 1 FROM DUMMY")
+    assert consultas.leer_parte(PARTES["cartera"], _empresa(None, cuentas=("1", "2"))) == (
+        'SELECT X.* FROM (\nSELECT 1 FROM DUMMY\n) X WHERE X."Cuenta visible" IN (\'1\', \'2\')'
+    )
+
+
+def test_leer_parte_de_cartera_sin_cuentas_falla_diciendo_que_variable_poner():
+    _escribir(config.QUERIES_DIR / "cartera" / "cartera.sql", "SELECT 1 FROM DUMMY")
+    with pytest.raises(ConfigError, match="HANA_SGX_CUENTAS_CARTERA"):
+        consultas.leer_parte(PARTES["cartera"], _empresa(None, cuentas=()))
 
 
 def test_leer_parte_de_las_demas_partes_queda_igual():

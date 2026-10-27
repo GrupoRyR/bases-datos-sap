@@ -177,12 +177,11 @@ def trabajos_completos(
     Las solicitudes tomadas de la misma empresa y conjunto van en la corrida
     completa (§7.3); las de otras empresas quedan como trabajos de solicitud.
     Una empresa sin lista de precios pública (`sin_precios`) manda su MAESTROS sin la
-    parte precios (§4.1); una solicitud de solo precios de esa empresa no cabe en esa
-    corrida y queda como trabajo de solicitud aparte.
+    parte precios (§4.1). Las solicitudes de solo precios de esa empresa no caben en
+    esa corrida: quien las toma las separa antes con `separar_solo_precios`.
     """
     empresas = list(dict.fromkeys(empresas))
-    resto, aparte = separar_solo_precios(solicitudes_tomadas, sin_precios)
-    por_grupo = {(t.empresa, t.conjunto): t for t in _agrupar(resto, hoy, sin_precios)}
+    por_grupo = {(t.empresa, t.conjunto): t for t in _agrupar(solicitudes_tomadas, hoy, sin_precios)}
     ayer = (hoy - timedelta(days=1)).isoformat()
 
     trabajos: list[Trabajo] = []
@@ -201,5 +200,4 @@ def trabajos_completos(
                 fecha_corte=ayer if conjunto == "CARTERA" else None,
             ))
     trabajos.extend(por_grupo.values())
-    trabajos.extend(_agrupar(aparte, hoy, ()))
     return trabajos

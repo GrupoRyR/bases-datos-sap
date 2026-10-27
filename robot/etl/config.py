@@ -26,11 +26,18 @@ ESQUEMAS_POR_DEFECTO = {"SGX": "SEGUREX", "SDC": "HBT_SDERIVADOS"}
 # Número (OPLN.ListNum) de la lista de precios pública de cada empresa. Segurex:
 # la 1, «LISTA PUBLICO». Derivados todavía no tiene una definida.
 LISTAS_PRECIOS_POR_DEFECTO: dict[str, int | None] = {"SGX": 1, "SDC": None}
+# Cuentas contables de cartera (JDT1.Account) de cada empresa: la consulta de cartera
+# es una sola y el robot se queda con estas cuentas.
+CUENTAS_CARTERA_POR_DEFECTO: dict[str, tuple[str, ...]] = {
+    "SGX": ("13050505", "13051005"),
+    "SDC": ("13050501", "13051005"),
+}
 CSV_DIR_POR_DEFECTO = r"C:\Users\Claude\Documents\CEREBRO\SAP\BASES_DE_DATOS"
 FRANJAS_POR_DEFECTO = "00:00,05:00,06:00,12:00,12:30"
 SOPHOS_CLI_POR_DEFECTO = r"C:\Program Files (x86)\Sophos\Connect\sccli.exe"
 
 _RE_FRANJA = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+_RE_CUENTA = re.compile(r"[0-9]+")
 
 
 def ahora() -> datetime:
@@ -76,9 +83,30 @@ def _int_o_nada(nombre: str, por_defecto: int | None, invalidos: list[str]) -> i
         return por_defecto
 
 
+def _cuentas(nombre: str, por_defecto: tuple[str, ...], invalidos: list[str]) -> tuple[str, ...]:
+    """Cuentas separadas por coma; si la variable falta o está vacía, las de por defecto.
+
+    Una cuenta que no sea solo dígitos usa las de por defecto, pero queda en `invalidos`:
+    el robot pone estas cuentas dentro de la consulta, así que no admite otra cosa.
+    """
+    valor = (os.getenv(nombre) or "").strip()
+    if not valor:
+        return por_defecto
+    cuentas = tuple(c.strip() for c in valor.split(",") if c.strip())
+    if not cuentas or not all(_RE_CUENTA.fullmatch(c) for c in cuentas):
+        invalidos.append(f"{nombre}={valor}")
+        return por_defecto
+    return cuentas
+
+
 def variable_lista_precios(empresa: str) -> str:
     """Nombre de la variable con el número de la lista de precios pública de la empresa."""
     return f"HANA_{empresa}_LISTA_PRECIOS"
+
+
+def variable_cuentas_cartera(empresa: str) -> str:
+    """Nombre de la variable con las cuentas de cartera de la empresa."""
+    return f"HANA_{empresa}_CUENTAS_CARTERA"
 
 
 def _texto(nombre: str, por_defecto: str = "") -> str:
@@ -119,10 +147,16 @@ class EmpresaHana:
     esquema: str
     # Número de la lista de precios pública (OPLN.ListNum); None: la empresa no tiene.
     lista_precios: int | None = None
+    # Cuentas de cartera de la empresa (JDT1.Account); cargar_config() siempre las llena.
+    cuentas_cartera: tuple[str, ...] = ()
 
     @property
     def variable_lista_precios(self) -> str:
         return variable_lista_precios(self.codigo)
+
+    @property
+    def variable_cuentas_cartera(self) -> str:
+        return variable_cuentas_cartera(self.codigo)
 
     @property
     def sin_precios(self) -> bool:
@@ -289,6 +323,9 @@ def cargar_config(env_path: Path | None = None) -> Config:
                     esquema=_texto(f"HANA_{codigo}_SCHEMA", ESQUEMAS_POR_DEFECTO[codigo]),
                     lista_precios=_int_o_nada(
                         variable_lista_precios(codigo), LISTAS_PRECIOS_POR_DEFECTO[codigo], invalidos
+                    ),
+                    cuentas_cartera=_cuentas(
+                        variable_cuentas_cartera(codigo), CUENTAS_CARTERA_POR_DEFECTO[codigo], invalidos
                     ),
                 )
                 for codigo in EMPRESAS
