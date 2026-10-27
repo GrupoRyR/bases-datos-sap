@@ -199,6 +199,7 @@ def _completa(
         fallos, fallidos = _asignar_solicitudes(trabajos, _tomar_solicitudes(api), hoy, cfg.hana)
         fallos_solicitudes.extend(fallos)
         resultados.extend(fallidos)
+        trabajos.extend(r.trabajo for r in fallidos)  # el estado de la ejecución los lista
 
     fallos = ejecutar_trabajos(
         cfg,

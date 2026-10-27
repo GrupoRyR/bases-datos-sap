@@ -86,6 +86,7 @@ def test_completa_falla_al_instante_la_solicitud_de_solo_precios_de_derivados(en
     assert e.servidor.estado_solicitudes == {50: "fallida", 51: "terminada"}
     assert [etapa for etapa, _ in correos[0]] == ["CONFIGURACION"]
     assert "HANA_SDC_LISTA_PRECIOS" in correos[0][0][1]
+    assert _estado()["trabajos"].count("MAESTROS SDC") == 2  # la completa y la solicitud fallida
     assert not e.hana.de("SDC", parte="precios")
 
 

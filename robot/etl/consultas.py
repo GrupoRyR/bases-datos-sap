@@ -17,10 +17,10 @@ from config import BOGOTA, EmpresaHana
 from esquema import PRECIOS, Parte
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
-# Carpetas donde una empresa puede traer su propia versión de una consulta.
-CARPETAS_POR_ESQUEMA = ("maestros", "cartera")
 # Carpetas sin consulta común: cada esquema trae la suya (las cuentas de cartera cambian por empresa).
 CARPETAS_SOLO_POR_ESQUEMA = ("cartera",)
+# Carpetas donde una empresa puede traer su propia versión de una consulta.
+CARPETAS_POR_ESQUEMA = ("maestros", *CARPETAS_SOLO_POR_ESQUEMA)
 
 
 def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
@@ -33,15 +33,16 @@ def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
     base = config.QUERIES_DIR  # se lee aquí: las pruebas lo cambian
     partes = PurePosixPath(nombre_relativo).parts
     por_esquema = len(partes) == 2 and partes[0] in CARPETAS_POR_ESQUEMA
+    solo_esquema = por_esquema and partes[0] in CARPETAS_SOLO_POR_ESQUEMA
     candidatas: list[Path] = []
     if por_esquema and esquema:
         candidatas.append(base / partes[0] / esquema / partes[1])
-    if not (por_esquema and partes[0] in CARPETAS_SOLO_POR_ESQUEMA):
+    if not solo_esquema:
         candidatas.append(base.joinpath(*partes))
     for ruta in candidatas:
         if ruta.is_file():
             return ruta
-    if por_esquema and partes[0] in CARPETAS_SOLO_POR_ESQUEMA:
+    if solo_esquema:
         raise config.ConfigError(
             f"No hay consulta de {partes[0]} para el esquema {esquema or 'sin esquema'}: "
             f"agrega robot/queries/{partes[0]}/{esquema or '<ESQUEMA>'}/{partes[1]}."
