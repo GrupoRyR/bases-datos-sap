@@ -111,9 +111,9 @@ No se usa MCP: las apps hablan con la API. Si más adelante un agente de IA nece
 
 | Parte | Origen | Cómo se actualiza |
 |---|---|---|
-| Líneas de venta | La consulta `etl/queries/ventas.sql` del gestor de cartera (main `9e2f877`), copiada tal cual con su marcador `@id_pedido_app` por empresa. Se verificó contra el «Análisis de ventas» de SAP el 29/10/2026: Segurex 200 de 200 clientes y Derivados 62 de 62 | Por empresa, se reemplaza solo la ventana que trae la consulta (fecha del documento desde el primer día del mes en curso menos 6 días). Se hace en una sola transacción y nunca queda vacía. Los meses anteriores se conservan y nunca se borran, porque Comisiones necesita el histórico congelado |
+| Líneas de venta | La consulta `etl/queries/ventas.sql` del gestor de cartera (main `9e2f877`), copiada tal cual con su marcador `@id_pedido_app` por empresa. Se verificó contra el «Análisis de ventas» de SAP el 29/10/2026: Segurex 200 de 200 clientes y Derivados 62 de 62 | Por empresa, se reemplaza solo la ventana que trae la consulta (fecha de contabilización, `DocDate`, desde los últimos 7 días del mes anterior hasta hoy: `ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE))`). Se hace en una sola transacción y nunca queda vacía. Los meses anteriores se conservan y nunca se borran, porque Comisiones necesita el histórico congelado |
 
-- El robot envía, junto con las filas, la fecha de inicio de la ventana que usó. La app borra y vuelve a escribir solo las filas de esa empresa con fecha de documento desde ese día.
+- El robot envía, junto con las filas, la fecha de inicio de la ventana que usó. La app borra y vuelve a escribir solo las filas de esa empresa con `fecha_contabilizacion` (`DocDate`) desde ese día. La columna `fecha_documento` (`TaxDate`) es solo de referencia y nunca define la ventana.
 - Un documento de un mes anterior que se cancele o se corrija en SAP fuera de la ventana no se actualiza. Así funciona hoy el robot del gestor; si hace falta, se agrega una recarga de un mes a pedido.
 - Las líneas «Sólo impuesto» (obsequios) llegan con venta 0, como en la consulta del gestor.
 - El costo de cada línea es el costo de inventario y **no** cuadra con la «Ganancia bruta» de SAP; ninguna app debe usarlo para márgenes.
