@@ -32,7 +32,7 @@ Comisiones in the gestor de cartera needs sales lines. The user moved VENTAS int
 |---|---|---|---|---|
 | V1 | Contract §10 VENTAS and this feature document | `docs/contrato-ventas` | inline (one doc file) | PR open |
 | V2 | App: `ventas` connection, table and `v_ventas`, batch rules, window apply, requests, nightly count | — | delegated writer | pending |
-| V3 | Robot: query copy, HANA window, nightly run, requests, `--diagnostico`, CSV and retention | — | delegated writer | pending |
+| V3 | Robot: query copy, HANA window, nightly run, requests, `--diagnostico`, CSV and retention | `feat/robot-ventas` | delegated writer (writer trigger: 2+ non-trivial files in `robot/**`) | done, not pushed |
 
 ## Acceptance
 
@@ -45,6 +45,17 @@ Comisiones in the gestor de cartera needs sales lines. The user moved VENTAS int
 ### V1
 
 - Contract section written; documentation only, structural readback.
+
+### V3
+
+Branch `feat/robot-ventas`, cut from `main` with contract §10. Test first: RED observed for each unit before the code, then GREEN.
+
+- `2bf6541` feat(robot): add the VENTAS query, its company marker and schema. `robot/queries/ventas/ventas.sql` is the gestor file at `9e2f877` byte for byte (same git blob `c768a24`, checked by a test). `consultas.sql_id_pedido_app` reuses the gestor regex: SGX runs as is, SDC gets `CAST(NULL AS NVARCHAR(254))`, and a missing, repeated or unrecognized marker fails before running. Parte `ventas` with the 34 contract columns and the new `cantidad` type (6 decimals, half up, no `-0.000000`). 7 files, +443 −21 (the copied SQL is 154 of them).
+- `abdb32d` feat(robot): send VENTAS runs with the HANA window, nightly and on request. `SELECT ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE)) FROM DUMMY` before and after the query on the extraction connection; one retry if it changed, then the job fails. `ventana_desde` only on VENTAS `iniciar`; rows before it fail the job. Nightly: MAESTROS, CARTERA and VENTAS per company, with `conteo_sap.ventas`. VENTAS requests map to `{"ventas": "todo"}`. CSV `VENTAS\<empresa>\aaaa-mm-dd_hhmm.csv`, 90-day retention. LEEME updated. 18 files, +480 −83 (about 560 changed lines, mostly tests: the nightly lists in existing tests grew from 4 to 6 runs).
+- `e4d1b3e` feat(robot): show the HANA window of VENTAS in the diagnostic. 2 files, +75 −8.
+- Checks: `robot/.venv/Scripts/python.exe -m pytest` → 677 passed (baseline 618). The bare `python -m pytest` of the system Python has no pytest installed; the robot venv is the runner.
+- Known behavior: a VENTAS job that fails before HANA returns the window (VPN or connection failure) cannot open a run to mark it failed, because `ventana_desde` is mandatory and never comes from the PC clock. The failure goes to the email and its requests expire in the API.
+- Pending: native review, push and PR (user decisions); the user runs `--diagnostico` against SAP.
 
 ## Next step
 
