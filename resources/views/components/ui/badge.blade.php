@@ -6,7 +6,7 @@
 @php
     $tones = [
         'neutral' => 'bg-subtle text-muted',
-        'brand' => 'bg-subtle text-brand-ink',
+        'brand' => 'bg-brand-tint text-brand-ink',
         'info' => 'bg-info-bg text-info',
         'success' => 'bg-success-bg text-success',
         'warning' => 'bg-warning-bg text-warning',
