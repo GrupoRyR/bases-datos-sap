@@ -1,7 +1,7 @@
 """FASE 2, sin VPN: CSV en la carpeta y corridas en la API (contrato §4).
 
 Por cada resultado bueno: guarda el CSV de cada parte (y la foto diaria en la
-cartera completa), inicia la corrida, manda lotes de hasta 1.000 filas de una
+cartera completa), inicia la corrida (VENTAS con su ventana_desde de HANA), manda lotes de hasta 1.000 filas de una
 sola parte, numerados desde 1, y cierra. Cualquier error después de abrir la
 corrida la marca fallida en la API.
 
@@ -60,8 +60,8 @@ def armar_lotes(trabajo: Trabajo, resultado: Resultado) -> list[Lote]:
     return lotes
 
 
-def _iniciar(api: ApiCliente, trabajo: Trabajo, extraida_en: str) -> int:
-    datos = {
+def _iniciar(api: ApiCliente, trabajo: Trabajo, extraida_en: str, ventana_desde: str | None = None) -> int:
+    datos: dict[str, Any] = {
         "conjunto": trabajo.conjunto,
         "empresa": trabajo.empresa,
         "tipo": trabajo.tipo,
@@ -70,6 +70,15 @@ def _iniciar(api: ApiCliente, trabajo: Trabajo, extraida_en: str) -> int:
         "fecha_corte": trabajo.fecha_corte,
         "extraida_en": extraida_en,
     }
+    if trabajo.conjunto == "VENTAS":
+        # Obligatoria en VENTAS y solo la da HANA (contrato §10.1): sin ella no se abre.
+        if not ventana_desde:
+            raise FalloEnvio(
+                "VALIDACION",
+                f"{trabajo.nombre}: no hay ventana_desde de HANA; no se puede abrir la corrida "
+                "(sus solicitudes vencen solas en la API).",
+            )
+        datos["ventana_desde"] = ventana_desde
     try:
         return int(api.iniciar_corrida(**datos)["run_id"])
     except CorridaAbierta as exc:
@@ -143,7 +152,7 @@ def _enviar_resultado(api: ApiCliente, r: Resultado) -> None:
     t = r.trabajo
     run_id: int | None = None
     try:
-        run_id = _iniciar(api, t, r.extraida_en)
+        run_id = _iniciar(api, t, r.extraida_en, r.ventana_desde)
         lotes = armar_lotes(t, r)
         for lote in lotes:
             _enviar_lote(api, run_id, lote)
@@ -165,7 +174,7 @@ def _enviar_resultado(api: ApiCliente, r: Resultado) -> None:
 def _abrir_y_fallar(api: ApiCliente, r: Resultado, ahora: Callable[[], datetime]) -> None:
     t = r.trabajo
     try:
-        run_id = _iniciar(api, t, ahora().isoformat(timespec="seconds"))
+        run_id = _iniciar(api, t, ahora().isoformat(timespec="seconds"), r.ventana_desde)
     except Exception as exc:
         log.error("%s: no se pudo abrir la corrida para reportar el fallo: %s", t.nombre, exc)
         return

@@ -37,6 +37,10 @@ class Resultado:
     filas: dict[str, list[list[Any]]] = field(default_factory=dict)  # ya serializadas
     conteo_sap: dict[str, int] | None = None  # solo en una corrida completa
     extraida_en: str = ""  # hora de Bogotá con zona, al terminar la última consulta
+    # Solo VENTAS: primer día de la ventana (AAAA-MM-DD), calculado por HANA (contrato §10.1).
+    # Si la extracción falla, queda el último que dio HANA: con él se abre y se falla la
+    # corrida; sin él (la VPN o la conexión fallaron antes) la corrida no se puede abrir.
+    ventana_desde: str | None = None
     error: str | None = None
     etapa: str | None = None
 
@@ -50,6 +54,43 @@ class FalloTrabajo(RuntimeError):
     def __init__(self, etapa: str, mensaje: str) -> None:
         super().__init__(mensaje)
         self.etapa = etapa
+
+
+INTENTOS_VENTANA = 2  # la extracción de VENTAS se repite una vez si la ventana cambió
+
+
+def leer_ventana(conn: Any, empresa: str) -> str:
+    """Primer día de la ventana de VENTAS según HANA, en esta conexión (contrato §10.1).
+
+    Nunca se calcula con el reloj del PC: la consulta filtra con CURRENT_DATE del
+    servidor HANA y la ventana debe ser exactamente esa.
+    """
+    _, filas = hana.ejecutar(conn, consultas.SQL_VENTANA, f"{empresa} ventana de ventas")
+    if len(filas) != 1 or len(filas[0]) != 1:
+        raise hana.HanaError(
+            f"La consulta de la ventana de ventas de {empresa} debía devolver una fila con una "
+            f"columna y devolvió {len(filas)} filas."
+        )
+    dia = esquema.serializar(filas[0][0], esquema.FECHA, "ventana_desde")
+    if dia is None:
+        raise esquema.ValorInvalido(f"La ventana de ventas de {empresa} llegó vacía de HANA.")
+    return dia
+
+
+def revisar_ventana(parte: esquema.Parte, filas: list[list[Any]], ventana_desde: str) -> None:
+    """Falla si alguna fila trae fecha_contabilizacion anterior a ventana_desde.
+
+    La API rechazaría el lote (contrato §10.1); se corta antes de abrir la corrida.
+    Las fechas ya están serializadas (AAAA-MM-DD), así que se comparan como texto.
+    """
+    posicion = parte.nombres.index(esquema.COLUMNA_VENTANA)
+    antes = sum(1 for fila in filas if fila[posicion] < ventana_desde)
+    if antes:
+        raise FalloTrabajo(
+            "VALIDACION",
+            f"Parte {parte.nombre}: {antes} filas con {esquema.COLUMNA_VENTANA} anterior a "
+            f"ventana_desde {ventana_desde}; la API las rechazaría.",
+        )
 
 
 _RE_LLAVES = re.compile(r"^(Parte \w+: \d+ llaves repetidas \([^)]*\))")
@@ -140,10 +181,52 @@ def resultado_fallido(trabajo: Trabajo, exc: BaseException) -> Resultado:
 
 def _extraer_trabajo(conn: Any, empresa_cfg: EmpresaHana, r: Resultado, ahora: Callable[[], datetime]) -> None:
     t = r.trabajo
+    if t.conjunto == "VENTAS":
+        _extraer_en_ventana(conn, empresa_cfg, r)
+    else:
+        _extraer_partes(conn, empresa_cfg, r)
+    r.extraida_en = ahora().isoformat(timespec="seconds")
+    log.info(
+        "%s extraído: %s%s.", t.nombre,
+        ", ".join(f"{p} {len(f)}" for p, f in r.filas.items()),
+        f"; ventana desde {r.ventana_desde}" if r.ventana_desde else "",
+    )
+
+
+def _extraer_en_ventana(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
+    """VENTAS: la ventana se pide a HANA antes y después de la consulta (contrato §10.1).
+
+    Si cambió (la extracción cruzó la medianoche del servidor HANA), se repite la
+    extracción una vez; si vuelve a cambiar, el trabajo falla. El conteo de la
+    completa va dentro, en la misma conexión, así que cuenta la misma ventana.
+    """
+    t = r.trabajo
+    for intento in range(1, INTENTOS_VENTANA + 1):
+        antes = r.ventana_desde = leer_ventana(conn, t.empresa)
+        _extraer_partes(conn, empresa_cfg, r)
+        despues = r.ventana_desde = leer_ventana(conn, t.empresa)
+        if antes == despues:
+            break
+        log.warning(
+            "%s: la ventana cambió de %s a %s durante la extracción (cruzó la medianoche); "
+            "intento %d de %d.", t.nombre, antes, despues, intento, INTENTOS_VENTANA,
+        )
+    else:
+        raise FalloTrabajo(
+            "VALIDACION",
+            f"La ventana de {t.nombre} cambió durante la extracción en {INTENTOS_VENTANA} intentos "
+            f"(la última vez de {antes} a {despues}); no se envía.",
+        )
+    for nombre in t.partes:
+        revisar_ventana(esquema.PARTES[nombre], r.filas[nombre], despues)
+
+
+def _extraer_partes(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
+    t = r.trabajo
     esquema_db = empresa_cfg.esquema
     completa = t.tipo == "completa"
-    if completa:
-        r.conteo_sap = {}
+    r.columnas, r.filas = {}, {}
+    r.conteo_sap = {} if completa else None
     codigos: list[str] = []  # códigos de los socios extraídos, en orden
 
     for nombre, modo in t.partes.items():
@@ -177,12 +260,6 @@ def _extraer_trabajo(conn: Any, empresa_cfg: EmpresaHana, r: Resultado, ahora: C
                 if f[posicion] not in vistos:
                     vistos.add(f[posicion])
                     codigos.append(f[posicion])
-
-    r.extraida_en = ahora().isoformat(timespec="seconds")
-    log.info(
-        "%s extraído: %s.", t.nombre,
-        ", ".join(f"{p} {len(f)}" for p, f in r.filas.items()),
-    )
 
 
 def _extraer_empresa(

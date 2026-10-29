@@ -297,6 +297,7 @@ HIJAS_DE_SOCIO = ("direcciones", "contactos")
 # Contrato §7.1: (conjunto, parte pedida o None) -> partes que trae la corrida.
 PARTES_POR_SOLICITUD: dict[tuple[str, str | None], tuple[str, ...]] = {
     ("CARTERA", None): ("cartera",),
+    ("VENTAS", None): ("ventas",),
     ("MAESTROS", None): PARTES_POR_CONJUNTO["MAESTROS"],
     ("MAESTROS", "clientes"): ("clientes", *HIJAS_DE_SOCIO),
     ("MAESTROS", "proveedores"): ("proveedores", *HIJAS_DE_SOCIO),

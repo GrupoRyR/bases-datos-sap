@@ -135,6 +135,17 @@ def test_cerrar_completa_con_conteo_sap(cliente: ApiCliente, servidor: ApiFalsa)
     assert servidor.peticiones_a("cerrar")[0].datos["conteo_sap"] == {"cartera": 1}
 
 
+def test_iniciar_ventas_manda_la_ventana_y_los_demas_no_la_mandan(cliente: ApiCliente, servidor: ApiFalsa) -> None:
+    run_id = cliente.iniciar_corrida(
+        conjunto="VENTAS", empresa="SGX", tipo="solicitud", partes={"ventas": "todo"},
+        solicitudes=[], fecha_corte=None, extraida_en=EXTRAIDA, ventana_desde="2026-09-24",
+    )["run_id"]
+    assert servidor.peticiones_a("iniciar")[0].datos["ventana_desde"] == "2026-09-24"
+    assert servidor.corridas[run_id].ventana_desde == "2026-09-24"
+    _iniciar_maestros(cliente)
+    assert "ventana_desde" not in servidor.peticiones_a("iniciar")[1].datos
+
+
 def test_fallar_corrida_recorta_el_error_a_mil_caracteres(cliente: ApiCliente, servidor: ApiFalsa) -> None:
     run_id = _iniciar_maestros(cliente)["run_id"]
 

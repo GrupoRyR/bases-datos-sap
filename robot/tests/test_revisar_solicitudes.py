@@ -88,6 +88,23 @@ def test_corre_las_solicitudes_y_suelta_el_candado(entorno, correos):
     assert (_estado()["estado"], _estado()["modo"]) == ("OK", "solicitudes")
 
 
+def test_solicitud_de_ventas_es_una_corrida_de_ventas_de_su_empresa(entorno, correos):
+    e = entorno
+    e.servidor.encolar_solicitud({"id": 140, "empresa": "SDC", "conjunto": "VENTAS",
+                                  "parte": None, "desde": {}})
+    assert _revisar(e) == 0
+    [corrida] = e.servidor.corridas.values()
+    assert (corrida.conjunto, corrida.empresa, corrida.tipo, corrida.estado, corrida.solicitudes) == (
+        "VENTAS", "SDC", "solicitud", "cerrada", [140])
+    assert (corrida.partes, corrida.ventana_desde, corrida.fecha_corte) == ({"ventas": "todo"}, "2026-09-24", None)
+    assert corrida.conteo_sap is None
+    assert [x.tipo for x in e.hana.de("SDC")] == ["ventana", "todo", "ventana"]
+    assert e.servidor.estado_solicitudes == {140: "terminada"}
+    assert (e.csv_dir / "VENTAS" / "SDC" / "2026-10-26_0200.csv").is_file()
+    revisar_fases(e.linea)
+    assert correos == []
+
+
 def test_derivados_sin_lista_de_precios_atiende_todo_maestros_y_falla_solo_precios(entorno, correos, monkeypatch):
     e = entorno
     monkeypatch.delenv("HANA_SDC_LISTA_PRECIOS")  # Derivados todavía no tiene lista pública
