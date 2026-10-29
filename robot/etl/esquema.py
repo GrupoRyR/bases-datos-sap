@@ -1,11 +1,12 @@
 """Partes del contrato, sus columnas y la conversión de valores (docs/contrato-robot.md).
 
-Este archivo replica §5 (MAESTROS), §6 (CARTERA) y §7.1 (qué trae cada
-solicitud) del contrato. El contrato manda: si cambia, se cambia aquí también.
+Este archivo replica §5 (MAESTROS), §6 (CARTERA), §10 (VENTAS) y §7.1 (qué
+trae cada solicitud) del contrato. El contrato manda: si cambia, se cambia aquí
+también.
 
 - En MAESTROS los alias del SQL ya son los nombres del contrato (`hana == nombre`).
-- En CARTERA la consulta es la del gestor de cartera, con sus etiquetas
-  ("Código SN"...), y `hana` es esa etiqueta.
+- En CARTERA y VENTAS la consulta es la del gestor de cartera, con sus etiquetas
+  ("Código SN", "Tipo objeto"...), y `hana` es esa etiqueta.
 - `indices()` falla ruidosamente si alguien edita el SQL y desaparece una
   columna (regla 7 del skill robot-sap-hana).
 """
@@ -24,10 +25,13 @@ from registro import obtener
 log = obtener("esquema")
 
 TEXTO, ENTERO, MONTO, FECHA, HORA, BOOL = "texto", "entero", "monto", "fecha", "hora", "bool"
+# Cantidades y tasas de VENTAS (contrato §4.2 y §10): como un monto, con hasta 6 decimales.
+CANTIDAD = "cantidad"
 
 MAX_TEXTO = 4000  # contrato §4.2
 MAX_LLAVES_EN_ERROR = 5
 _CENTAVOS = Decimal("0.01")
+_SEIS_DECIMALES = Decimal("0.000001")
 _VERDADEROS = {"y", "1", "true", "t"}
 _FALSOS = {"n", "0", "false", "f"}
 
@@ -48,7 +52,7 @@ class Columna:
 @dataclass(frozen=True)
 class Parte:
     nombre: str
-    conjunto: str                   # MAESTROS o CARTERA
+    conjunto: str                   # MAESTROS, CARTERA o VENTAS
     consulta: str                   # archivo relativo a robot/queries
     columnas: tuple[Columna, ...]   # el ORDEN define el orden del CSV y del lote
     llave: tuple[str, ...]          # nombres del contrato; vacía = sin llave (cartera)
@@ -202,6 +206,48 @@ _CARTERA = (
 )
 
 
+# Orden del contrato §10; `hana` es la etiqueta de la consulta del gestor (lote `ventas`).
+_VENTAS = (
+    Columna("Tipo objeto", "tipo_objeto", ENTERO, requerida=True),
+    Columna("DocEntry", "doc_entry", ENTERO, requerida=True),
+    Columna("Número documento", "numero_documento", ENTERO, requerida=True),
+    Columna("Línea", "linea", ENTERO, requerida=True),
+    Columna("Clase documento", "clase_documento", TEXTO, requerida=True),
+    Columna("Estado documento", "estado_documento", TEXTO, requerida=True),
+    Columna("Fecha documento", "fecha_documento", FECHA, requerida=True),
+    Columna("Fecha contabilización", "fecha_contabilizacion", FECHA, requerida=True),
+    Columna("SlpCode", "slp_code", ENTERO, requerida=True),
+    Columna("Vendedor", "vendedor", TEXTO),
+    Columna("Canal", "canal", TEXTO),
+    Columna("Código cliente", "codigo_cliente", TEXTO, requerida=True),
+    Columna("Cliente", "cliente", TEXTO),
+    Columna("Nit", "nit", TEXTO),
+    Columna("Ciudad", "ciudad", TEXTO),
+    Columna("Pedido", "pedido", TEXTO),
+    Columna("Id pedido app", "id_pedido_app", TEXTO),
+    Columna("OC cliente", "oc_cliente", TEXTO),
+    Columna("Ciudad envío", "ciudad_envio", TEXTO),
+    Columna("Dirección envío", "direccion_envio", TEXTO),
+    Columna("Marca", "marca", TEXTO),
+    Columna("Familia", "familia", TEXTO),
+    Columna("Código artículo", "codigo_articulo", TEXTO),
+    Columna("Descripción", "descripcion", TEXTO),
+    Columna("Cantidad", "cantidad", CANTIDAD, requerida=True),
+    Columna("Costo unitario", "costo_unitario", MONTO),
+    Columna("Costo total", "costo_total", MONTO),
+    Columna("Precio lista", "precio_lista", MONTO),
+    Columna("Precio unitario", "precio_unitario", MONTO),
+    Columna("Total", "total", MONTO, requerida=True),
+    Columna("IVA", "iva", MONTO),
+    Columna("Moneda", "moneda", TEXTO),
+    Columna("TRM", "trm", CANTIDAD),
+    Columna("Comentarios", "comentarios", TEXTO),
+)
+
+# Columna que define la ventana de VENTAS (contrato §10.1): la que filtra la consulta.
+COLUMNA_VENTANA = "fecha_contabilizacion"
+
+
 def _maestro(
     nombre: str,
     columnas: tuple[Columna, ...],
@@ -216,7 +262,8 @@ PRECIOS = "precios"
 
 # Orden de las partes: el del contrato §1. `precios` trae todas las listas y
 # consultas.leer_parte() deja solo la pública de la empresa, por número. `cartera` trae
-# todas las cuentas por cobrar y deja solo las de la empresa, en el mismo lugar.
+# todas las cuentas por cobrar y deja solo las de la empresa, en el mismo lugar. `ventas`
+# es la consulta del gestor y en Derivados cambia el id del pedido de la app por un NULL.
 PARTES: dict[str, Parte] = {
     parte.nombre: parte
     for parte in (
@@ -234,12 +281,14 @@ PARTES: dict[str, Parte] = {
             ENTERO, _m("dias_extra", ENTERO), _m("meses_extra", ENTERO))),
         _maestro("municipios", _catalogo(TEXTO)),
         Parte("cartera", "CARTERA", "cartera/cartera.sql", _CARTERA, (), "todo", False),
+        Parte("ventas", "VENTAS", "ventas/ventas.sql", _VENTAS,
+              ("tipo_objeto", "doc_entry", "linea"), "todo", False),
     )
 }
 
 PARTES_POR_CONJUNTO: dict[str, tuple[str, ...]] = {
     conjunto: tuple(p.nombre for p in PARTES.values() if p.conjunto == conjunto)
-    for conjunto in ("MAESTROS", "CARTERA")
+    for conjunto in ("MAESTROS", "CARTERA", "VENTAS")
 }
 
 SOCIOS = ("clientes", "proveedores")
@@ -337,6 +386,15 @@ def _monto(valor: Any, columna: str) -> str:
     return f"{redondeado:f}"
 
 
+def _cantidad(valor: Any, columna: str) -> str:
+    """Cantidad o tasa (VENTAS): texto decimal con hasta 6 decimales, mitad hacia arriba."""
+    numero = _decimal(valor, columna, "se esperaba una cantidad")
+    redondeado = numero.quantize(_SEIS_DECIMALES, rounding=ROUND_HALF_UP)
+    if redondeado == 0:
+        redondeado = Decimal("0.000000")  # sin "-0.000000"
+    return f"{redondeado:f}"
+
+
 def _fecha(valor: Any, columna: str) -> str:
     if isinstance(valor, datetime):
         return valor.date().isoformat()
@@ -419,6 +477,8 @@ def serializar(valor: Any, tipo: str, columna: str = "") -> Any:
         return _entero(valor, columna)
     if tipo == MONTO:
         return _monto(valor, columna)
+    if tipo == CANTIDAD:
+        return _cantidad(valor, columna)
     if tipo == FECHA:
         return _fecha(valor, columna)
     if tipo == HORA:

@@ -10,6 +10,7 @@ import esquema
 from fake_hana import fila
 from esquema import (
     BOOL,
+    CANTIDAD,
     ENTERO,
     FECHA,
     HORA,
@@ -24,7 +25,7 @@ from esquema import (
     serializar,
 )
 
-# Columnas del contrato (docs/contrato-robot.md §5.2 y §6), en su orden.
+# Columnas del contrato (docs/contrato-robot.md §5.2, §6 y §10), en su orden.
 SOCIO = [
     "codigo", "nombre", "nombre_extranjero", "nit", "grupo_codigo", "vendedor_codigo",
     "condicion_pago_codigo", "lista_precios_codigo", "telefono", "telefono_2", "celular",
@@ -63,6 +64,14 @@ COLUMNAS = {
         "valor_abonado", "sin_vencer", "valor_cheques", "d_0_30", "d_31_60", "d_61_90",
         "d_91_120", "d_121_150", "d_151_180", "d_mas_180", "saldo", "rango",
     ],
+    "ventas": [
+        "tipo_objeto", "doc_entry", "numero_documento", "linea", "clase_documento",
+        "estado_documento", "fecha_documento", "fecha_contabilizacion", "slp_code", "vendedor",
+        "canal", "codigo_cliente", "cliente", "nit", "ciudad", "pedido", "id_pedido_app",
+        "oc_cliente", "ciudad_envio", "direccion_envio", "marca", "familia", "codigo_articulo",
+        "descripcion", "cantidad", "costo_unitario", "costo_total", "precio_lista",
+        "precio_unitario", "total", "iva", "moneda", "trm", "comentarios",
+    ],
 }
 REQUERIDAS = {
     "clientes": {"codigo", "nombre", "activo", "actualizado_en_sap"},
@@ -78,6 +87,11 @@ REQUERIDAS = {
     "condiciones_pago": {"codigo", "nombre", "activo"},
     "municipios": {"codigo", "nombre", "activo"},
     "cartera": {"codigo_sn", "documento", "fecha_vencimiento", "dias", "saldo"},
+    "ventas": {
+        "tipo_objeto", "doc_entry", "numero_documento", "linea", "clase_documento",
+        "estado_documento", "fecha_documento", "fecha_contabilizacion", "slp_code",
+        "codigo_cliente", "cantidad", "total",
+    },
 }
 LLAVES = {
     "clientes": ("codigo",),
@@ -93,20 +107,24 @@ LLAVES = {
     "condiciones_pago": ("codigo",),
     "municipios": ("codigo",),
     "cartera": (),
+    "ventas": ("tipo_objeto", "doc_entry", "linea"),
 }
 MODOS = {
     "clientes": "cambios", "proveedores": "cambios", "articulos": "cambios",
     "direcciones": "socio", "contactos": "socio",
     "grupos_articulos": "todo", "marcas": "todo", "precios": "todo", "vendedores": "todo",
     "grupos_clientes": "todo", "condiciones_pago": "todo", "municipios": "todo",
-    "cartera": "todo",
+    "cartera": "todo", "ventas": "todo",
 }
-MAESTROS = [p for p in COLUMNAS if p != "cartera"]
+CONJUNTOS = {"cartera": "CARTERA", "ventas": "VENTAS"}
+MAESTROS = [p for p in COLUMNAS if p not in CONJUNTOS]
 
 
 def test_estan_todas_las_partes_del_contrato():
     assert list(PARTES) == list(COLUMNAS)
-    assert esquema.PARTES_POR_CONJUNTO == {"MAESTROS": tuple(MAESTROS), "CARTERA": ("cartera",)}
+    assert esquema.PARTES_POR_CONJUNTO == {
+        "MAESTROS": tuple(MAESTROS), "CARTERA": ("cartera",), "VENTAS": ("ventas",),
+    }
     assert esquema.SOCIOS == ("clientes", "proveedores")
     assert esquema.HIJAS_DE_SOCIO == ("direcciones", "contactos")
 
@@ -120,7 +138,7 @@ def test_columnas_llave_obligatorias_y_modo(nombre):
     assert parte.llave == LLAVES[nombre]
     assert parte.modo_solicitud == MODOS[nombre]
     assert parte.incremental == (nombre in {"clientes", "proveedores", "articulos"})
-    assert parte.conjunto == ("CARTERA" if nombre == "cartera" else "MAESTROS")
+    assert parte.conjunto == CONJUNTOS.get(nombre, "MAESTROS")
 
 
 @pytest.mark.parametrize("nombre", MAESTROS)
@@ -138,6 +156,25 @@ def test_cartera_usa_las_etiquetas_del_gestor():
     assert hana["valor_cheques"] == "Valor cheques aplicados"
     assert hana["d_mas_180"] == "> 180"
     assert len(set(hana.values())) == len(hana)
+
+
+def test_ventas_usa_las_etiquetas_del_gestor():
+    ventas = PARTES["ventas"]
+    assert ventas.consulta == "ventas/ventas.sql"
+    hana = {c.nombre: c.hana for c in ventas.columnas}
+    assert hana == {
+        "tipo_objeto": "Tipo objeto", "doc_entry": "DocEntry", "numero_documento": "Número documento",
+        "linea": "Línea", "clase_documento": "Clase documento", "estado_documento": "Estado documento",
+        "fecha_documento": "Fecha documento", "fecha_contabilizacion": "Fecha contabilización",
+        "slp_code": "SlpCode", "vendedor": "Vendedor", "canal": "Canal",
+        "codigo_cliente": "Código cliente", "cliente": "Cliente", "nit": "Nit", "ciudad": "Ciudad",
+        "pedido": "Pedido", "id_pedido_app": "Id pedido app", "oc_cliente": "OC cliente",
+        "ciudad_envio": "Ciudad envío", "direccion_envio": "Dirección envío", "marca": "Marca",
+        "familia": "Familia", "codigo_articulo": "Código artículo", "descripcion": "Descripción",
+        "cantidad": "Cantidad", "costo_unitario": "Costo unitario", "costo_total": "Costo total",
+        "precio_lista": "Precio lista", "precio_unitario": "Precio unitario", "total": "Total",
+        "iva": "IVA", "moneda": "Moneda", "trm": "TRM", "comentarios": "Comentarios",
+    }
 
 
 def _tipos(nombre: str) -> dict[str, str]:
@@ -195,6 +232,25 @@ def test_tipos_de_cartera():
     assert tipos["tipo_doc"] == TEXTO and tipos["documento"] == TEXTO
 
 
+def test_tipos_de_ventas():
+    tipos = _tipos("ventas")
+    enteros = {"tipo_objeto", "doc_entry", "numero_documento", "linea", "slp_code"}
+    fechas = {"fecha_documento", "fecha_contabilizacion"}
+    cantidades = {"cantidad", "trm"}
+    montos = {"costo_unitario", "costo_total", "precio_lista", "precio_unitario", "total", "iva"}
+    for nombre, tipo in tipos.items():
+        if nombre in enteros:
+            assert tipo == ENTERO, nombre
+        elif nombre in fechas:
+            assert tipo == FECHA, nombre
+        elif nombre in cantidades:
+            assert tipo == CANTIDAD, nombre
+        elif nombre in montos:
+            assert tipo == MONTO, nombre
+        else:
+            assert tipo == TEXTO, nombre
+
+
 def test_partes_por_solicitud_segun_contrato_7_1():
     assert esquema.PARTES_POR_SOLICITUD == {
         ("CARTERA", None): ("cartera",),
@@ -234,6 +290,29 @@ def test_entero_invalido(valor):
 ])
 def test_monto(valor, esperado):
     assert serializar(valor, MONTO) == esperado
+
+
+@pytest.mark.parametrize("valor, esperado", [
+    (Decimal("2.5"), "2.500000"), (Decimal("-2.5"), "-2.500000"), (3, "3.000000"),
+    ("4100.1234565", "4100.123457"), (Decimal("-4100.1234565"), "-4100.123457"),
+    (2.675, "2.675000"), (0, "0.000000"), (Decimal("-0.0000001"), "0.000000"),
+    (Decimal("1E+3"), "1000.000000"), (None, None), ("", None),
+])
+def test_cantidad_con_hasta_seis_decimales(valor, esperado):
+    assert serializar(valor, CANTIDAD) == esperado
+
+
+@pytest.mark.parametrize("valor", ["1,5", "abc", Decimal("NaN"), float("inf"), True])
+def test_cantidad_invalida(valor):
+    with pytest.raises(ValorInvalido, match="cantidad"):
+        serializar(valor, CANTIDAD, "cantidad")
+
+
+def test_ventas_con_llave_repetida_falla():
+    filas = [fila("ventas", 1), fila("ventas", 2, tipo_objeto=1, doc_entry=1, linea=1)]
+    alias = [c.hana for c in PARTES["ventas"].columnas]
+    with pytest.raises(LlaveRepetida, match="tipo_objeto, doc_entry, linea"):
+        preparar_filas(PARTES["ventas"], alias, [[f[a] for a in alias] for f in filas])
 
 
 @pytest.mark.parametrize("valor", ["1,234.56", "abc", Decimal("NaN"), float("inf"), True])

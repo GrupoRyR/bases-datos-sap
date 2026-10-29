@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -127,6 +128,58 @@ def test_leer_parte_de_cartera_sin_cuentas_falla_diciendo_que_variable_poner():
 def test_leer_parte_de_las_demas_partes_queda_igual():
     _escribir(config.QUERIES_DIR / "maestros" / "marcas.sql", "SELECT 1 FROM DUMMY")
     assert consultas.leer_parte(PARTES["marcas"], _empresa(None)) == "SELECT 1 FROM DUMMY"
+
+
+VENTAS_REAL = Path(__file__).resolve().parent.parent / "queries" / "ventas" / "ventas.sql"
+EXPRESION_SGX = 'CAST(T0."U_SGX_IdPedidoApp" AS NVARCHAR(254))'
+
+
+def _ventas_real() -> str:
+    return VENTAS_REAL.read_text(encoding="utf-8")
+
+
+def test_ventas_de_segurex_queda_tal_cual():
+    sql = _ventas_real()
+    assert consultas.sql_id_pedido_app(sql, "SGX") == sql
+
+
+def test_ventas_de_derivados_cambia_el_id_del_pedido_de_la_app_por_null():
+    sql = _ventas_real()
+    cambiada = consultas.sql_id_pedido_app(sql, "SDC")
+    assert 'CAST(NULL AS NVARCHAR(254)) AS "IdPedidoApp" -- @id_pedido_app' in cambiada
+    # El campo solo queda nombrado en un comentario: HANA no lo pide en Derivados.
+    assert "U_SGX_IdPedidoApp" not in re.sub(r"--[^\n]*", "", cambiada)
+    assert EXPRESION_SGX not in cambiada
+    # Solo cambia esa expresión: el resto del archivo queda igual.
+    assert cambiada == sql.replace(EXPRESION_SGX, "CAST(NULL AS NVARCHAR(254))")
+
+
+@pytest.mark.parametrize("empresa", ["SGX", "SDC"])
+@pytest.mark.parametrize("texto", [
+    'SELECT CAST(T0."U_SGX_IdPedidoApp" AS NVARCHAR(254)) AS "IdPedidoApp" FROM "OINV" T0',
+    'SELECT CAST(T0."U" AS NVARCHAR(254)) AS "IdPedidoApp" -- @id_pedido_app\n'
+    'UNION ALL SELECT CAST(T0."U" AS NVARCHAR(254)) AS "IdPedidoApp" -- @id_pedido_app',
+    'SELECT T0."U" AS "IdPedidoApp" -- @id_pedido_app',
+    'SELECT CAST(T0."U" AS NVARCHAR(254)) AS "Otro" -- @id_pedido_app',
+])
+def test_ventas_sin_un_solo_marcador_reconocible_falla(texto: str, empresa: str):
+    with pytest.raises(ConfigError, match="@id_pedido_app"):
+        consultas.sql_id_pedido_app(texto, empresa)
+
+
+@pytest.mark.parametrize("codigo", ["SGX", "SDC"])
+def test_leer_parte_de_ventas_pone_lo_de_cada_empresa(monkeypatch, codigo: str):
+    monkeypatch.setattr(config, "QUERIES_DIR", VENTAS_REAL.parent.parent)
+    empresa = EmpresaHana(codigo, "usuario", "clave", "ESQUEMA")
+    sql = consultas.leer_parte(PARTES["ventas"], empresa)
+    assert (EXPRESION_SGX in sql) == (codigo == "SGX")
+    assert sql == consultas.sql_id_pedido_app(_ventas_real().rstrip(), codigo)
+
+
+def test_leer_parte_de_ventas_sin_marcador_no_corre():
+    _escribir(config.QUERIES_DIR / "ventas" / "ventas.sql", "SELECT 1 FROM DUMMY")
+    with pytest.raises(ConfigError, match="@id_pedido_app"):
+        consultas.leer_parte(PARTES["ventas"], _empresa(None))
 
 
 def test_sql_contar():
