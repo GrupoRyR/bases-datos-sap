@@ -21,12 +21,14 @@ Todas piden sesión y un rol (`core.consultar`); las que cambian datos piden ade
 | Estado | `GET /panel` | `panel.estado` | `core.consultar` |
 | Solicitudes | `GET /panel/solicitudes` | `panel.solicitudes` | `core.consultar` |
 | Actualizar datos | `GET`, `POST /panel/actualizar` | `panel.actualizar`, `panel.actualizar.store` | `core.administrar` |
-| Consulta (pendiente) | `GET /panel/consulta` | `panel.consulta` | `core.consultar` |
+| Consulta | `GET`, `POST /panel/consulta` | `panel.consulta`, `panel.consulta.buscar` | `core.consultar` |
 | Apps conectadas (pendiente) | `/panel/apps` | `panel.apps` | `core.administrar` |
 
 **Solicitudes** muestra el historial de `RequestHistory`, 25 por página y la más reciente primero, con los filtros opcionales `empresa` y `conjunto` (un valor desconocido se ignora).
 
 **Actualizar datos** pide con `UpdateRequests`, con las mismas reglas que las apps: se une a una igual o queda en cola, nunca se rechaza. Lo audita como `panel.request.placed` solo con los códigos de lo pedido. Sus opciones salen de `Support\UpdateOptions`: cada conjunto completo más las partes de `RequestScope::forDataset`, con valor `MAESTROS` o `MAESTROS:clientes`.
+
+**Consulta** busca clientes, proveedores o artículos con `MasterLookup` (las partes buscables están en `Support\LookupPage::PARTS`), en una empresa o en las dos, hasta `MasterLookup::MAX_RESULTS` filas. El término puede ser un NIT o un nombre (Ley 1581): va solo en el cuerpo del `POST`, los resultados y los errores se pintan desde ese mismo `POST` (sin redirección y sin guardar nada en la sesión), toda respuesta lleva `Cache-Control: no-store` y el término no se audita ni va al log. El `GET` ignora su query string, así que ninguna búsqueda sale de una URL.
 
 Las etiquetas de empresas, conjuntos, partes, partes de solicitud, estados de solicitud y corridas salen de `resources/lang/es/etiquetas.php` por `Support\Labels`; un valor sin etiqueta se muestra tal cual, así un conjunto nuevo (VENTAS) aparece sin tocar el panel. `Support\Formats` da los números con puntos de miles y las horas de Bogotá.
 
