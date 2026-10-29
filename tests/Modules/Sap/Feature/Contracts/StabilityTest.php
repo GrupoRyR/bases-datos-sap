@@ -77,6 +77,8 @@ it('skips today while it is in progress and counts back from yesterday', functio
         ->and($stability->days)->toHaveCount(14)
         ->and($today->date->format('Y-m-d H:i'))->toBe('2026-10-27 00:00')
         ->and($today->stable)->toBeFalse()
+        ->and($today->inProgress)->toBeTrue()
+        ->and($stability->days[1]->inProgress)->toBeFalse()
         ->and($today->problems)->toContain('No hubo corrida nocturna cerrada de SGX MAESTROS.', 'Falta el conteo de SDC CARTERA.')
         ->and($stability->days[13]->date->toDateString())->toBe('2026-10-14');
 });
@@ -94,7 +96,10 @@ it('ends the streak today when something today already went wrong for good', fun
         'late request' => stabilityRequest('terminada', '2026-10-27 08:00:00', '2026-10-27 08:20:00'),
     };
 
-    expect(app(Stability::class)->current()->stableDays)->toBe(0);
+    $stability = app(Stability::class)->current();
+
+    expect($stability->stableDays)->toBe(0)
+        ->and($stability->days[0]->inProgress)->toBeFalse();
 })->with(['failed run', 'count mismatch', 'late request']);
 
 it('counts today once it is stable', function () {
