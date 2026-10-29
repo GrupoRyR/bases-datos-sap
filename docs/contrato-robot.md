@@ -7,8 +7,8 @@ Versión 1. Lo implementan dos sesiones en paralelo: «Datos y API» (el servido
 | Término | Qué es | Valores |
 |---|---|---|
 | Empresa | Empresa de SAP | `SGX` (esquema `SEGUREX`), `SDC` (esquema `HBT_SDERIVADOS`) |
-| Conjunto | Grupo de datos con su propia base MySQL | `MAESTROS` (`maestros_sap`), `CARTERA` (`cartera_sap`) |
-| Parte | Tabla lógica dentro de un conjunto (§5 y §6) | `clientes`, `proveedores`, `direcciones`, `contactos`, `articulos`, `grupos_articulos`, `marcas`, `precios`, `vendedores`, `grupos_clientes`, `condiciones_pago`, `municipios`, `cartera` |
+| Conjunto | Grupo de datos con su propia base MySQL | `MAESTROS` (`maestros_sap`), `CARTERA` (`cartera_sap`), `VENTAS` (`ventas_sap`) |
+| Parte | Tabla lógica dentro de un conjunto (§5, §6 y §10) | `clientes`, `proveedores`, `direcciones`, `contactos`, `articulos`, `grupos_articulos`, `marcas`, `precios`, `vendedores`, `grupos_clientes`, `condiciones_pago`, `municipios`, `cartera`, `ventas` |
 | Corrida | Un envío completo del robot: iniciar, lotes y cerrar (§4) | Tipo `completa` o `solicitud` |
 | Lote | Hasta 1.000 filas de una sola parte | Numerados desde 1 en cada corrida |
 | Solicitud | Pedido de actualización de una app o del panel (§7) | Estados en §7.2 |
@@ -87,6 +87,7 @@ Una corrida lleva un conjunto de una empresa. Los datos de una corrida no se ven
 - En una corrida `completa` todas las partes del conjunto van, y van en modo `todo`. Única excepción: `SDC` (Derivados) todavía no tiene una lista de precios pública, así que su corrida `completa` de `MAESTROS` puede omitir `precios`; al cerrar no se inactiva nada por esa ausencia. `SGX` siempre la envía.
 - `solicitudes`: ids de las solicitudes que atiende (§7). Vacío en una corrida `completa` sin solicitudes. Cada id debe estar `tomada`, ser de la misma empresa y conjunto, y pedir partes incluidas en `partes`; si no, 422.
 - `fecha_corte`: solo en `CARTERA`. En la `completa` nocturna, el día anterior; en una `solicitud`, hoy.
+- `ventana_desde`: solo en `VENTAS`, donde es obligatoria; en los demás conjuntos, 422. El primer día de la ventana que trajo la consulta, calculado en HANA (§10.1).
 - `extraida_en`: cuándo terminó la consulta a SAP.
 
 Respuesta 201: `{"run_id": 42, "estado": "abierta", "abierta_hasta": "2026-10-23T11:11:30-05:00"}`.
@@ -108,7 +109,7 @@ Una corrida abierta que pasa **30 minutos sin recibir lotes** queda `vencida`, s
 
 - `batch`: entero desde 1, consecutivo en la corrida (no por parte). Hasta **1.000 filas** por lote y una sola parte.
 - `columns`: exactamente las columnas de la parte (§5 o §6), en cualquier orden y sin repetir. Cada fila de `rows` es una lista con un valor por columna, en ese orden.
-- Valores: enteros como número JSON; montos como texto decimal con punto, hasta 2 decimales y sin separador de miles (`"1234567.89"`); booleanos como `true`/`false`; fechas `"AAAA-MM-DD"`; horas ISO 8601 con zona; texto hasta 4.000 caracteres, recortado; `null` si falta. Las columnas obligatorias no pueden llegar nulas ni vacías.
+- Valores: enteros como número JSON; montos como texto decimal con punto, hasta 2 decimales y sin separador de miles (`"1234567.89"`), con `-` si son negativos; cantidades y tasas (solo en `VENTAS`, §10) igual que los montos pero con hasta 6 decimales (`"2.500000"`); booleanos como `true`/`false`; fechas `"AAAA-MM-DD"`; horas ISO 8601 con zona; texto hasta 4.000 caracteres, recortado; `null` si falta. Las columnas obligatorias no pueden llegar nulas ni vacías.
 - Una llave (§5 y §6) no puede repetirse en la corrida, ni dentro del lote ni entre lotes.
 
 Respuestas:
@@ -134,7 +135,7 @@ Un 422 no cierra la corrida: el robot corrige o la marca fallida (§4.4). Ante u
 
 - `batches` y `filas`: lo que el robot envió. Si la API no tiene todos los lotes del 1 al `batches` o las filas no cuadran, responde 409 con `{"faltan": [4, 5]}` y la corrida sigue abierta para que el robot los reenvíe.
 - `conteo_sap`: **obligatorio en una corrida `completa`** y prohibido en las demás. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y lo compara con las filas recibidas y con las filas activas en MySQL después de aplicar; con eso arma el conteo diario del plan §6.
-- Al cerrar, la API aplica en una transacción: inserta o actualiza por llave, pone `sincronizado_en` y, en las partes `todo`, inactiva lo que no llegó. En `CARTERA` reemplaza la cartera actual de la empresa y, en la corrida `completa`, guarda además la foto del día con `fecha_corte` (§6).
+- Al cerrar, la API aplica en una transacción: inserta o actualiza por llave, pone `sincronizado_en` y, en las partes `todo`, inactiva lo que no llegó. En `CARTERA` reemplaza la cartera actual de la empresa y, en la corrida `completa`, guarda además la foto del día con `fecha_corte` (§6). En `VENTAS` reemplaza solo la ventana de la empresa (§10.2).
 - Una parte `todo` con 0 filas no se aplica y la corrida falla (422): una lectura vacía de SAP nunca vacía una tabla.
 
 Respuesta 200:
@@ -224,6 +225,7 @@ Tipos: `slp_code`, `total_plazos`, `no_plazo` y `dias`, enteros; las `fecha_*`, 
 | Conjunto | `parte` | Partes que trae la corrida |
 |---|---|---|
 | `CARTERA` | `null` | `cartera` |
+| `VENTAS` | `null` | `ventas` |
 | `MAESTROS` | `null` | Todas, cada una en su modo de §5.1 |
 | `MAESTROS` | `clientes` | `clientes`, `direcciones`, `contactos` |
 | `MAESTROS` | `proveedores` | `proveedores`, `direcciones`, `contactos` |
@@ -300,3 +302,41 @@ El botón del panel crea solicitudes por dentro (contratos de `Sap`), con las mi
 | Robot | `BASES_SAP_API_URL` | Base de la app, p. ej. `https://<subdominio>` |
 | Robot | `BASES_SAP_ROBOT_KEY_ID`, `BASES_SAP_ROBOT_SECRET` | Su llave |
 | Robot | `BASES_SAP_CSV_DIR` | Carpeta de CSV, fuera del repo |
+
+## 10. VENTAS
+
+Una sola parte, `ventas`, siempre en modo `todo`. Una fila por línea de factura de clientes (`OINV`/`INV1`, incluidas las notas débito) o de nota crédito de clientes (`ORIN`/`RIN1`). Origen: la consulta `etl/queries/ventas.sql` del gestor de cartera (main `9e2f877`), copiada tal cual. Las columnas son las de su `etl/esquema.py` (lote `ventas`), con los mismos nombres y en este orden:
+
+**`tipo_objeto`**, **`doc_entry`**, **`numero_documento`**, **`linea`**, **`clase_documento`**, **`estado_documento`**, **`fecha_documento`**, **`fecha_contabilizacion`**, **`slp_code`**, `vendedor`, `canal`, **`codigo_cliente`**, `cliente`, `nit`, `ciudad`, `pedido`, `id_pedido_app`, `oc_cliente`, `ciudad_envio`, `direccion_envio`, `marca`, `familia`, `codigo_articulo`, `descripcion`, **`cantidad`**, `costo_unitario`, `costo_total`, `precio_lista`, `precio_unitario`, **`total`**, `iva`, `moneda`, `trm`, `comentarios`.
+
+| Tipo | Columnas |
+|---|---|
+| Entero | `tipo_objeto` (13 factura, 14 nota crédito), `doc_entry`, `numero_documento`, `linea`, `slp_code` (`-1` si no tiene) |
+| Fecha | `fecha_documento` (`TaxDate`, solo referencia), `fecha_contabilizacion` (`DocDate`, la fecha de la factura y la que define el mes de la venta) |
+| Cantidad o tasa, hasta 6 decimales | `cantidad`, `trm` |
+| Monto | `costo_unitario`, `costo_total`, `precio_lista`, `precio_unitario`, `total`, `iva` |
+| Texto | Las demás. `clase_documento`: `factura`, `nota_debito` o `nota_credito`. `estado_documento`: `anulado`, `anulacion`, `cerrado` o `abierto` |
+
+- **Signo.** Las notas crédito llegan con `cantidad`, `costo_total`, `total` e `iva` negativos: la suma de `total` es la venta neta. Los precios y costos unitarios van sin signo.
+- **Llave.** `tipo_objeto` + `doc_entry` + `linea`, única por empresa. No puede repetirse en la corrida (§4.2).
+- **`id_pedido_app`** (`OINV.U_SGX_IdPedidoApp`) solo existe en `SGX`. Para `SDC` el robot cambia la expresión marcada `-- @id_pedido_app` por `CAST(NULL AS NVARCHAR(254))`, así que en Derivados siempre llega `null`. Las notas crédito también lo traen `null`.
+- Las apps leen la vista `v_ventas`, en `ventas_sap`.
+
+### 10.1 Ventana
+
+- La consulta trae los documentos con `DocDate` (la columna `fecha_contabilizacion`) desde `ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE))` hasta hoy: el mes en curso más los últimos 7 días del mes anterior. Por ejemplo, el 16/10 y el 01/10 la ventana empieza el 24/09. `CURRENT_DATE` es la fecha del servidor HANA.
+- El robot calcula ese día con la misma expresión, en HANA y en la misma conexión de la extracción (`SELECT ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE)) FROM DUMMY`), nunca con el reloj del PC, y lo envía al iniciar como `ventana_desde` (§4.1). Lo pide antes y después de la consulta: si cambió porque la extracción cruzó la medianoche, repite la extracción una vez y, si vuelve a cambiar, falla.
+- La ventana va siempre por `fecha_contabilizacion`, que es la que filtra la consulta. `fecha_documento` (`TaxDate`) puede caer antes o después de `DocDate`: si la app borrara por ella, en el borde de la ventana quedarían filas repetidas o se perderían.
+- La API responde 422 si `ventana_desde` falta, no es una fecha, es posterior a mañana o anterior a hoy menos 40 días (la fórmula llega como máximo a 37), y en un lote si una fila trae `fecha_contabilizacion` anterior a `ventana_desde`. Así un error del robot nunca alcanza meses ya cerrados.
+
+### 10.2 Cierre
+
+- Al cerrar, en una transacción, la API borra las filas de `VENTAS` de esa empresa con `fecha_contabilizacion` desde `ventana_desde` y escribe las recibidas, con `sincronizado_en`. **Nada anterior a `ventana_desde` se toca nunca**: es el histórico congelado que usa Comisiones (plan §4).
+- **Nunca vacía.** Un cierre con 0 filas falla (§4.3) y la ventana anterior se queda.
+- No hay columna `activo`: dentro de la ventana, una línea que ya no está en SAP desaparece con el reemplazo; fuera de ella, nada cambia. Un documento de un mes anterior que se anule o corrija en SAP fuera de la ventana no se actualiza.
+- No hay foto diaria ni `fecha_corte`: la corrida `completa` de las 02:00 y las de solicitud hacen lo mismo.
+- **Conteo nocturno.** En la corrida `completa`, `conteo_sap.ventas` es el `COUNT(*)` de la misma consulta, en la misma conexión, justo después de extraer: las filas de la ventana. En la respuesta (§4.3), `activas_mysql` son las filas de la empresa en MySQL con `fecha_contabilizacion` desde `ventana_desde`, después de aplicar.
+
+### 10.3 Carpeta
+
+`VENTAS\<empresa>\aaaa-mm-dd_hhmm.csv` dentro de `BASES_SAP_CSV_DIR`, uno por corrida, con las columnas de este contrato. Se borran a los 90 días, como los de MAESTROS y CARTERA.
