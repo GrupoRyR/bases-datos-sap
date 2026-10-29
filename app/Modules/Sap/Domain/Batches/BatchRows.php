@@ -23,6 +23,9 @@ final class BatchRows
 
     private const AMOUNT = '/^-?\d{1,17}(\.\d{1,2})?$/';
 
+    /** Fits decimal(19,6): 13 integer digits and up to 6 decimals. */
+    private const QUANTITY = '/^-?\d{1,13}(\.\d{1,6})?$/';
+
     /**
      * @return array{rows: list<list<mixed>>, errors: array<string, string>}
      */
@@ -127,6 +130,9 @@ final class BatchRows
             ColumnType::Decimal => is_string($value) && preg_match(self::AMOUNT, $value) === 1
                 ? [$value, null]
                 : [null, 'Debe ser un monto como texto, con punto y hasta 2 decimales.'],
+            ColumnType::Quantity => is_string($value) && preg_match(self::QUANTITY, $value) === 1
+                ? [$value, null]
+                : [null, 'Debe ser una cantidad como texto, con punto y hasta 6 decimales.'],
             ColumnType::Boolean => is_bool($value) ? [$value, null] : [null, 'Debe ser true o false.'],
             ColumnType::Date => SapTime::isDate($value) ? [$value, null] : [null, 'Debe ser una fecha AAAA-MM-DD.'],
             ColumnType::DateTime => ($time = SapTime::parse($value)) !== null

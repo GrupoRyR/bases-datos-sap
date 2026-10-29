@@ -135,7 +135,7 @@ it('rejects what the contract does not allow with 422', function (array $overrid
 
     expect(Run::count())->toBe(0);
 })->with([
-    'unknown dataset' => [['conjunto' => 'VENTAS'], 'conjunto'],
+    'unknown dataset' => [['conjunto' => 'COMPRAS'], 'conjunto'],
     'unknown company' => [['empresa' => 'XYZ'], 'empresa'],
     'unknown type' => [['tipo' => 'parcial'], 'tipo'],
     'archive-only table' => [['partes' => ['auditoria' => 'todo']], 'partes.auditoria'],

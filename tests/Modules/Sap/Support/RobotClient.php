@@ -59,6 +59,7 @@ final class RobotClient
                 ColumnType::Text => mb_substr('X'.$name, 0, $column->length ?? 255),
                 ColumnType::Integer => 1,
                 ColumnType::Decimal => '1000.50',
+                ColumnType::Quantity => '2.500000',
                 ColumnType::Boolean => true,
                 ColumnType::Date => '2026-10-20',
                 ColumnType::DateTime => '2026-10-23T09:15:02-05:00',

@@ -4,7 +4,7 @@ namespace App\Modules\Sap\Domain\Columns;
 
 /**
  * One column of a part as the robot sends it (docs/contrato-robot.md,
- * sections 5.2 and 6). Required columns are the bold ones of the contract
+ * sections 5.2, 6 and 10). Required columns are the bold ones of the contract
  * and the key; they can never arrive null or empty.
  */
 final readonly class Column
@@ -32,6 +32,11 @@ final readonly class Column
     public static function decimal(string $name, bool $required = false): self
     {
         return new self($name, ColumnType::Decimal, $required);
+    }
+
+    public static function quantity(string $name, bool $required = false): self
+    {
+        return new self($name, ColumnType::Quantity, $required);
     }
 
     public static function boolean(string $name, bool $required = false): self

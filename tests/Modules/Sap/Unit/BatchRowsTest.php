@@ -103,3 +103,43 @@ it('hashes the key of a row so equal keys match exactly', function () {
     expect($key(['nombre' => 'Bodega']))->toBe($key(['nombre' => 'Bodega', 'calle' => 'Cra 7']))
         ->and($key(['nombre' => 'Bodega']))->not->toBe($key(['nombre' => 'BODEGA']));
 });
+
+/**
+ * @param  array<string, mixed>  $overrides
+ * @return array{rows: list<list<mixed>>, errors: array<string, string>}
+ */
+function checkOneSale(array $overrides): array
+{
+    $body = RobotClient::batch(1, Part::Sales, [RobotClient::row(Part::Sales, $overrides)]);
+
+    return BatchRows::check(Part::Sales, $body['columns'], $body['rows']);
+}
+
+it('keeps quantities and rates with up to 6 decimals and negative credit note amounts', function () {
+    $result = checkOneSale([
+        'tipo_objeto' => 14, 'cantidad' => '-2.500000', 'trm' => '4123.456789',
+        'costo_total' => '-1500.25', 'total' => '-2380.00', 'iva' => '-380', 'precio_unitario' => '952.38',
+    ]);
+    $row = array_combine(array_keys(Part::Sales->columns()), $result['rows'][0]);
+
+    expect($result['errors'])->toBe([])
+        ->and($row['cantidad'])->toBe('-2.500000')
+        ->and($row['trm'])->toBe('4123.456789')
+        ->and($row['total'])->toBe('-2380.00')
+        ->and($row['iva'])->toBe('-380');
+});
+
+it('checks quantities and rates as decimal text with up to 6 decimals', function (mixed $value) {
+    expect(checkOneSale(['cantidad' => $value])['errors'])
+        ->toBe(['rows.0.cantidad' => 'Debe ser una cantidad como texto, con punto y hasta 6 decimales.']);
+})->with([
+    'as number' => [2.5],
+    'with 7 decimals' => ['2.5000001'],
+    'with comma' => ['2,5'],
+    'over 13 digits' => ['12345678901234'],
+]);
+
+it('keeps amounts of VENTAS to 2 decimals', function () {
+    expect(checkOneSale(['total' => '10.505'])['errors'])
+        ->toBe(['rows.0.total' => 'Debe ser un monto como texto, con punto y hasta 2 decimales.']);
+});

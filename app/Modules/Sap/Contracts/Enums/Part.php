@@ -6,8 +6,8 @@ use App\Modules\Sap\Domain\Columns\Column;
 use App\Modules\Sap\Domain\Columns\PartColumns;
 
 /**
- * A logical table inside a dataset (docs/contrato-robot.md, sections 1, 5
- * and 6). The value is the contract name, which is also the MySQL table;
+ * A logical table inside a dataset (docs/contrato-robot.md, sections 1, 5,
+ * 6 and 10). The value is the contract name, which is also the MySQL table;
  * apps read it through the view v_<value>.
  */
 enum Part: string
@@ -25,6 +25,7 @@ enum Part: string
     case PaymentTerms = 'condiciones_pago';
     case Municipalities = 'municipios';
     case Receivables = 'cartera';
+    case Sales = 'ventas';
 
     /**
      * The parts of a dataset, in contract order.
@@ -38,7 +39,11 @@ enum Part: string
 
     public function dataset(): Dataset
     {
-        return $this === self::Receivables ? Dataset::Cartera : Dataset::Maestros;
+        return match ($this) {
+            self::Receivables => Dataset::Cartera,
+            self::Sales => Dataset::Ventas,
+            default => Dataset::Maestros,
+        };
     }
 
     public function table(): string
@@ -56,7 +61,8 @@ enum Part: string
 
     /**
      * The columns that identify a row inside a company. CARTERA has none:
-     * each close replaces the whole company (contract section 6).
+     * each close replaces the whole company (contract section 6). A VENTAS
+     * line is its document type, document and line (contract section 10).
      *
      * @return list<string>
      */
@@ -67,6 +73,7 @@ enum Part: string
             self::Contacts => ['contacto_id'],
             self::Prices => ['articulo_codigo'],
             self::Receivables => [],
+            self::Sales => ['tipo_objeto', 'doc_entry', 'linea'],
             default => ['codigo'],
         };
     }
