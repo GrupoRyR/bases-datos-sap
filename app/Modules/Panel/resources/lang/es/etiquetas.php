@@ -30,6 +30,25 @@ return [
         'cartera' => 'Cartera',
     ],
 
+    // What a request asks for (RequestScope); the parts it brings go in parentheses.
+    'partes_solicitud' => [
+        'clientes' => 'Clientes (con direcciones y contactos)',
+        'proveedores' => 'Proveedores (con direcciones y contactos)',
+        'articulos' => 'Artículos (con grupos y marcas)',
+        'precios' => 'Precios',
+        'vendedores' => 'Vendedores',
+        'catalogos' => 'Catálogos (grupos de clientes, condiciones de pago y municipios)',
+    ],
+
+    'estados_solicitud' => [
+        'pendiente' => 'Pendiente',
+        'en_cola' => 'En cola',
+        'tomada' => 'En curso',
+        'terminada' => 'Terminada',
+        'fallida' => 'Falló',
+        'vencida' => 'Venció',
+    ],
+
     'tipos_corrida' => [
         'completa' => 'Nocturna',
         'solicitud' => 'Por solicitud',

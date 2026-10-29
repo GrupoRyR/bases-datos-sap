@@ -27,6 +27,35 @@ final class Labels
         return self::of('partes', $value);
     }
 
+    /**
+     * The part of a dataset a request asks for (RequestScope), e.g.
+     * "Clientes (con direcciones y contactos)".
+     */
+    public static function scope(string $value): string
+    {
+        return self::of('partes_solicitud', $value);
+    }
+
+    /** "pendiente", "en_cola", "tomada", "terminada", "fallida" or "vencida". */
+    public static function requestState(string $value): string
+    {
+        return self::of('estados_solicitud', $value);
+    }
+
+    /**
+     * The badge tone of a request state; waiting and unknown states stay neutral.
+     */
+    public static function requestStateTone(string $state): string
+    {
+        return match ($state) {
+            'terminada' => 'success',
+            'fallida' => 'danger',
+            'vencida' => 'warning',
+            'tomada' => 'info',
+            default => 'neutral',
+        };
+    }
+
     /** "completa" or "solicitud". */
     public static function runType(string $value): string
     {

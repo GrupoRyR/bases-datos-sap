@@ -19,11 +19,13 @@ Todas piden sesión y un rol (`core.consultar`); las que cambian datos piden ade
 | Pantalla | Ruta | Nombre | Permiso |
 |---|---|---|---|
 | Estado | `GET /panel` | `panel.estado` | `core.consultar` |
-| Solicitudes (pendiente) | `GET /panel/solicitudes` | `panel.solicitudes` | `core.consultar` |
+| Solicitudes | `GET /panel/solicitudes` | `panel.solicitudes` | `core.consultar` |
 | Actualizar datos (pendiente) | `GET`, `POST /panel/actualizar` | `panel.actualizar` | `core.administrar` |
 | Consulta (pendiente) | `GET /panel/consulta` | `panel.consulta` | `core.consultar` |
 | Apps conectadas (pendiente) | `/panel/apps` | `panel.apps` | `core.administrar` |
 
-Las etiquetas de empresas, conjuntos, partes y corridas salen de `resources/lang/es/etiquetas.php` por `Support\Labels`; un valor sin etiqueta se muestra tal cual, así un conjunto nuevo (VENTAS) aparece sin tocar el panel. `Support\Formats` da los números con puntos de miles y las horas de Bogotá.
+**Solicitudes** muestra el historial de `RequestHistory`, 25 por página y la más reciente primero, con los filtros opcionales `empresa` y `conjunto` (un valor desconocido se ignora).
+
+Las etiquetas de empresas, conjuntos, partes, partes de solicitud, estados de solicitud y corridas salen de `resources/lang/es/etiquetas.php` por `Support\Labels`; un valor sin etiqueta se muestra tal cual, así un conjunto nuevo (VENTAS) aparece sin tocar el panel. `Support\Formats` da los números con puntos de miles y las horas de Bogotá.
 
 Las reglas completas están en `docs/arquitectura.md`.

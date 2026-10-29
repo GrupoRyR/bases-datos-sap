@@ -24,6 +24,41 @@ final class Formats
         return self::shortDate($moment).' a las '.self::bogota($moment)->format('H:i');
     }
 
+    /**
+     * "a las 12:45" when the moment falls today in Bogota, otherwise
+     * "el 30 oct a las 00:15", so a time never reads as the wrong day.
+     */
+    public static function at(CarbonInterface $moment): string
+    {
+        $local = self::bogota($moment);
+
+        return $local->isSameDay(self::bogota(now()))
+            ? 'a las '.$local->format('H:i')
+            : 'el '.self::dateTime($moment);
+    }
+
+    /**
+     * How long it took from $from to $to: "menos de un minuto", "4 min",
+     * "1 h" or "1 h 5 min". Whole minutes, rounded down.
+     */
+    public static function duration(CarbonInterface $from, CarbonInterface $to): string
+    {
+        $minutes = intdiv(max(0, (int) $from->diffInSeconds($to)), 60);
+
+        if ($minutes === 0) {
+            return 'menos de un minuto';
+        }
+
+        $hours = intdiv($minutes, 60);
+        $minutes %= 60;
+
+        return match (true) {
+            $hours === 0 => "{$minutes} min",
+            $minutes === 0 => "{$hours} h",
+            default => "{$hours} h {$minutes} min",
+        };
+    }
+
     /** "29 oct". */
     public static function shortDate(CarbonInterface $moment): string
     {
