@@ -4,6 +4,7 @@ namespace App\Modules\Sap\Application\Runs;
 
 use App\Modules\Sap\Application\Apply\ApplyCartera;
 use App\Modules\Sap\Application\Apply\ApplyMaestros;
+use App\Modules\Sap\Application\Apply\ApplyVentas;
 use App\Modules\Sap\Application\Apply\CountRun;
 use App\Modules\Sap\Contracts\Enums\Dataset;
 use App\Modules\Sap\Domain\Runs\PartMode;
@@ -25,6 +26,7 @@ final class CloseRun
         private readonly OpenRuns $runs,
         private readonly ApplyMaestros $maestros,
         private readonly ApplyCartera $cartera,
+        private readonly ApplyVentas $ventas,
         private readonly CountRun $counts,
     ) {}
 
@@ -55,9 +57,11 @@ final class CloseRun
                 return $empty;
             }
 
-            DB::connection($run->conjunto->connection())->transaction(fn () => $run->conjunto === Dataset::Maestros
-                ? $this->maestros->apply($run, $appliedAt)
-                : $this->cartera->apply($run, $appliedAt));
+            DB::connection($run->conjunto->connection())->transaction(fn () => match ($run->conjunto) {
+                Dataset::Maestros => $this->maestros->apply($run, $appliedAt),
+                Dataset::Cartera => $this->cartera->apply($run, $appliedAt),
+                Dataset::Ventas => $this->ventas->apply($run, $appliedAt),
+            });
 
             $run->finish(RunState::Closed, null, [
                 'batches' => $batches,

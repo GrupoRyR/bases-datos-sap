@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Sap\Contracts\Enums\Part;
+use App\Modules\Sap\Domain\Runs\RunState;
 use App\Modules\Sap\Models\Run;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -9,8 +10,9 @@ use Tests\TestCase;
 
 /*
 | A VENTAS run (docs/contrato-robot.md, sections 4 and 10): it starts with
-| the first day of its window, and its batches never bring a line before
-| that day.
+| the first day of its window, its batches never bring a line before that
+| day, and its close replaces only the company's window. Every earlier line
+| is the frozen history Comisiones reads and is never touched.
 */
 
 beforeEach(function () {
@@ -54,6 +56,20 @@ function saleLine(int $entry, string $postedOn, array $overrides = []): array
 }
 
 /**
+ * A sale line already in ventas_sap.
+ *
+ * @return array<string, mixed>
+ */
+function storedSale(string $company, int $entry, string $postedOn, string $total = '100.00'): array
+{
+    return [
+        ...saleLine($entry, $postedOn, ['total' => $total]),
+        'empresa' => $company,
+        'sincronizado_en' => '2026-10-01 02:30:00',
+    ];
+}
+
+/**
  * Opens a VENTAS run, sends the lines in one batch and returns the run id.
  *
  * @param  list<array<string, mixed>>  $lines
@@ -68,6 +84,14 @@ function sendVentas(TestCase $test, array $lines, array $overrides = []): int
     }
 
     return $run;
+}
+
+/** @return list<string> "<empresa>/<doc_entry>/<total>" of every stored line, sorted. */
+function storedSales(): array
+{
+    return DB::connection('ventas')->table('ventas')->orderBy('empresa')->orderBy('doc_entry')->get()
+        ->map(fn (object $row): string => "{$row->empresa}/{$row->doc_entry}/".number_format((float) $row->total, 2, '.', ''))
+        ->all();
 }
 
 it('opens a VENTAS run and keeps the first day of its window', function () {
@@ -143,4 +167,61 @@ it('refuses a line key repeated in the run', function () {
     ]))->assertUnprocessable()
         ->assertJsonValidationErrors(['rows.1.tipo_objeto'])
         ->assertJsonMissingValidationErrors(['rows.0.tipo_objeto']);
+});
+
+it('replaces only the window of the company and never touches earlier lines', function () {
+    DB::connection('ventas')->table('ventas')->insert([
+        // Before the window: frozen history, kept as it was.
+        storedSale('SGX', 1, '2026-09-23', '111.00'),
+        // Inside the window: replaced by what arrives, gone if it did not arrive.
+        storedSale('SGX', 2, '2026-09-24', '222.00'),
+        storedSale('SGX', 3, '2026-10-10', '333.00'),
+        // The other company, inside the window: untouched.
+        storedSale('SDC', 4, '2026-10-01', '444.00'),
+    ]);
+
+    $lines = [saleLine(2, '2026-09-24', ['total' => '-200.50', 'cantidad' => '-1.500000']), saleLine(5, '2026-10-15', ['total' => '555.00'])];
+    $run = sendVentas($this, $lines);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2]])
+        ->assertOk()
+        ->assertJsonPath('estado', 'cerrada');
+
+    $line = (array) DB::connection('ventas')->table('ventas')->where('empresa', 'SGX')->where('doc_entry', 2)->sole();
+
+    expect(storedSales())->toBe(['SDC/4/444.00', 'SGX/1/111.00', 'SGX/2/-200.50', 'SGX/5/555.00'])
+        ->and((float) $line['cantidad'])->toBe(-1.5)
+        ->and($line['sincronizado_en'])->toStartWith('2026-10-16 10:00:00')
+        ->and((int) $line['corrida_id'])->toBe($run)
+        ->and(DB::connection('ventas')->table('ventas')->where('doc_entry', 1)->value('sincronizado_en'))->toStartWith('2026-10-01 02:30:00');
+});
+
+it('fails an empty close and keeps the previous window', function () {
+    DB::connection('ventas')->table('ventas')->insert(storedSale('SGX', 3, '2026-10-10'));
+    $run = sendVentas($this, []);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 0, 'filas' => ['ventas' => 0]])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor('filas.ventas');
+
+    expect(Run::find($run)->estado)->toBe(RunState::Failed)
+        ->and(storedSales())->toBe(['SGX/3/100.00']);
+});
+
+it('counts the lines of the company inside the window in the nightly run', function () {
+    DB::connection('ventas')->table('ventas')->insert([
+        storedSale('SGX', 1, '2026-09-01'),
+        storedSale('SDC', 2, '2026-10-01'),
+    ]);
+    $run = sendVentas($this, [saleLine(3, '2026-09-24'), saleLine(4, '2026-10-15')], ['tipo' => 'completa']);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2], 'conteo_sap' => ['ventas' => 2]])
+        ->assertOk()
+        ->assertJsonPath('conteo.ventas', ['sap' => 2, 'recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => true]);
+
+    $count = DB::table('daily_counts')->sole();
+
+    expect($count->conjunto)->toBe('VENTAS')
+        ->and($count->parte)->toBe('ventas')
+        ->and($count->fecha)->toStartWith('2026-10-16');
 });
