@@ -67,31 +67,44 @@ final class DatabaseStability implements Stability
             $days[] = $this->day($date, $runs->get($key, collect()), $counts->get($key, collect()), $requests->get($key, collect()));
         }
 
+        // Today is still running: unless it is stable or already failed for
+        // good, it only lacks what has not run yet.
         $todayKey = $today->toDateString();
         $todayFailed = $this->failedForGood($runs->get($todayKey, collect()), $counts->get($todayKey, collect()), $requests->get($todayKey, collect()));
 
+        if (! $days[0]->stable && ! $todayFailed) {
+            $days[0] = new StabilityDayData(
+                date: $days[0]->date,
+                nightlyRunsOk: $days[0]->nightlyRunsOk,
+                countsMatch: $days[0]->countsMatch,
+                requestsOnTime: $days[0]->requestsOnTime,
+                stable: false,
+                problems: $days[0]->problems,
+                inProgress: true,
+            );
+        }
+
         return new StabilityData(
-            stableDays: min($this->streak($days, $todayFailed), self::TARGET_DAYS),
+            stableDays: min($this->streak($days), self::TARGET_DAYS),
             targetDays: self::TARGET_DAYS,
             days: array_slice($days, 0, self::TARGET_DAYS),
         );
     }
 
     /**
-     * Stable days in a row from today back. Today is still in progress: it
-     * counts when stable, ends the streak when something already went wrong
-     * for good, and is skipped while it only lacks what has not run yet.
+     * Stable days in a row from today back. A day in progress (today) is
+     * skipped; any other unstable day ends the streak.
      *
      * @param  list<StabilityDayData>  $days  Today first.
      */
-    private function streak(array $days, bool $todayFailed): int
+    private function streak(array $days): int
     {
         $streak = 0;
 
-        foreach ($days as $index => $day) {
+        foreach ($days as $day) {
             if ($day->stable) {
                 $streak++;
-            } elseif ($index > 0 || $todayFailed) {
+            } elseif (! $day->inProgress) {
                 break;
             }
         }
