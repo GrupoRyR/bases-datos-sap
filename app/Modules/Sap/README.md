@@ -13,6 +13,14 @@ Los datos de SAP y todo lo que los mueve: los conjuntos MAESTROS y CARTERA, la r
 
 Lo que Panel necesite leer de aquí lo publica Sap en `App\Modules\Sap\Contracts`. El contrato con el robot está en `docs/contrato-robot.md` y no cambia sin avisarle al usuario.
 
+## Contratos para el panel
+
+Cada uno se implementa en `Application\Panel` (o `Application\Apps`) y se registra en `SapServiceProvider`. Recorren `Company::cases()`, `Dataset::cases()` y `Part::forDataset()`, así que un conjunto nuevo aparece sin cambiarlos. Las horas vuelven como `CarbonImmutable` en hora de Bogotá.
+
+- `DatasetStatuses::all()`: por empresa y conjunto, la última vez que se aplicó, las filas en MySQL por parte (activas si la tabla tiene `activo`) y la última corrida.
+- `Stability::current()`: el contador de días estables del plan (§6) y los últimos 14 días con lo que falló en cada uno; el criterio 4 (correcciones a mano) no se puede medir.
+- `ClientAppKeys`: además de `issue` y `revoke`, `all()` lista las apps sin su hash y `rotate()` da una llave nueva (la anterior recibe 401 de inmediato y una app revocada vuelve a funcionar).
+
 Las reglas completas están en `docs/arquitectura.md`.
 
 ## Partes y columnas
@@ -102,7 +110,7 @@ El candado usa la caché de Laravel: en producción `CACHE_STORE` debe ser `data
 
 ## API de las apps
 
-Cada app tiene su llave (`client_apps`): `bsap_` y 48 caracteres al azar; se guarda solo su SHA-256 y sus primeros 12 caracteres. Se crea con `php artisan sap:app "Nombre"` (la muestra una vez) o desde el panel por el contrato `Contracts\ClientAppKeys` (`issue`, `revoke`). Va en `Authorization: Bearer <llave>`; una llave revocada o desconocida recibe 401 `Llave inválida.` (`Http\Middleware\AuthenticateClientApp`). Límite: 60 peticiones por minuto por llave (las apps del mismo servidor comparten IP).
+Cada app tiene su llave (`client_apps`): `bsap_` y 48 caracteres al azar; se guarda solo su SHA-256 y sus primeros 12 caracteres. Se crea con `php artisan sap:app "Nombre"` (la muestra una vez) o desde el panel por el contrato `Contracts\ClientAppKeys` (`issue`, `revoke`, `all`, `rotate`). Va en `Authorization: Bearer <llave>`; una llave revocada o desconocida recibe 401 `Llave inválida.` (`Http\Middleware\AuthenticateClientApp`). Límite: 60 peticiones por minuto por llave (las apps del mismo servidor comparten IP).
 
 | Ruta | Hace |
 |---|---|
