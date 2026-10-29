@@ -39,7 +39,7 @@ it('renders the app layout with the Segurex brand, title and theme support', fun
 
 it('shows the logo as an image on the dark header', function () {
     $this->blade('<x-layouts.app title="Inicio">Hola</x-layouts.app>')
-        ->assertSeeInOrder(['<header', 'bg-brand-dark', '<img', '/img/logo-segurex.svg', 'alt="Segurex LATAM"'], false);
+        ->assertSeeInOrder(['<header', 'bg-brand-head', '<img', '/img/logo-segurex-blanco.png', 'alt="Segurex LATAM"'], false);
 });
 
 it('lets the caller set the logo height', function () {
@@ -108,6 +108,6 @@ it('renders the guest layout with the logo, the toggle and the content', functio
     $this->blade('<x-layouts.guest title="Ingresar">Formulario</x-layouts.guest>')
         ->assertSee('<html lang="es" data-brand="segurex">', false)
         ->assertSee('<title>Ingresar · Bases de datos SAP</title>', false)
-        ->assertSeeInOrder(['href="#contenido"', 'Saltar al contenido', '<main id="contenido"', 'bg-brand-dark', 'alt="Segurex LATAM"', 'aria-label="Tema: sistema"', 'Tu cuenta no tiene acceso.', 'Formulario'], false)
+        ->assertSeeInOrder(['href="#contenido"', 'Saltar al contenido', '<main id="contenido"', 'bg-brand-head', 'alt="Segurex LATAM"', 'aria-label="Tema: sistema"', 'Tu cuenta no tiene acceso.', 'Formulario'], false)
         ->assertDontSee('Menú principal');
 });
