@@ -23,7 +23,7 @@
 <body class="min-h-screen">
     <x-layouts.partials.skip-link />
 
-    <header class="bg-brand-dark text-on-brand [&_:focus-visible]:outline-on-brand">
+    <header class="bg-brand-head text-on-brand [&_:focus-visible]:outline-on-brand">
         <div class="mx-auto flex max-w-7xl items-center gap-3 px-4 py-2">
             <a href="{{ url('/') }}" class="shrink-0 rounded">
                 <x-ui.logo class="h-7 sm:h-8" />

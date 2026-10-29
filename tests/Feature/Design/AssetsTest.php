@@ -41,7 +41,7 @@ it('declares the Segurex brand variables', function () {
 
     expect($css)->toContain(":root[data-brand='segurex']");
 
-    foreach (['accent', 'button', 'ink', 'text', 'dark'] as $name) {
+    foreach (['accent', 'button', 'ink', 'text', 'tint', 'head', 'head-fg', 'head-muted'] as $name) {
         expect($css)->toContain("--brand-{$name}:")
             ->toContain("--color-brand-{$name}: var(--brand-{$name});");
     }
