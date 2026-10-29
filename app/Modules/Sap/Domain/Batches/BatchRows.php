@@ -19,7 +19,7 @@ final class BatchRows
     private const MAX_TEXT = 4000;
 
     /** The contract reports at most this many errors. */
-    private const MAX_ERRORS = 50;
+    public const MAX_ERRORS = 50;
 
     private const AMOUNT = '/^-?\d{1,17}(\.\d{1,2})?$/';
 
