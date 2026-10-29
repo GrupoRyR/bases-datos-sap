@@ -60,10 +60,12 @@ final class UpdateDataController
     private function message(UpdateRequestData $result): string
     {
         $id = ['id' => $result->id];
+        $runsAt = $result->state === RequestState::Queued && $result->runFrom !== null ? Formats::at($result->runFrom) : null;
 
         return match (true) {
+            ! $result->created && $runsAt !== null => __('panel::actualizar.resultado.unida_hora', [...$id, 'cuando' => $runsAt]),
             ! $result->created => __('panel::actualizar.resultado.unida', $id),
-            $result->state === RequestState::Queued && $result->runFrom !== null => __('panel::actualizar.resultado.en_cola_hora', [...$id, 'cuando' => Formats::at($result->runFrom)]),
+            $runsAt !== null => __('panel::actualizar.resultado.en_cola_hora', [...$id, 'cuando' => $runsAt]),
             $result->state === RequestState::Queued => __('panel::actualizar.resultado.en_cola', $id),
             default => __('panel::actualizar.resultado.pendiente', $id),
         };
