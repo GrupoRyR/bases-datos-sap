@@ -23,6 +23,7 @@ return [
     // The flash message after asking, from the request the contract returns.
     'resultado' => [
         'unida' => 'Ya había una solicitud igual esperando; te uniste a la solicitud :id.',
+        'unida_hora' => 'Ya había una solicitud igual esperando; te uniste a la solicitud :id, que se actualizará :cuando.',
         'pendiente' => 'Pedimos los datos a SAP (solicitud :id). Suele tardar unos minutos.',
         'en_cola_hora' => 'Se actualizará :cuando (solicitud :id).',
         'en_cola' => 'Hay otra actualización en curso; esta sigue después (solicitud :id).',

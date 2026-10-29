@@ -87,14 +87,14 @@ final class Labels
      */
     public static function of(string $group, string $value): string
     {
-        $key = "panel::etiquetas.{$group}.{$value}";
-
-        if ($value === '' || ! Lang::has($key)) {
+        if ($value === '') {
             return $value;
         }
 
+        // Lang::get returns the key itself when there is no label.
+        $key = "panel::etiquetas.{$group}.{$value}";
         $label = Lang::get($key);
 
-        return is_string($label) ? $label : $value;
+        return is_string($label) && $label !== $key ? $label : $value;
     }
 }

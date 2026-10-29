@@ -99,7 +99,8 @@ it('says what happened to the request', function (array $answer, string $message
         ->assertOk()
         ->assertSee($message);
 })->with([
-    'joined' => [['state' => RequestState::Queued, 'created' => false], 'Ya había una solicitud igual esperando; te uniste a la solicitud 118.'],
+    'joined' => [['created' => false], 'Ya había una solicitud igual esperando; te uniste a la solicitud 118.'],
+    'joined a queued one' => [['state' => RequestState::Queued, 'runFrom' => '2026-10-29 12:45', 'created' => false], 'Ya había una solicitud igual esperando; te uniste a la solicitud 118, que se actualizará a las 12:45.'],
     'pending' => [[], 'Pedimos los datos a SAP (solicitud 118). Suele tardar unos minutos.'],
     'queued until a time' => [['state' => RequestState::Queued, 'runFrom' => '2026-10-29 12:45'], 'Se actualizará a las 12:45 (solicitud 118).'],
     'queued until tomorrow' => [['state' => RequestState::Queued, 'runFrom' => '2026-10-30 00:15'], 'Se actualizará el 30 oct a las 00:15 (solicitud 118).'],
