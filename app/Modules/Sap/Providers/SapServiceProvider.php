@@ -4,12 +4,14 @@ namespace App\Modules\Sap\Providers;
 
 use App\Modules\Sap\Application\Apps\AppKeys;
 use App\Modules\Sap\Application\Panel\DatabaseDatasetStatuses;
+use App\Modules\Sap\Application\Panel\DatabaseStability;
 use App\Modules\Sap\Application\Requests\PlaceRequest;
 use App\Modules\Sap\Application\Requests\SettleRequests;
 use App\Modules\Sap\Console\CreateAppKeyCommand;
 use App\Modules\Sap\Console\ExpireCommand;
 use App\Modules\Sap\Contracts\ClientAppKeys;
 use App\Modules\Sap\Contracts\DatasetStatuses;
+use App\Modules\Sap\Contracts\Stability;
 use App\Modules\Sap\Contracts\UpdateRequests;
 use App\Modules\Sap\Domain\Runs\RunFinished;
 use App\Modules\Sap\Http\Middleware\DecodeRobotBody;
@@ -54,6 +56,7 @@ final class SapServiceProvider extends ModuleServiceProvider
 
         // What the TI panel reads.
         $this->app->bind(DatasetStatuses::class, DatabaseDatasetStatuses::class);
+        $this->app->bind(Stability::class, DatabaseStability::class);
     }
 
     protected function bootModule(): void
