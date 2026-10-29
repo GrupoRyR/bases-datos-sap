@@ -130,9 +130,8 @@ it('says when a dataset has no data and no runs yet', function () {
 });
 
 it('lists the panel screens in the navigation, hiding the admin ones from consulta', function () {
-    // T5 and T7 add these routes; until then a stand-in proves the permission.
+    // T7 adds this route; until then a stand-in proves the permission.
     Route::get('panel/apps-de-prueba', fn () => 'ok')->name('panel.apps');
-    Route::get('panel/actualizar-de-prueba', fn () => 'ok')->name('panel.actualizar');
     Route::getRoutes()->refreshNameLookups();
 
     $labels = fn (User $user): array => array_map(

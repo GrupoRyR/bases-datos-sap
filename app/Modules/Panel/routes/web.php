@@ -8,9 +8,15 @@
 
 use App\Modules\Panel\Http\Controllers\RequestHistoryController;
 use App\Modules\Panel\Http\Controllers\StatusController;
+use App\Modules\Panel\Http\Controllers\UpdateDataController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'can:core.consultar'])->group(function () {
     Route::get('/', StatusController::class)->name('estado');
     Route::get('solicitudes', RequestHistoryController::class)->name('solicitudes');
+
+    Route::middleware('can:core.administrar')->group(function () {
+        Route::get('actualizar', [UpdateDataController::class, 'create'])->name('actualizar');
+        Route::post('actualizar', [UpdateDataController::class, 'store'])->name('actualizar.store');
+    });
 });
