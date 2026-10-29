@@ -6,6 +6,7 @@
 // a role (core.consultar); screens that change data also need
 // can:core.administrar on their own route.
 
+use App\Modules\Panel\Http\Controllers\ConnectedAppsController;
 use App\Modules\Panel\Http\Controllers\LookupController;
 use App\Modules\Panel\Http\Controllers\RequestHistoryController;
 use App\Modules\Panel\Http\Controllers\StatusController;
@@ -23,5 +24,11 @@ Route::middleware(['auth', 'can:core.consultar'])->group(function () {
     Route::middleware('can:core.administrar')->group(function () {
         Route::get('actualizar', [UpdateDataController::class, 'create'])->name('actualizar');
         Route::post('actualizar', [UpdateDataController::class, 'store'])->name('actualizar.store');
+
+        // A new or rotated key comes back once, in the POST response itself.
+        Route::get('apps', [ConnectedAppsController::class, 'index'])->name('apps');
+        Route::post('apps', [ConnectedAppsController::class, 'store'])->name('apps.store');
+        Route::post('apps/{app}/llave', [ConnectedAppsController::class, 'rotate'])->whereNumber('app')->name('apps.rotate');
+        Route::post('apps/{app}/revocar', [ConnectedAppsController::class, 'revoke'])->whereNumber('app')->name('apps.revoke');
     });
 });

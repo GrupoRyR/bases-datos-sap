@@ -8,7 +8,6 @@ use App\Modules\Sap\Contracts\Stability;
 use App\Support\Navigation\NavItem;
 use App\Support\Navigation\NavRegistry;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\Route;
 use Tests\Modules\Panel\Support\FakeDatasetStatuses;
 use Tests\Modules\Panel\Support\FakeStability;
 
@@ -130,10 +129,6 @@ it('says when a dataset has no data and no runs yet', function () {
 });
 
 it('lists the panel screens in the navigation, hiding the admin ones from consulta', function () {
-    // T7 adds this route; until then a stand-in proves the permission.
-    Route::get('panel/apps-de-prueba', fn () => 'ok')->name('panel.apps');
-    Route::getRoutes()->refreshNameLookups();
-
     $labels = fn (User $user): array => array_map(
         fn (NavItem $item): string => $item->label,
         app(NavRegistry::class)->visibleTo($user),
