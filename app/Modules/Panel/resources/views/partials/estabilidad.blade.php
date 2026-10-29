@@ -4,7 +4,7 @@
     days and the criterion that TI checks by hand.
 --}}
 @php
-    $failedDays = array_values(array_filter($stability['days'], fn (array $day): bool => $day['problems'] !== []));
+    $failedDays = array_values(array_filter($stability['days'], fn (array $day): bool => $day['state'] === 'con_fallas'));
 @endphp
 
 <x-ui.card :title="__('panel::estado.estabilidad.titulo')">

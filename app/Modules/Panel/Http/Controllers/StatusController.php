@@ -34,11 +34,11 @@ final class StatusController
     {
         $days = [];
 
-        foreach ($stability->days as $index => $day) {
-            // Today (the first day) is still running until it is stable.
+        foreach ($stability->days as $day) {
+            // Sap marks today in progress while it only lacks what has not run yet.
             $state = match (true) {
                 $day->stable => 'estable',
-                $index === 0 && $day->problems === [] => 'en_curso',
+                $day->inProgress => 'en_curso',
                 default => 'con_fallas',
             };
 

@@ -62,7 +62,8 @@ it('marks today as in progress until it is stable', function () {
     $this->actingAs(User::factory()->consulta()->create())
         ->get('/panel')
         ->assertSee('En curso')
-        ->assertDontSee('Con fallas');
+        ->assertDontSee('Con fallas')
+        ->assertDontSee('No hubo corrida nocturna cerrada de SGX MAESTROS.');
 });
 
 it('shows each company and dataset with its rows, update time and last run', function () {
