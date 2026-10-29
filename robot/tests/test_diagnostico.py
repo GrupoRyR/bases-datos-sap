@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import diagnostico
@@ -39,13 +40,53 @@ def test_resumen_con_filas_conteos_y_activos(escenario):
     ]
     clientes = _fila(resumen, "SGX", "clientes")
     assert clientes == {"empresa": "SGX", "conjunto": "MAESTROS", "parte": "clientes", "filas": "3",
-                        "conteo_sap": "3", "activos": "2", "inactivos": "1", "error": ""}
+                        "conteo_sap": "3", "activos": "2", "inactivos": "1", "ventana_desde": "",
+                        "error": ""}
     cartera = _fila(resumen, "SDC", "cartera")
     assert (cartera["conjunto"], cartera["filas"], cartera["conteo_sap"], cartera["activos"]) == (
         "CARTERA", "3", "3", "")
     listas = _fila(resumen, "SGX", "listas_precios")
     assert (listas["filas"], listas["conteo_sap"], listas["error"]) == ("1", "", "")
+    for empresa in ("SGX", "SDC"):
+        ventas = _fila(resumen, empresa, "ventas")
+        assert ventas == {"empresa": empresa, "conjunto": "VENTAS", "parte": "ventas", "filas": "2",
+                          "conteo_sap": "2", "activos": "", "inactivos": "", "ventana_desde": "2026-09-24",
+                          "error": ""}
     revisar_fases(e.linea)
+
+
+def test_ventas_del_diagnostico_pide_la_ventana_antes_y_despues_en_la_misma_conexion(escenario):
+    e = escenario
+    _, fallos = _correr(e, ("SDC",))
+    assert fallos == []
+    pasos = [x for x in e.hana.de("SDC") if x.parte in ("ventana", "ventas")]
+    assert [x.tipo for x in pasos] == ["ventana", "todo", "contar", "ventana"]
+    assert len({x.conexion for x in pasos}) == 1
+    datos = (e.csv_dir / "_DIAGNOSTICO" / "SDC" / "ventas" / "2026-10-26_0200.csv")
+    lineas = datos.read_text(encoding="utf-8-sig").splitlines()
+    assert lineas[0].split(";") == esquema.PARTES["ventas"].nombres
+    assert len(lineas) == 3
+
+
+def test_ventana_que_cambia_en_el_diagnostico_queda_como_error(escenario):
+    e = escenario
+    e.hana.ventanas["SGX"] = [date(2026, 9, 23)]
+    _, fallos = _correr(e, ("SGX",))
+    assert [etapa for etapa, _ in fallos] == ["DIAGNOSTICO"]
+    ventas = _fila(_resumen(e), "SGX", "ventas")
+    assert "ventana" in ventas["error"] and "2026-09-23" in ventas["error"]
+    assert ventas["ventana_desde"] == "2026-09-24"
+    assert _fila(_resumen(e), "SGX", "cartera")["error"] == ""
+
+
+def test_venta_anterior_a_la_ventana_queda_como_error_del_diagnostico(escenario):
+    e = escenario
+    e.hana.datos["SGX"]["ventas"].append(fila("ventas", 3, fecha_contabilizacion=date(2026, 9, 1)))
+    _, fallos = _correr(e, ("SGX",))
+    assert [etapa for etapa, _ in fallos] == ["DIAGNOSTICO"]
+    ventas = _fila(_resumen(e), "SGX", "ventas")
+    assert "anterior a ventana_desde" in ventas["error"]
+    assert (ventas["filas"], ventas["conteo_sap"], ventas["ventana_desde"]) == ("3", "3", "2026-09-24")
 
 
 def test_precios_del_diagnostico_son_solo_la_lista_de_la_empresa(escenario):
