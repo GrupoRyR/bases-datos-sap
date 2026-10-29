@@ -44,5 +44,6 @@ return [
     ],
 
     'revocada' => 'Revocamos la llave de :nombre.',
+    'ya_cambio' => 'La llave de :nombre ya cambió y no la volvimos a cambiar. Si necesitas otra, genera una nueva aquí.',
 
 ];

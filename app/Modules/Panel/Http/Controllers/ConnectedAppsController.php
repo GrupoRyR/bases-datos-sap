@@ -11,6 +11,7 @@ use App\Modules\Sap\Contracts\Data\IssuedAppKey;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
@@ -45,8 +46,19 @@ final class ConnectedAppsController
         return $this->keyPage($issued, $keys, $audit, 'panel.app.created');
     }
 
-    public function rotate(int $app, ClientAppKeys $keys, AuditLogger $audit): Response
+    /**
+     * The form sends the key prefix the list showed. If the key changed
+     * since (a resubmitted or double-clicked form), it does not rotate again:
+     * that would kill the key just shown.
+     */
+    public function rotate(Request $request, int $app, ClientAppKeys $keys, AuditLogger $audit): Response|RedirectResponse
     {
+        $found = $this->find($keys, $app) ?? abort(404);
+
+        if ($request->input('prefijo') !== $found->keyPrefix) {
+            return redirect()->route('panel.apps')->with('error', __('panel::apps.ya_cambio', ['nombre' => $found->name]));
+        }
+
         try {
             $issued = $keys->rotate($app);
         } catch (InvalidArgumentException) {

@@ -128,7 +128,7 @@ it('rotates the key of an app and shows the new one once', function (?string $re
     $this->actingAs($this->admin)->get('/panel/apps')->assertSee($button);
 
     $response = $this->actingAs($this->admin)
-        ->post(route('panel.apps.rotate', $app->id))
+        ->post(route('panel.apps.rotate', $app->id), ['prefijo' => $app->keyPrefix])
         ->assertOk()
         ->assertViewIs('panel::apps-llave')
         ->assertSee('Llave de Portal RYR');
@@ -153,14 +153,34 @@ it('rotates the key of an app and shows the new one once', function (?string $re
     'revoked' => ['2026-10-20 16:45', 'Reactivar con llave nueva'],
 ]);
 
+it('does not rotate again when the key already changed, as on a resubmit', function () {
+    $app = $this->keys->add('Portal RYR');
+
+    $this->actingAs($this->admin)
+        ->post(route('panel.apps.rotate', $app->id), ['prefijo' => 'bsap_vieja00'])
+        ->assertRedirect(route('panel.apps'))
+        ->assertSessionHas('error', 'La llave de Portal RYR ya cambió y no la volvimos a cambiar. Si necesitas otra, genera una nueva aquí.');
+
+    expect($this->keys->calls)->toBe([])
+        ->and(DB::table('audit_logs')->count())->toBe(0);
+});
+
+it('sends the key prefix the list shows with the rotate form', function () {
+    $app = $this->keys->add('Portal RYR');
+
+    $this->actingAs($this->admin)->get('/panel/apps')
+        ->assertSee('name="prefijo" value="'.$app->keyPrefix.'"', false);
+});
+
 it('answers 404 for an app that does not exist', function (string $action) {
     $this->actingAs($this->admin)->post("/panel/apps/99/{$action}")->assertNotFound();
 
     expect(DB::table('audit_logs')->count())->toBe(0);
 })->with(['llave', 'revocar']);
 
-it('only takes numeric app ids', function () {
+it('only takes numeric app ids of a sane length', function () {
     $this->actingAs($this->admin)->post('/panel/apps/portal/llave')->assertNotFound();
+    $this->actingAs($this->admin)->post('/panel/apps/99999999999999999999/llave')->assertNotFound();
 
     expect($this->keys->calls)->toBe([]);
 });

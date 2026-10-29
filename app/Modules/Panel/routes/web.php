@@ -28,7 +28,7 @@ Route::middleware(['auth', 'can:core.consultar'])->group(function () {
         // A new or rotated key comes back once, in the POST response itself.
         Route::get('apps', [ConnectedAppsController::class, 'index'])->name('apps');
         Route::post('apps', [ConnectedAppsController::class, 'store'])->name('apps.store');
-        Route::post('apps/{app}/llave', [ConnectedAppsController::class, 'rotate'])->whereNumber('app')->name('apps.rotate');
-        Route::post('apps/{app}/revocar', [ConnectedAppsController::class, 'revoke'])->whereNumber('app')->name('apps.revoke');
+        Route::post('apps/{app}/llave', [ConnectedAppsController::class, 'rotate'])->where('app', '[0-9]{1,9}')->name('apps.rotate');
+        Route::post('apps/{app}/revocar', [ConnectedAppsController::class, 'revoke'])->where('app', '[0-9]{1,9}')->name('apps.revoke');
     });
 });

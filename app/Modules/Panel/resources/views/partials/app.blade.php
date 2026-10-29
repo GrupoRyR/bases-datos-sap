@@ -35,6 +35,7 @@
     <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
         <form method="POST" action="{{ route('panel.apps.rotate', $app['id']) }}" class="flex flex-col gap-1">
             @csrf
+            <input type="hidden" name="prefijo" value="{{ $app['keyPrefix'] }}">
 
             @if ($app['revokedAt'] === null)
                 <x-ui.button type="submit" variant="secondary" class="w-full sm:w-auto" aria-describedby="rotar-{{ $app['id'] }}">{{ __('panel::apps.app.rotar') }}</x-ui.button>
