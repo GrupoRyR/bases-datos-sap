@@ -6,9 +6,11 @@
 // a role (core.consultar); screens that change data also need
 // can:core.administrar on their own route.
 
+use App\Modules\Panel\Http\Controllers\RequestHistoryController;
 use App\Modules\Panel\Http\Controllers\StatusController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'can:core.consultar'])->group(function () {
     Route::get('/', StatusController::class)->name('estado');
+    Route::get('solicitudes', RequestHistoryController::class)->name('solicitudes');
 });
