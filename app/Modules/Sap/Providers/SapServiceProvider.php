@@ -4,6 +4,8 @@ namespace App\Modules\Sap\Providers;
 
 use App\Modules\Sap\Application\Apps\AppKeys;
 use App\Modules\Sap\Application\Panel\DatabaseDatasetStatuses;
+use App\Modules\Sap\Application\Panel\DatabaseMasterLookup;
+use App\Modules\Sap\Application\Panel\DatabaseRequestHistory;
 use App\Modules\Sap\Application\Panel\DatabaseStability;
 use App\Modules\Sap\Application\Requests\PlaceRequest;
 use App\Modules\Sap\Application\Requests\SettleRequests;
@@ -11,6 +13,8 @@ use App\Modules\Sap\Console\CreateAppKeyCommand;
 use App\Modules\Sap\Console\ExpireCommand;
 use App\Modules\Sap\Contracts\ClientAppKeys;
 use App\Modules\Sap\Contracts\DatasetStatuses;
+use App\Modules\Sap\Contracts\MasterLookup;
+use App\Modules\Sap\Contracts\RequestHistory;
 use App\Modules\Sap\Contracts\Stability;
 use App\Modules\Sap\Contracts\UpdateRequests;
 use App\Modules\Sap\Domain\Runs\RunFinished;
@@ -54,9 +58,11 @@ final class SapServiceProvider extends ModuleServiceProvider
         // The panel lists, creates, rotates and revokes app keys through this contract.
         $this->app->bind(ClientAppKeys::class, AppKeys::class);
 
-        // What the TI panel reads.
+        // What the TI panel reads: dataset status, stability, request history and master lookup.
         $this->app->bind(DatasetStatuses::class, DatabaseDatasetStatuses::class);
         $this->app->bind(Stability::class, DatabaseStability::class);
+        $this->app->bind(RequestHistory::class, DatabaseRequestHistory::class);
+        $this->app->bind(MasterLookup::class, DatabaseMasterLookup::class);
     }
 
     protected function bootModule(): void
