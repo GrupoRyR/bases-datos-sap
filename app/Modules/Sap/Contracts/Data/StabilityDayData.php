@@ -7,6 +7,8 @@ use Carbon\CarbonImmutable;
 /**
  * One Bogota day of the stability counter (date at 00:00) with the three
  * measurable criteria of the plan (section 6) and, in Spanish, what failed.
+ * inProgress is true only for today while it is not stable yet but nothing
+ * has gone wrong for good: it neither counts nor ends the streak.
  */
 final readonly class StabilityDayData
 {
@@ -20,5 +22,6 @@ final readonly class StabilityDayData
         public bool $requestsOnTime,
         public bool $stable,
         public array $problems,
+        public bool $inProgress = false,
     ) {}
 }
