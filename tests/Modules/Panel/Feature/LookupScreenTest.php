@@ -101,7 +101,7 @@ it('shows each record with its code, name, NIT, company, state and dates', funct
             'SAP no da la fecha de cambio', 'Llegó aquí el 28 oct a las 02:20',
         ])
         ->assertSee('<time datetime="2026-10-23T09:15:00-05:00">', false)
-        ->assertDontSee('Se muestran solo los primeros');
+        ->assertDontSee('Se muestran los primeros');
 });
 
 it('says 1 resultado and keeps the choices in the form', function () {
@@ -138,7 +138,7 @@ it('says only the first ones are shown when the results reach the maximum', func
     ($this->consulta)()
         ->post('/panel/consulta', ['parte' => 'clientes', 'termino' => 'cliente'])
         ->assertSee(MasterLookup::MAX_RESULTS.' resultados')
-        ->assertSee('Se muestran solo los primeros '.MasterLookup::MAX_RESULTS.'. Afina la búsqueda.');
+        ->assertSee('Se muestran los primeros '.MasterLookup::MAX_RESULTS.' y puede haber más. Afina la búsqueda.');
 });
 
 it('says when nothing matches', function () {

@@ -22,7 +22,7 @@ return [
     ],
 
     'resultados' => '{1} :count resultado|[0,*] :count resultados',
-    'tope' => 'Se muestran solo los primeros :max. Afina la búsqueda.',
+    'tope' => 'Se muestran los primeros :max y puede haber más. Afina la búsqueda.',
     'vacio' => 'No encontramos nada con eso.',
 
     'registro' => [
