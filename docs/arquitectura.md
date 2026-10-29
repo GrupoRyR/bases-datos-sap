@@ -180,7 +180,7 @@ Las pruebas de un módulo van en `tests/Modules/<Modulo>/Unit` y `tests/Modules/
 - activa `Http::preventStrayRequests()`: toda llamada HTTP sin `Http::fake()` falla;
 - llama `withoutVite()`: las vistas se pintan sin `public/build`.
 
-En tu equipo las pruebas corren en SQLite en memoria (una base por conexión); CI las corre en MySQL 8 con tres bases. Evita SQL propio de un motor. Las pruebas nunca tocan SAP, la VPN, GoDaddy ni correo real.
+En tu equipo las pruebas corren en SQLite en memoria (una base por conexión); CI las corre en MySQL 8 con cuatro bases. Evita SQL propio de un motor. Las pruebas nunca tocan SAP, la VPN, GoDaddy ni correo real.
 
 ## 6. Comandos
 
@@ -198,7 +198,7 @@ En tu equipo las pruebas corren en SQLite en memoria (una base por conexión); C
 | Job | Qué hace |
 |---|---|
 | Lint | PHP 8.3, `composer lint`. |
-| Tests | PHP 8.3 con MySQL 8; crea las tres bases de prueba y corre `composer test`. |
+| Tests | PHP 8.3 con MySQL 8; crea las cuatro bases de prueba y corre `composer test`. |
 | Assets | Node 22, `npm ci` y `npm run build`. Solo comprueba que compila. |
 
 ## 8. Protecciones locales de `main`
