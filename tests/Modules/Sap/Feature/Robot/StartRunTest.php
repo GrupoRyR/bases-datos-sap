@@ -17,7 +17,8 @@ use Tests\TestCase;
 
 beforeEach(function () {
     RobotClient::configure();
-    $this->freezeSecond();
+    // A fixed time outside the blocked slots, so a request is taken at once.
+    $this->travelTo(now()->setDate(2026, 10, 23)->setTime(10, 45));
 });
 
 /**
