@@ -20,7 +20,7 @@ beforeEach(function () {
 
     $this->fake = ($this->lookup)();
 
-    $this->consulta = fn () => $this->actingAs(User::factory()->consulta()->create());
+    $this->admin = fn () => $this->actingAs(User::factory()->adminTi()->create());
 });
 
 it('sends a guest to the sign-in page', function () {
@@ -30,17 +30,17 @@ it('sends a guest to the sign-in page', function () {
     expect($this->fake->calls)->toBe([]);
 });
 
-it('forbids a user without a role', function () {
-    $user = User::factory()->create();
+it('forbids consulta and users without a role (Ley 1581)', function (?string $role) {
+    $user = $role === null ? User::factory()->create() : User::factory()->{$role}()->create();
 
     $this->actingAs($user)->get('/panel/consulta')->assertForbidden();
     $this->actingAs($user)->post('/panel/consulta', ['parte' => 'clientes', 'termino' => 'andina'])->assertForbidden();
 
     expect($this->fake->calls)->toBe([]);
-});
+})->with(['consulta' => 'consulta', 'no role' => null]);
 
-it('shows the form with the searchable parts and the companies to every role', function (string $role) {
-    $response = $this->actingAs(User::factory()->{$role}()->create())
+it('shows the form with the searchable parts and the companies to TI', function () {
+    $response = ($this->admin)()
         ->get(route('panel.consulta'))
         ->assertOk()
         ->assertViewIs('panel::consulta')
@@ -63,10 +63,10 @@ it('shows the form with the searchable parts and the companies to every role', f
     }
 
     expect($this->fake->calls)->toBe([]);
-})->with(['consulta', 'adminTi']);
+});
 
 it('asks the contract for the chosen part, term and company, up to the maximum', function (array $input, Part $part, ?Company $company) {
-    ($this->consulta)()
+    ($this->admin)()
         ->post('/panel/consulta', [...$input, 'termino' => '  800123  '])
         ->assertOk()
         ->assertViewIs('panel::consulta');
@@ -90,7 +90,7 @@ it('shows each record with its code, name, NIT, company, state and dates', funct
         FakeMasterLookup::record(company: Company::Sdc, code: 'C900555', name: 'Andina Trading', taxId: null, active: false, updatedInSap: null, syncedAt: '2026-10-28 02:20'),
     ]);
 
-    ($this->consulta)()
+    ($this->admin)()
         ->post('/panel/consulta', ['parte' => 'clientes', 'termino' => 'andina'])
         ->assertOk()
         ->assertSee('2 resultados')
@@ -107,7 +107,7 @@ it('shows each record with its code, name, NIT, company, state and dates', funct
 it('says 1 resultado and keeps the choices in the form', function () {
     ($this->lookup)([FakeMasterLookup::record()]);
 
-    $html = ($this->consulta)()
+    $html = ($this->admin)()
         ->post('/panel/consulta', ['parte' => 'proveedores', 'empresa' => 'SDC', 'termino' => 'andina'])
         ->assertSee('1 resultado')
         ->assertDontSee('1 resultados')
@@ -122,7 +122,7 @@ it('says 1 resultado and keeps the choices in the form', function () {
 it('hides the NIT of items', function () {
     ($this->lookup)([FakeMasterLookup::record(part: Part::Items, code: 'A-1020', name: 'Guante de nitrilo', taxId: null)]);
 
-    ($this->consulta)()
+    ($this->admin)()
         ->post('/panel/consulta', ['parte' => 'articulos', 'termino' => 'guante'])
         ->assertSee('Guante de nitrilo')
         ->assertSee('A-1020')
@@ -135,14 +135,14 @@ it('says only the first ones are shown when the results reach the maximum', func
         range(1, MasterLookup::MAX_RESULTS),
     ));
 
-    ($this->consulta)()
+    ($this->admin)()
         ->post('/panel/consulta', ['parte' => 'clientes', 'termino' => 'cliente'])
         ->assertSee(MasterLookup::MAX_RESULTS.' resultados')
         ->assertSee('Se muestran los primeros '.MasterLookup::MAX_RESULTS.' y puede haber más. Afina la búsqueda.');
 });
 
 it('says when nothing matches', function () {
-    ($this->consulta)()
+    ($this->admin)()
         ->post('/panel/consulta', ['parte' => 'clientes', 'termino' => 'zzz'])
         ->assertOk()
         ->assertSee('No encontramos nada con eso.')
@@ -150,7 +150,7 @@ it('says when nothing matches', function () {
 });
 
 it('rejects invalid input without asking the contract and shows why', function (array $input, string $field, string $message) {
-    ($this->consulta)()
+    ($this->admin)()
         ->post('/panel/consulta', $input)
         ->assertUnprocessable()
         ->assertViewIs('panel::consulta')
@@ -170,7 +170,7 @@ it('rejects invalid input without asking the contract and shows why', function (
 ]);
 
 it('keeps a valid term on the error page without storing it', function () {
-    ($this->consulta)()
+    ($this->admin)()
         ->post('/panel/consulta', ['parte' => 'vendedores', 'termino' => '800123456'])
         ->assertUnprocessable()
         ->assertSee('value="800123456"', false)
@@ -180,7 +180,7 @@ it('keeps a valid term on the error page without storing it', function () {
 });
 
 it('tells every response not to store the page', function (string $method, array $input) {
-    $response = ($this->consulta)()->{$method}('/panel/consulta', $input);
+    $response = ($this->admin)()->{$method}('/panel/consulta', $input);
 
     expect($response->headers->get('Cache-Control'))->toContain('no-store');
 })->with([
@@ -190,7 +190,7 @@ it('tells every response not to store the page', function (string $method, array
 ]);
 
 it('never searches from the URL', function () {
-    ($this->consulta)()
+    ($this->admin)()
         ->get('/panel/consulta?parte=clientes&termino=800123456')
         ->assertOk()
         ->assertDontSee('800123456')
@@ -202,7 +202,7 @@ it('never searches from the URL', function () {
 it('neither audits nor stores the term', function () {
     ($this->lookup)([FakeMasterLookup::record()]);
 
-    ($this->consulta)()
+    ($this->admin)()
         ->post('/panel/consulta', ['parte' => 'clientes', 'termino' => '800123456'])
         ->assertOk()
         ->assertSessionMissing('_old_input');

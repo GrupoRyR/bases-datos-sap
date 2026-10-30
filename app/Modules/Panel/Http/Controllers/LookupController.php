@@ -10,7 +10,8 @@ use Illuminate\Http\Response;
 /**
  * GET and POST /panel/consulta (panel.consulta, panel.consulta.buscar):
  * finds customers, suppliers and items through MasterLookup so TI can check
- * what arrived from SAP. The term can be a NIT or a name (Ley 1581): it only
+ * what arrived from SAP. Only core.administrar may search, since the results
+ * hold personal data. The term can be a NIT or a name (Ley 1581): it only
  * travels in the POST body, the results are rendered from that POST with no
  * redirect, nothing goes to the session, and the term is never audited or
  * logged. The GET ignores its query string, so no search runs from a URL.

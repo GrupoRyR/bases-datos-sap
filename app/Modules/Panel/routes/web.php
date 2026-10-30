@@ -3,8 +3,8 @@
 // Panel web routes. PanelServiceProvider adds the "web" middleware, the
 // /panel prefix and the "panel." route-name prefix: Route::get('/', ...)
 // ->name('estado') becomes GET /panel named panel.estado. Every screen needs
-// a role (core.consultar); screens that change data also need
-// can:core.administrar on their own route.
+// a role (core.consultar); screens that change data, and the lookup of
+// personal data (Ley 1581), also need can:core.administrar.
 
 use App\Modules\Panel\Http\Controllers\ConnectedAppsController;
 use App\Modules\Panel\Http\Controllers\LookupController;
@@ -17,11 +17,11 @@ Route::middleware(['auth', 'can:core.consultar'])->group(function () {
     Route::get('/', StatusController::class)->name('estado');
     Route::get('solicitudes', RequestHistoryController::class)->name('solicitudes');
 
-    // The term travels only in the POST body (Ley 1581); the GET is the empty form.
-    Route::get('consulta', [LookupController::class, 'create'])->name('consulta');
-    Route::post('consulta', [LookupController::class, 'search'])->name('consulta.buscar');
-
     Route::middleware('can:core.administrar')->group(function () {
+        // The term travels only in the POST body (Ley 1581); the GET is the empty form.
+        Route::get('consulta', [LookupController::class, 'create'])->name('consulta');
+        Route::post('consulta', [LookupController::class, 'search'])->name('consulta.buscar');
+
         Route::get('actualizar', [UpdateDataController::class, 'create'])->name('actualizar');
         Route::post('actualizar', [UpdateDataController::class, 'store'])->name('actualizar.store');
 

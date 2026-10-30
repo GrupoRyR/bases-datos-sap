@@ -21,6 +21,7 @@ return [
         'todo' => 'Todo el conjunto',
         'pedida' => 'Pedida el :momento',
         'tardo' => 'Tardó :duracion',
+        'sin_duracion' => '—',
         'quien' => 'Quién la pidió',
         'panel' => 'Panel',
         'se_unio' => 'Se unió el :momento',

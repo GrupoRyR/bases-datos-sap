@@ -134,13 +134,15 @@ it('lists the panel screens in the navigation, hiding the admin ones from consul
         app(NavRegistry::class)->visibleTo($user),
     );
 
-    expect($labels(User::factory()->adminTi()->create()))->toContain('Estado', 'Actualizar datos', 'Apps conectadas')
-        ->and($labels(User::factory()->consulta()->create()))->toContain('Estado')
+    expect($labels(User::factory()->adminTi()->create()))->toContain('Estado', 'Actualizar datos', 'Consulta', 'Apps conectadas')
+        ->and($labels(User::factory()->consulta()->create()))->toContain('Estado', 'Solicitudes')
         ->not->toContain('Actualizar datos')
+        ->not->toContain('Consulta')
         ->not->toContain('Apps conectadas');
 
     $this->actingAs(User::factory()->consulta()->create())
         ->get('/panel')
         ->assertSee('Estado')
-        ->assertDontSee('Apps conectadas');
+        ->assertDontSee('Apps conectadas')
+        ->assertDontSee('href="'.route('panel.consulta').'"', false);
 });
