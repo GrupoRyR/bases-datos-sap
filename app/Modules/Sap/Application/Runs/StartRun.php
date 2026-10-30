@@ -14,6 +14,7 @@ use App\Modules\Sap\Domain\Values\SapTime;
 use App\Modules\Sap\Http\Exceptions\RobotRequestRejected;
 use App\Modules\Sap\Models\Run;
 use App\Modules\Sap\Models\UpdateRequest;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use LogicException;
 
@@ -24,6 +25,9 @@ use LogicException;
  */
 final class StartRun
 {
+    /** The earliest window start accepted, in days before today (the formula reaches 37). */
+    private const WINDOW_MAX_DAYS = 40;
+
     /** @var array<string, string> */
     private array $errors = [];
 
@@ -39,7 +43,7 @@ final class StartRun
         $type = RunType::tryFrom(is_string($input['tipo'] ?? null) ? $input['tipo'] : '');
 
         if ($dataset === null) {
-            $this->fail('conjunto', 'Conjunto desconocido: solo MAESTROS o CARTERA.');
+            $this->fail('conjunto', 'Conjunto desconocido: solo MAESTROS, CARTERA o VENTAS.');
         }
 
         if ($company === null) {
@@ -53,6 +57,7 @@ final class StartRun
         $parts = $dataset ? $this->parts($input['partes'] ?? null, $dataset, $type, $company) : [];
         $requests = $this->requests($input['solicitudes'] ?? []);
         $cutOff = $dataset ? $this->cutOff($input['fecha_corte'] ?? null, $dataset) : null;
+        $window = $dataset ? $this->window($input['ventana_desde'] ?? null, $dataset) : null;
         $extractedAt = SapTime::parse($input['extraida_en'] ?? null);
 
         if ($extractedAt === null) {
@@ -76,6 +81,7 @@ final class StartRun
             'partes' => $parts,
             'solicitudes' => $requests,
             'fecha_corte' => $cutOff,
+            'ventana_desde' => $window,
             'extraida_en' => $extractedAt,
             'estado' => RunState::Open,
             'abierta_lock' => Run::lockFor($dataset, $company),
@@ -214,9 +220,9 @@ final class StartRun
 
     private function cutOff(mixed $date, Dataset $dataset): ?string
     {
-        if ($dataset === Dataset::Maestros) {
+        if ($dataset !== Dataset::Cartera) {
             if ($date !== null) {
-                $this->fail('fecha_corte', 'MAESTROS no lleva fecha de corte.');
+                $this->fail('fecha_corte', "{$dataset->value} no lleva fecha de corte.");
             }
 
             return null;
@@ -224,6 +230,39 @@ final class StartRun
 
         if (! SapTime::isDate($date)) {
             $this->fail('fecha_corte', 'CARTERA lleva fecha de corte AAAA-MM-DD.');
+
+            return null;
+        }
+
+        return $date;
+    }
+
+    /**
+     * The first day of the VENTAS window (contract sections 4.1 and 10.1),
+     * computed by the robot in HANA. Between today minus 40 days and
+     * tomorrow, today in Bogota, so a robot error never reaches closed
+     * months. The other datasets have no window.
+     */
+    private function window(mixed $date, Dataset $dataset): ?string
+    {
+        if ($dataset !== Dataset::Ventas) {
+            if ($date !== null) {
+                $this->fail('ventana_desde', 'Solo VENTAS lleva ventana_desde.');
+            }
+
+            return null;
+        }
+
+        if (! SapTime::isDate($date)) {
+            $this->fail('ventana_desde', 'VENTAS lleva ventana_desde AAAA-MM-DD.');
+
+            return null;
+        }
+
+        $today = CarbonImmutable::now((string) config('app.timezone'));
+
+        if ($date > $today->addDay()->toDateString() || $date < $today->subDays(self::WINDOW_MAX_DAYS)->toDateString()) {
+            $this->fail('ventana_desde', 'Debe estar entre hoy menos '.self::WINDOW_MAX_DAYS.' días y mañana.');
 
             return null;
         }
