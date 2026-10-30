@@ -219,13 +219,14 @@ El usuario activa el hook una vez por clon: `git config core.hooksPath .githooks
 
 ## 10. Diseño
 
-El panel es de TI y lleva solo la marca de Segurex (§3 del plan). Las reglas salen de la skill `frontend-marca-sgx-sydc`:
+El panel es de TI y lleva solo la marca de Segurex (§3 del plan). Las reglas salen del manual de marca v2, la skill `frontend-marca-sgx-sydc-v2`:
 
-- **Logo como imagen**, nunca el nombre en texto: `public/img/logo-segurex.svg` (la versión para fondo oscuro del gestor de cartera) con `<x-ui.logo />`, alto fijo y ancho automático, sobre el gris `bg-brand-dark`. El texto sobre ese gris va en blanco (`text-on-brand`): el naranja ahí no da contraste.
+- **Logo como imagen**, nunca el nombre en texto: `public/img/logo-segurex-blanco.png` (el logo blanco del manual v2) con `<x-ui.logo />`, alto fijo y ancho automático, solo sobre el encabezado `bg-brand-head` (gris en claro, casi negro en oscuro). El texto sobre el encabezado va en blanco (`text-on-brand` o `text-brand-head-fg`; el secundario, `text-brand-head-muted`): el naranja ahí no da contraste.
+- **Etiquetas y avisos de marca**: fondo `bg-brand-tint` y texto `text-brand-ink` (el `badge` con `tone="brand"`). Nunca texto blanco sobre el naranja `#F26522`: los botones usan `bg-brand-button`.
 - **Tipografía Helvetica/Arial** en toda la interfaz. No se carga ninguna fuente externa ni CDN.
 - **Colores solo por variables `--brand-*`**: ninguna vista lleva un hex. `tests/Feature/Design/AssetsTest.php` falla si una vista Blade trae un color de marca o una fuente externa.
 
-**Tokens.** Viven en `resources/css/app.css`: las variables de marca en `:root[data-brand="segurex"]` y las neutras (`--ui-*`: fondo, superficie, texto, texto suave, bordes, foco, info, éxito, aviso y peligro), todas AA y con su contraste anotado. `@theme inline` las vuelve utilidades de Tailwind: `bg-surface`, `text-muted`, `border-line`, `bg-brand-button`, `text-brand-ink`, `bg-danger-bg`… La paleta por defecto de Tailwind está desactivada, así que solo existen estos colores.
+**Tokens.** Viven en `resources/css/app.css`: las variables de marca en `:root[data-brand="segurex"]` y las neutras (`--ui-*`: fondo, superficie, texto, texto suave, bordes, foco, info, éxito, aviso y peligro), todas AA y con su contraste anotado. `@theme inline` las vuelve utilidades de Tailwind: `bg-surface`, `text-muted`, `border-line`, `bg-brand-button`, `text-brand-ink`, `bg-brand-head`, `bg-brand-tint`, `bg-danger-bg`… La paleta por defecto de Tailwind está desactivada, así que solo existen estos colores.
 
 **Modo oscuro.** Cada token se escribe una vez con `light-dark(claro, oscuro)`. Por defecto sigue al sistema; el botón «Tema» del encabezado (`resources/js/theme.js`) alterna sistema → claro → oscuro, lo guarda en `localStorage` y lo aplica con `<html data-theme="light|dark">`. Un script en el `<head>` lo aplica antes de pintar, sin parpadeo. Sin JavaScript, el botón no aparece y manda el sistema. Si una vista necesita algo distinto en oscuro, usa la variante `dark:`, que respeta la misma regla.
 

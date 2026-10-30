@@ -18,6 +18,9 @@ Lo que Panel necesite leer de aquí lo publica Sap en `App\Modules\Sap\Contracts
 Cada uno se implementa en `Application\Panel` (o `Application\Apps`) y se registra en `SapServiceProvider`. Recorren `Company::cases()`, `Dataset::cases()` y `Part::forDataset()`, así que un conjunto nuevo aparece sin cambiarlos. Las horas vuelven como `CarbonImmutable` en hora de Bogotá.
 
 - `DatasetStatuses::all()`: por empresa y conjunto, la última vez que se aplicó, las filas en MySQL por parte (activas si la tabla tiene `activo`) y la última corrida.
+- `Stability::current()`: el contador de días estables del plan (§6) y los últimos 14 días con lo que falló en cada uno; el criterio 4 (correcciones a mano) no se puede medir.
+- `RequestHistory::page()`: las solicitudes de la más nueva a la más vieja, con quién pidió cada una (app o panel), filtrables por empresa y conjunto.
+- `MasterLookup::search()`: busca clientes, proveedores o artículos en su vista por código, nombre o NIT; devuelve solo campos de identificación (Ley 1581) y como máximo 25 filas.
 - `ClientAppKeys`: además de `issue` y `revoke`, `all()` lista las apps sin su hash y `rotate()` da una llave nueva (la anterior recibe 401 de inmediato y una app revocada vuelve a funcionar).
 
 Las reglas completas están en `docs/arquitectura.md`.
