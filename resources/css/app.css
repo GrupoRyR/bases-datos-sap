@@ -32,27 +32,32 @@
 }
 
 /*
- * Segurex brand: the panel belongs to TI, so it is Segurex only. The
- * data-brand attribute stays so another brand block could be added later.
+ * Segurex brand, manual v2 (frontend-marca-sgx-sydc-v2 skill): the panel
+ * belongs to TI, so it is Segurex only. The data-brand attribute stays so
+ * another brand block could be added later. Never white text on #f26522
+ * (3.15:1) nor orange text on the gray header (2.22:1).
  */
 :root[data-brand='segurex'] {
     --brand-accent: #f26522; /* accents, icons, borders; text only when large */
     --brand-button: #c6531c; /* button background with white text: 4.51:1 (both modes) */
     --brand-ink: light-dark(#943e15, #f26522); /* orange text: 7.10:1 on white · 5.35:1 on #1c1d20 */
-    --brand-text: light-dark(#58595b, #a8a9aa); /* long text: 7.01:1 on white · 7.16:1 on #1c1d20 */
-    --brand-dark: #58595b; /* header behind the logo; white on it 7.01:1, orange only 2.22:1 */
+    --brand-text: light-dark(#58595b, #cacbcd); /* long text: 7.01:1 on white · 10.38:1 on #1c1d20 */
+    --brand-tint: light-dark(#fcede4, rgb(242 101 34 / 0.1)); /* chips and notices: --brand-ink on it 6.21:1 · 4.74:1 */
+    --brand-head: light-dark(#58595b, #2b2c2f); /* header behind the logo; white on it 7.01:1 · 13.96:1 */
+    --brand-head-fg: #ffffff; /* text on the header */
+    --brand-head-muted: rgb(255 255 255 / 0.82); /* secondary text on the header: 5.36:1 */
 }
 
-/* Neutral tokens. Dark values are redefined, not inverted. */
+/* Neutral tokens (manual v2). Dark values are redefined, not inverted. */
 :root {
-    --ui-ground: light-dark(#f5f5f2, #121315); /* page background */
+    --ui-ground: light-dark(#f5f4f3, #141518); /* page background */
     --ui-surface: light-dark(#ffffff, #1c1d20); /* cards and bars */
-    --ui-subtle: light-dark(#f0f0ec, #26272b); /* hover, active item */
-    --ui-line: light-dark(#e5e5e0, #2c2e33); /* decorative dividers and card borders */
+    --ui-subtle: light-dark(#f0eeec, #25272b); /* hover, active item */
+    --ui-line: light-dark(#e3e0dd, rgb(255 255 255 / 0.1)); /* decorative dividers and card borders */
     --ui-line-strong: light-dark(#8a8d93, #74777e); /* control borders: 3.33:1 on white · 3.76:1 on #1c1d20 */
-    --ui-text: light-dark(#17191c, #f2f2ef); /* body text: 17.61:1 on white · 15.03:1 on #1c1d20 */
-    --ui-muted: light-dark(#5e6168, #a3a6ad); /* secondary text: 5.43:1 on #f0f0ec · 6.12:1 on #26272b */
-    --ui-on-brand: #ffffff; /* text on --brand-button, --brand-dark and --ui-danger-solid */
+    --ui-text: light-dark(#2f3032, #ededee); /* body text and titles: 13.21:1 on white · 14.41:1 on #1c1d20 */
+    --ui-muted: light-dark(#6a6b6e, #a8a9aa); /* secondary text: 5.33:1 on white, 4.60:1 on #f0eeec · 6.35:1 on #25272b */
+    --ui-on-brand: #ffffff; /* text on --brand-button and --ui-danger-solid */
     --ui-focus: var(--brand-ink); /* focus ring: 7.10:1 on white · 5.35:1 on #1c1d20 */
 
     /* Status pairs: text on its own background. */
@@ -78,7 +83,10 @@
     --color-brand-button: var(--brand-button);
     --color-brand-ink: var(--brand-ink);
     --color-brand-text: var(--brand-text);
-    --color-brand-dark: var(--brand-dark);
+    --color-brand-tint: var(--brand-tint);
+    --color-brand-head: var(--brand-head);
+    --color-brand-head-fg: var(--brand-head-fg);
+    --color-brand-head-muted: var(--brand-head-muted);
 
     --color-ground: var(--ui-ground);
     --color-surface: var(--ui-surface);

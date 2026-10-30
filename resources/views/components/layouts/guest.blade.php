@@ -13,7 +13,7 @@
 
     <main id="contenido" tabindex="-1" class="flex min-h-screen items-center justify-center px-4 py-10">
         <div class="w-full max-w-md overflow-hidden rounded-xl border border-line bg-surface shadow-sm">
-            <div class="flex items-center justify-between gap-3 bg-brand-dark px-4 py-3 text-on-brand sm:px-6 [&_:focus-visible]:outline-on-brand">
+            <div class="flex items-center justify-between gap-3 bg-brand-head px-4 py-3 text-brand-head-fg sm:px-6 [&_:focus-visible]:outline-on-brand">
                 <x-ui.logo />
                 <x-layouts.partials.theme-toggle />
             </div>
