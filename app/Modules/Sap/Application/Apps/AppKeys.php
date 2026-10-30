@@ -33,7 +33,7 @@ final class AppKeys implements ClientAppKeys
 
         $app = ClientApp::create(['nombre' => $name, ...$this->stored($key)]);
 
-        return new IssuedAppKey($app->id, $app->nombre, $key);
+        return new IssuedAppKey($app->id, $app->nombre, $key, $app->key_prefix);
     }
 
     public function revoke(int $appId): void
@@ -75,7 +75,7 @@ final class AppKeys implements ClientAppKeys
 
         $app->forceFill([...$this->stored($key), 'revoked_at' => null])->save();
 
-        return new IssuedAppKey($app->id, $app->nombre, $key);
+        return new IssuedAppKey($app->id, $app->nombre, $key, $app->key_prefix);
     }
 
     /**

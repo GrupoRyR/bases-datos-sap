@@ -30,6 +30,7 @@ it('lists every app by name, revoked ones included, without the key hash', funct
     expect(array_map(fn (ClientAppData $app): string => $app->name, $apps))->toBe(['Gestor de cartera', 'Toma de pedidos'])
         ->and($apps[0]->id)->toBe($portfolio->id)
         ->and($apps[0]->keyPrefix)->toBe(substr($portfolio->key, 0, 12))
+        ->and($portfolio->keyPrefix)->toBe($apps[0]->keyPrefix)
         ->and($apps[0]->createdAt->format('Y-m-d H:i'))->toBe('2026-10-27 10:00')
         ->and($apps[0]->lastUsedAt)->toBeNull()
         ->and($apps[0]->revokedAt)->toBeNull()
@@ -47,7 +48,8 @@ it('rotates a key: the old one gets 401 at once and the new one works', function
         ->and($new->name)->toBe('Gestor de cartera')
         ->and($new->key)->toStartWith('bsap_')->not->toBe($old->key)
         ->and(DB::table('client_apps')->value('key_hash'))->toBe(hash('sha256', $new->key))
-        ->and(DB::table('client_apps')->value('key_prefix'))->toBe(substr($new->key, 0, 12));
+        ->and(DB::table('client_apps')->value('key_prefix'))->toBe(substr($new->key, 0, 12))
+        ->and($new->keyPrefix)->toBe(substr($new->key, 0, 12));
 
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', keysBearer($old->key))->assertUnauthorized();
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', keysBearer($new->key))->assertOk();
