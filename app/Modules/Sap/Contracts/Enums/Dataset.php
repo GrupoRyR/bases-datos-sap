@@ -15,6 +15,9 @@ enum Dataset: string
     /** Open invoices and balances, plus one photo per day, in cartera_sap. */
     case Cartera = 'CARTERA';
 
+    /** Invoice and credit note lines, replaced only inside a window, in ventas_sap. */
+    case Ventas = 'VENTAS';
+
     /**
      * The database connection that holds the tables of the dataset
      * (config/database.php).
@@ -24,6 +27,7 @@ enum Dataset: string
         return match ($this) {
             self::Maestros => 'maestros',
             self::Cartera => 'cartera',
+            self::Ventas => 'ventas',
         };
     }
 }

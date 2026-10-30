@@ -142,13 +142,14 @@ Un módulo usa otro **solo por su espacio `App\Modules\<Otro>\Contracts`**, y so
 
 ## 4. Bases de datos y conexiones
 
-Tres bases en el mismo servidor MySQL (§3 del plan), una conexión por base:
+Cuatro bases en el mismo servidor MySQL (§3 del plan), una conexión por base:
 
 | Conexión | Base | Qué guarda |
 |---|---|---|
 | `app` (por defecto) | `bases_sap` | Solicitudes, corridas, lotes, usuarios del panel, apps conectadas, auditoría |
 | `maestros` | `maestros_sap` | Tablas del conjunto MAESTROS |
 | `cartera` | `cartera_sap` | Tablas del conjunto CARTERA |
+| `ventas` | `ventas_sap` | Tablas del conjunto VENTAS |
 
 - Una migración de un conjunto declara su conexión; el migrador la usa en `up()` y `down()`:
 
@@ -164,7 +165,7 @@ Tres bases en el mismo servidor MySQL (§3 del plan), una conexión por base:
   };
   ```
 
-- Los modelos de un conjunto declaran `protected $connection = 'maestros';` (o `'cartera'`).
+- Los modelos de un conjunto declaran `protected $connection = 'maestros';` (o `'cartera'` o `'ventas'`).
 - **Las apps nunca leen tablas.** Leen vistas estables `v_*` (`v_clientes`, `v_articulos`, `v_cartera`…) con un usuario MySQL de solo lectura por app, con permiso solo en las bases que usa (§3 y §4 del plan).
 - Nunca se borran filas de los maestros: lo que falta en una corrida completa queda inactivo.
 - **Prefijos de migraciones:** cada módulo usa el suyo (`config/modules.php`) y numera con el sufijo: `2026_11_02_000001_create_…`. La base usa `0001_01_01_*`.
@@ -179,7 +180,7 @@ Las pruebas de un módulo van en `tests/Modules/<Modulo>/Unit` y `tests/Modules/
 - activa `Http::preventStrayRequests()`: toda llamada HTTP sin `Http::fake()` falla;
 - llama `withoutVite()`: las vistas se pintan sin `public/build`.
 
-En tu equipo las pruebas corren en SQLite en memoria (una base por conexión); CI las corre en MySQL 8 con tres bases. Evita SQL propio de un motor. Las pruebas nunca tocan SAP, la VPN, GoDaddy ni correo real.
+En tu equipo las pruebas corren en SQLite en memoria (una base por conexión); CI las corre en MySQL 8 con cuatro bases. Evita SQL propio de un motor. Las pruebas nunca tocan SAP, la VPN, GoDaddy ni correo real.
 
 ## 6. Comandos
 
@@ -197,7 +198,7 @@ En tu equipo las pruebas corren en SQLite en memoria (una base por conexión); C
 | Job | Qué hace |
 |---|---|
 | Lint | PHP 8.3, `composer lint`. |
-| Tests | PHP 8.3 con MySQL 8; crea las tres bases de prueba y corre `composer test`. |
+| Tests | PHP 8.3 con MySQL 8; crea las cuatro bases de prueba y corre `composer test`. |
 | Assets | Node 22, `npm ci` y `npm run build`. Solo comprueba que compila. |
 
 ## 8. Protecciones locales de `main`
