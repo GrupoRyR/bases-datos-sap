@@ -30,9 +30,9 @@ Comisiones in the gestor de cartera needs sales lines. The user moved VENTAS int
 
 | ID | Task | Branch | Route | Status |
 |---|---|---|---|---|
-| V1 | Contract §10 VENTAS and this feature document | `docs/contrato-ventas` | inline (one doc file) | PR open |
-| V2 | App: `ventas` connection, table and `v_ventas`, batch rules, window apply, requests, nightly count | `feat/sap-ventas` | delegated writer | done, not pushed |
-| V3 | Robot: query copy, HANA window, nightly run, requests, `--diagnostico`, CSV and retention | — | delegated writer | pending |
+| V1 | Contract §10 VENTAS and this feature document | `docs/contrato-ventas` | inline (one doc file) | merged (#33) |
+| V2 | App: `ventas` connection, table and `v_ventas`, batch rules, window apply, requests, nightly count | `feat/sap-ventas-esquema`, `feat/sap-ventas` | delegated writer | merged (#34, #35) |
+| V3 | Robot: query copy, HANA window, nightly run, requests, `--diagnostico`, CSV and retention | `feat/robot-ventas-consulta`, `feat/robot-ventas` | delegated writer (writer trigger: 2+ non-trivial files in `robot/**`) | #40 merged, #41 merging |
 
 ## Acceptance
 
@@ -71,6 +71,17 @@ Checks (2026-10-29, Bogota time):
 - `composer test` (12:47): 507 tests, 505 passed, 2 skipped, 0 failed.
 - Earlier runs at 12:18 and 12:30 had 2 failures in `StartRunTest` (Derivados MAESTROS requests). They failed the same way on the base commit: those tests do not freeze the clock, so within 15 minutes of the 12:00 and 12:30 blocked slots the request is queued instead of taken. After 12:45 all 26 `StartRunTest` cases pass. This is flaky and existed before V2; V2 did not cause it.
 
+### V3
+
+Branch `feat/robot-ventas`, cut from `main` with contract §10. Test first: RED observed for each unit before the code, then GREEN.
+
+- `2bf6541` feat(robot): add the VENTAS query, its company marker and schema. `robot/queries/ventas/ventas.sql` is the gestor file at `9e2f877` byte for byte (same git blob `c768a24`, checked by a test). `consultas.sql_id_pedido_app` reuses the gestor regex: SGX runs as is, SDC gets `CAST(NULL AS NVARCHAR(254))`, and a missing, repeated or unrecognized marker fails before running. Parte `ventas` with the 34 contract columns and the new `cantidad` type (6 decimals, half up, no `-0.000000`). 7 files, +443 −21 (the copied SQL is 154 of them).
+- `abdb32d` feat(robot): send VENTAS runs with the HANA window, nightly and on request. `SELECT ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE)) FROM DUMMY` before and after the query on the extraction connection; one retry if it changed, then the job fails. `ventana_desde` only on VENTAS `iniciar`; rows before it fail the job. Nightly: MAESTROS, CARTERA and VENTAS per company, with `conteo_sap.ventas`. VENTAS requests map to `{"ventas": "todo"}`. CSV `VENTAS\<empresa>\aaaa-mm-dd_hhmm.csv`, 90-day retention. LEEME updated. 18 files, +480 −83 (about 560 changed lines, mostly tests: the nightly lists in existing tests grew from 4 to 6 runs).
+- `e4d1b3e` feat(robot): show the HANA window of VENTAS in the diagnostic. 2 files, +75 −8.
+- Checks: `robot/.venv/Scripts/python.exe -m pytest` → 677 passed (baseline 618). The bare `python -m pytest` of the system Python has no pytest installed; the robot venv is the runner.
+- Known behavior: a VENTAS job that fails before HANA returns the window (VPN or connection failure) cannot open a run to mark it failed, because `ventana_desde` is mandatory and never comes from the PC clock. The failure goes to the email and its requests expire in the API.
+- Pending: native review, push and PR (user decisions); the user runs `--diagnostico` against SAP.
+
 ## Next step
 
-User reviews the contract PR and V2 (`feat/sap-ventas`, not pushed). Then V3 (robot).
+The user ran `--diagnostico` on `8b166f0` and it matched SAP per customer and month in both companies (2026-10-30). Merge #41; then V1 to V3 are done.

@@ -16,14 +16,14 @@ Las tablas que solo van a la carpeta (archivo, catálogo, diagnóstico, plan §5
 siguen las mismas dos fases y nunca llaman a la API.
 
 Uso:
-    python run_robot.py --completa                 # nocturna: MAESTROS y CARTERA de SGX y SDC,
+    python run_robot.py --completa                 # nocturna: MAESTROS, CARTERA y VENTAS de SGX y SDC,
                                                    # más los registros del archivo (AUDITORIA, ORTT)
     python run_robot.py --completa --empresa SGX   # solo una empresa (se puede repetir)
     python run_robot.py --completa --sin-vpn       # asume la VPN ya conectada a mano
     python run_robot.py --archivo fotos            # domingo 03:00: fotos del archivo y catálogo
     python run_robot.py --archivo registros        # solo los registros del archivo
     python run_robot.py --catalogo                 # solo el catálogo
-    python run_robot.py --diagnostico              # cifras de MAESTROS y CARTERA, sin enviar
+    python run_robot.py --diagnostico              # cifras de MAESTROS, CARTERA y VENTAS, sin enviar
     python run_robot.py --completa --forzar        # no espera la franja bloqueada
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
@@ -100,7 +100,7 @@ def ejecutar_trabajos(
     `antes_de_enviar(resultados)` corre con la VPN ya abajo, antes del envío
     (la nocturna toma ahí las solicitudes). `registros` lee el archivo en la
     misma sesión de VPN y lo escribe en la fase 2; sus fallos van a la lista,
-    pero nunca frenan MAESTROS ni CARTERA.
+    pero nunca frenan MAESTROS, CARTERA ni VENTAS.
     """
     api = api or ApiCliente(cfg.api)
     carpeta = carpeta or Carpeta(cfg.csv_dir)
@@ -260,7 +260,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Robot de Bases de datos SAP")
     modo = parser.add_mutually_exclusive_group(required=True)
     modo.add_argument("--completa", action="store_true",
-                      help="Corrida nocturna: MAESTROS y CARTERA completos, con la foto de cartera "
+                      help="Corrida nocturna: MAESTROS, CARTERA y VENTAS completos, con la foto de cartera "
                            "y los registros del archivo.")
     modo.add_argument("--archivo", choices=("fotos", "registros"),
                       help="Tablas que solo van a la carpeta: fotos (domingo, con el catálogo) "
@@ -268,7 +268,7 @@ def _parser() -> argparse.ArgumentParser:
     modo.add_argument("--catalogo", action="store_true",
                       help="Catálogo de tablas y columnas de cada empresa (carpeta _CATALOGO).")
     modo.add_argument("--diagnostico", action="store_true",
-                      help="Extrae MAESTROS y CARTERA con sus conteos a _DIAGNOSTICO; no envía nada.")
+                      help="Extrae MAESTROS, CARTERA y VENTAS con sus conteos a _DIAGNOSTICO; no envía nada.")
     parser.add_argument("--empresa", action="append", choices=EMPRESAS,
                         help="Empresa a procesar (se puede repetir). Por defecto, todas.")
     parser.add_argument("--sin-vpn", action="store_true",

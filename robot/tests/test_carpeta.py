@@ -58,6 +58,14 @@ def test_guardar_corrida_ruta_y_nombre_en_hora_de_bogota(tmp_path: Path):
     assert ruta.read_text(encoding="utf-8-sig").splitlines() == ["codigo", "C1"]
 
 
+def test_guardar_corrida_de_ventas_va_directo_en_la_carpeta_de_la_empresa(tmp_path: Path):
+    c = Carpeta(tmp_path)
+    momento = datetime(2026, 10, 26, 2, 0, tzinfo=BOGOTA)
+    ruta = c.guardar_corrida("VENTAS", "SGX", "ventas", ["tipo_objeto"], [[13]], momento)
+    assert ruta == tmp_path / "VENTAS" / "SGX" / "2026-10-26_0200.csv"
+    assert ruta.read_text(encoding="utf-8-sig").splitlines() == ["tipo_objeto", "13"]
+
+
 def test_guardar_corrida_no_pisa_otra_del_mismo_minuto(tmp_path: Path):
     c = Carpeta(tmp_path)
     momento = datetime(2026, 10, 26, 10, 42, tzinfo=BOGOTA)
@@ -96,15 +104,17 @@ def test_purgar_corridas_borra_solo_corridas_viejas(tmp_path: Path):
     vieja_c = _tocar(raiz / "CARTERA" / "SGX" / "cartera" / "2026-05-01_0200.csv")
     nueva_c = _tocar(raiz / "CARTERA" / "SGX" / "cartera" / "2026-10-25_0200.csv")
     historico = _tocar(raiz / "CARTERA" / "SGX" / "historico" / "2025-01-01.csv")
+    vieja_v = _tocar(raiz / "VENTAS" / "SDC" / "2026-07-27_0200.csv")
+    limite_v = _tocar(raiz / "VENTAS" / "SDC" / "2026-07-28_0200.csv")
     otro = _tocar(raiz / "MAESTROS" / "SGX" / "clientes" / "notas.txt")
     archivo = _tocar(raiz / "AUDITORIA" / "SGX" / "USR5" / "2024-01-01.csv")
 
     borrados = Carpeta(raiz).purgar_corridas(date(2026, 10, 26))
 
-    assert sorted(borrados) == sorted([vieja_m, vieja_m2, vieja_c])
-    for ruta in (vieja_m, vieja_m2, vieja_c):
+    assert sorted(borrados) == sorted([vieja_m, vieja_m2, vieja_c, vieja_v])
+    for ruta in (vieja_m, vieja_m2, vieja_c, vieja_v):
         assert not ruta.exists()
-    for ruta in (limite_m, nueva_c, historico, otro, archivo):
+    for ruta in (limite_m, nueva_c, historico, limite_v, otro, archivo):
         assert ruta.exists()
 
 

@@ -27,7 +27,8 @@ class Trabajo:
     partes: dict[str, str]  # parte -> todo | cambios, en orden de envío
     desde: dict[str, str | None] = field(default_factory=dict)
     solicitudes: list[int] = field(default_factory=list)
-    fecha_corte: str | None = None
+    fecha_corte: str | None = None  # solo CARTERA. VENTAS lleva su ventana_desde, que sale de HANA
+    # al extraer (extraccion.Resultado.ventana_desde), no del trabajo.
 
     @property
     def nombre(self) -> str:
@@ -172,7 +173,7 @@ def trabajos_completos(
     solicitudes_tomadas: list[dict[str, Any]],
     sin_precios: Collection[str] = (),
 ) -> list[Trabajo]:
-    """Corrida nocturna: por empresa, MAESTROS y luego CARTERA, todo en modo `todo`.
+    """Corrida nocturna: por empresa, MAESTROS, CARTERA y VENTAS, todo en modo `todo`.
 
     Las solicitudes tomadas de la misma empresa y conjunto van en la corrida
     completa (§7.3); las de otras empresas quedan como trabajos de solicitud.
@@ -186,7 +187,7 @@ def trabajos_completos(
 
     trabajos: list[Trabajo] = []
     for empresa in empresas:
-        for conjunto in ("MAESTROS", "CARTERA"):
+        for conjunto in esquema.PARTES_POR_CONJUNTO:  # MAESTROS, CARTERA y VENTAS
             de_solicitud = por_grupo.pop((empresa, conjunto), None)
             trabajos.append(Trabajo(
                 empresa=empresa,

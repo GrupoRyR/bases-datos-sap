@@ -1,13 +1,18 @@
 """Diagnóstico (--diagnostico): lo corre el usuario para ver cifras antes de cargar.
 
-Por empresa extrae cada parte de MAESTROS (completa) y CARTERA con su
+Por empresa extrae cada parte de MAESTROS (completa), CARTERA y VENTAS con su
 COUNT(*), y la lista de listas de precios (OPLN). Nunca envía nada a la API:
 este módulo no importa el cliente de la API y no necesita su configuración.
+
+VENTAS pide su ventana a HANA antes y después de la consulta, como la corrida
+real (contrato §10.1), y la deja en la columna ventana_desde del resumen. Si
+cambió, o si una fila cae antes de ella, queda como error de la parte: aquí no
+se repite la consulta, basta con volver a correr el diagnóstico.
 
     _DIAGNOSTICO\\<EMPRESA>\\<parte>\\aaaa-mm-dd_hhmm.csv
     _DIAGNOSTICO\\<EMPRESA>\\listas_precios\\aaaa-mm-dd_hhmm.csv
     _DIAGNOSTICO\\resumen\\aaaa-mm-dd_hhmm.csv
-        empresa;conjunto;parte;filas;conteo_sap;activos;inactivos;error
+        empresa;conjunto;parte;filas;conteo_sap;activos;inactivos;ventana_desde;error
 
 Una parte que falla no detiene a las demás: su error (corto y sin valores de
 SAP) queda en el resumen. Retención: 90 días. Dos fases: `Diagnostico.__call__`
@@ -24,14 +29,16 @@ import esquema
 import hana
 from carpeta import DIAGNOSTICO, Carpeta, texto_crudo
 from config import Config, EmpresaHana
-from extraccion import mensaje_seguro
+from extraccion import FalloTrabajo, leer_ventana, mensaje_seguro, revisar_ventana
 from registro import obtener
 
 log = obtener("diagnostico")
 
 LISTAS_PRECIOS = "listas_precios"
 CONSULTA_LISTAS = "diagnostico/listas_precios.sql"
-COLUMNAS_RESUMEN = ["empresa", "conjunto", "parte", "filas", "conteo_sap", "activos", "inactivos", "error"]
+COLUMNAS_RESUMEN = [
+    "empresa", "conjunto", "parte", "filas", "conteo_sap", "activos", "inactivos", "ventana_desde", "error",
+]
 
 
 @dataclass
@@ -44,6 +51,7 @@ class ParteDiagnostico:
     conteo_sap: int | None = None
     activos: int | None = None
     inactivos: int | None = None
+    ventana_desde: str | None = None  # solo VENTAS: la que dio HANA
     error: str | None = None
 
     def resumen(self) -> list[Any]:
@@ -53,6 +61,7 @@ class ParteDiagnostico:
             "" if self.conteo_sap is None else self.conteo_sap,
             "" if self.activos is None else self.activos,
             "" if self.inactivos is None else self.inactivos,
+            self.ventana_desde or "",
             self.error or "",
         ]
 
@@ -82,7 +91,10 @@ class Diagnostico:
                            f"({empresa_cfg.variable_lista_precios}).")
                 continue
             try:
-                self._leer_parte(conn, empresa_cfg, parte, p)
+                if parte.conjunto == "VENTAS":
+                    self._leer_en_ventana(conn, empresa_cfg, parte, p)
+                else:
+                    self._leer_parte(conn, empresa_cfg, parte, p)
             except Exception as exc:
                 self._fallo(p, exc)
         p = ParteDiagnostico(empresa, "DIAGNOSTICO", LISTAS_PRECIOS)
@@ -94,6 +106,20 @@ class Diagnostico:
             p.columnas, p.filas = columnas, [[texto_crudo(v) for v in f] for f in datos]
         except Exception as exc:
             self._fallo(p, exc)
+
+    def _leer_en_ventana(
+        self, conn: Any, empresa_cfg: EmpresaHana, parte: esquema.Parte, p: ParteDiagnostico
+    ) -> None:
+        """VENTAS: la ventana se pide a HANA antes y después, en la misma conexión."""
+        antes = p.ventana_desde = leer_ventana(conn, p.empresa)
+        self._leer_parte(conn, empresa_cfg, parte, p)
+        despues = p.ventana_desde = leer_ventana(conn, p.empresa)
+        if despues != antes:
+            raise FalloTrabajo(
+                "VALIDACION",
+                f"La ventana cambió durante la consulta (de {antes} a {despues}); vuelve a correr el diagnóstico.",
+            )
+        revisar_ventana(parte, p.filas or [], despues)
 
     def _leer_parte(self, conn: Any, empresa_cfg: EmpresaHana, parte: esquema.Parte, p: ParteDiagnostico) -> None:
         etiqueta = f"{p.empresa} {parte.nombre} (diagnóstico)"
@@ -144,6 +170,6 @@ class Diagnostico:
 
     @staticmethod
     def _mostrar(filas: list[list[Any]]) -> None:
-        log.info("%-4s %-11s %-17s %8s %10s %8s %9s  %s", *COLUMNAS_RESUMEN)
+        log.info("%-4s %-11s %-17s %8s %10s %8s %9s %13s  %s", *COLUMNAS_RESUMEN)
         for f in filas:
-            log.info("%-4s %-11s %-17s %8s %10s %8s %9s  %s", *f)
+            log.info("%-4s %-11s %-17s %8s %10s %8s %9s %13s  %s", *f)

@@ -254,6 +254,7 @@ def test_tipos_de_ventas():
 def test_partes_por_solicitud_segun_contrato_7_1():
     assert esquema.PARTES_POR_SOLICITUD == {
         ("CARTERA", None): ("cartera",),
+        ("VENTAS", None): ("ventas",),
         ("MAESTROS", None): tuple(MAESTROS),
         ("MAESTROS", "clientes"): ("clientes", "direcciones", "contactos"),
         ("MAESTROS", "proveedores"): ("proveedores", "direcciones", "contactos"),

@@ -1,6 +1,6 @@
 # Robot de Bases de datos SAP
 
-Saca los datos maestros y la cartera de SAP Business One (Segurex, SGX, y Soluciones y Derivados, SDC) por la VPN Sophos, guarda un respaldo en CSV y los envía a la app. El contrato con la app está en `docs/contrato-robot.md`.
+Saca los datos maestros, la cartera y las ventas de SAP Business One (Segurex, SGX, y Soluciones y Derivados, SDC) por la VPN Sophos, guarda un respaldo en CSV y los envía a la app. El contrato con la app está en `docs/contrato-robot.md`.
 
 Corre en el PC de TI con Windows y Python 3.14.
 
@@ -34,6 +34,7 @@ py -3.14 -m venv .venv
 
 3. Los precios salen de la lista pública de cada empresa, buscada por **número** (no por nombre): `HANA_SGX_LISTA_PRECIOS` (por defecto `1`) y `HANA_SDC_LISTA_PRECIOS` (vacía: Derivados todavía no tiene lista pública). Sin número, esa empresa manda su MAESTROS sin la parte `precios` (contrato §4.1): la nocturna no falla y no consulta precios. Una solicitud de solo precios de esa empresa falla al instante, en la nocturna o en la revisión de cada minuto, con un mensaje que dice qué variable poner; no arrastra a las solicitudes de todo MAESTROS de la misma empresa. Cuando Derivados defina su lista, pon su número en `HANA_SDC_LISTA_PRECIOS` y los precios vuelven solos.
 4. La cartera sale de las cuentas contables de cada empresa: `HANA_SGX_CUENTAS_CARTERA` (por defecto `13050505,13051005`) y `HANA_SDC_CUENTAS_CARTERA` (por defecto `13050501,13051005`), separadas por coma y solo dígitos. Casi nunca hay que tocarlas.
+5. Las ventas (facturas, notas débito y notas crédito de clientes) salen de la consulta del gestor de cartera, copiada tal cual en `queries\ventas\ventas.sql`. No llevan variables: en Derivados el robot cambia el id del pedido de la app (`U_SGX_IdPedidoApp`, que solo existe en Segurex) por un vacío.
 
 El `.env` nunca se sube a Git. Los CSV quedan en `BASES_SAP_CSV_DIR`, fuera del repo.
 
@@ -54,6 +55,7 @@ Con lo que dejan en `_CATALOGO` y `_DIAGNOSTICO`, revisa lo que las consultas ma
 - [ ] `CRD1.County` guarda el código del municipio.
 - [ ] `activo`: que `validFor = 'N'` o `frozenFor = 'Y'` marque de verdad a los socios y artículos inactivos.
 - [ ] La cartera de Derivados (cuentas 13050501 y 13051005) da las mismas cifras que el informe de cartera de SAP. Segurex usa 13050505 y 13051005. La consulta es una sola (`queries\cartera\cartera.sql`) y el robot se queda con las cuentas de cada empresa.
+- [ ] Las ventas de cada empresa (`_DIAGNOSTICO\<empresa>\ventas`) contra el informe de ventas de SAP, por mes de `fecha_contabilizacion`, y lo que la consulta marca como `VALIDAR CON DATOS REALES` (el campo `U_SGX_IdPedidoApp` en Segurex, el pedido, el costo y el precio de lista). El resumen muestra el `ventana_desde` que dio HANA.
 - [ ] Los nombres de columna del archivo (`queries\archivo`) contra `_CATALOGO\<empresa>\columnas`.
 - [ ] El tamaño de `ADOC`, `ADO1`, `AJDT` y `AJD1` en `_CATALOGO\<empresa>\tablas` antes de activar `BASES_SAP_ARCHIVO_HISTORIAL_DOCUMENTOS`.
 
@@ -73,12 +75,12 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 
 | Comando | Qué hace | Usa la API |
 |---|---|---|
-| `run_robot.py --completa` | Nocturna: MAESTROS y CARTERA de las dos empresas, la foto diaria de cartera y los registros del archivo. Toma también las solicitudes listas | Sí |
+| `run_robot.py --completa` | Nocturna: MAESTROS, CARTERA y VENTAS de las dos empresas, la foto diaria de cartera y los registros del archivo. Toma también las solicitudes listas | Sí |
 | `run_robot.py --archivo fotos` | Domingo: fotos de las tablas del archivo y el catálogo | No |
 | `run_robot.py --archivo registros` | Solo los registros del archivo (auditoría y tasas de cambio) | No |
 | `run_robot.py --catalogo` | Solo el catálogo de tablas y columnas | No |
-| `run_robot.py --diagnostico` | Extrae MAESTROS y CARTERA con sus conteos; no envía nada | No |
-| `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app y las corre; sin solicitudes no sube la VPN | Sí |
+| `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA y VENTAS con sus conteos; no envía nada | No |
+| `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA o VENTAS) y las corre; sin solicitudes no sube la VPN | Sí |
 
 Opciones de `run_robot.py`:
 
@@ -89,6 +91,15 @@ Opciones de `run_robot.py`:
 Si el robot está ocupado (otra ejecución tiene el candado), `--completa` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
 
 Códigos de salida: `0` todo bien, `1` algún fallo, `2` configuración incompleta, `130` cancelado con Ctrl+C.
+
+## Ventas
+
+Cada corrida de VENTAS (la nocturna o una solicitud) trae el mes en curso más los últimos 7 días del mes anterior, por `fecha_contabilizacion` (`DocDate`), y la app reemplaza solo esa ventana; lo anterior no se toca (contrato §10).
+
+- El primer día de la ventana (`ventana_desde`) lo calcula HANA con la misma expresión de la consulta, en la misma conexión, antes y después de extraer. Nunca se usa el reloj del PC.
+- Si cambió entre las dos lecturas (la extracción cruzó la medianoche), se repite la extracción una vez; si vuelve a cambiar, esa corrida falla.
+- Si alguna fila trae una `fecha_contabilizacion` anterior a `ventana_desde`, la corrida falla antes de enviar nada.
+- Si la extracción falla antes de que HANA dé la ventana (por ejemplo, no conectó la VPN), la corrida no se puede abrir para marcarla fallida: el fallo va al correo y sus solicitudes vencen solas en la app.
 
 ## Tareas programadas
 
@@ -121,6 +132,7 @@ Todo queda en `BASES_SAP_CSV_DIR` (UTF-8 con BOM, separador `;`):
 |---|---|---|
 | `MAESTROS\<empresa>\<parte>\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
 | `CARTERA\<empresa>\cartera\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
+| `VENTAS\<empresa>\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
 | `CARTERA\<empresa>\historico\aaaa-mm-dd.csv` | Foto diaria de cartera, con fecha de corte de ayer y los días de mora contados a esa fecha | Siempre |
 | `<categoría>\<empresa>\<tabla>\aaaa-mm-dd.csv` | Foto del archivo (domingo) | 52 semanas |
 | `<categoría>\<empresa>\<tabla>\aaaa-mm.csv` | Registros del archivo, por mes | Siempre |

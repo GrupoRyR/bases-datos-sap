@@ -4,6 +4,7 @@ Estructura (plan §5):
     MAESTROS\\<SGX|SDC>\\<parte>\\aaaa-mm-dd_hhmm.csv     una por corrida, 90 días
     CARTERA\\<SGX|SDC>\\cartera\\aaaa-mm-dd_hhmm.csv      una por corrida, 90 días
     CARTERA\\<SGX|SDC>\\historico\\aaaa-mm-dd.csv         foto diaria, no se borra
+    VENTAS\\<SGX|SDC>\\aaaa-mm-dd_hhmm.csv                una por corrida, 90 días
     <CARPETA>\\<SGX|SDC>\\<TABLA>\\aaaa-mm-dd.csv         foto del archivo, 52 semanas
     <CARPETA>\\<SGX|SDC>\\<TABLA>\\aaaa-mm.csv            registro del archivo, no se borra
     _CATALOGO\\<SGX|SDC>\\<consulta>\\aaaa-mm-dd.csv      foto del catálogo, 52 semanas
@@ -37,6 +38,8 @@ PATRON_CORRIDA = re.compile(r"^(\d{4}-\d{2}-\d{2})_\d{4}(?:-\d+)?\.csv$")
 PATRON_FOTO = re.compile(r"^(\d{4}-\d{2}-\d{2})\.csv$")
 PATRON_MES = re.compile(r"^(\d{4}-\d{2})\.csv$")
 DIAGNOSTICO = "_DIAGNOSTICO"
+# Conjuntos de una sola parte: su CSV va directo en <CONJUNTO>\<EMPRESA> (contrato §10.3).
+CONJUNTOS_SIN_CARPETA_DE_PARTE = ("VENTAS",)
 
 
 def texto_crudo(valor: Any) -> str:
@@ -160,8 +163,14 @@ class Carpeta:
         filas: Iterable[Sequence[Any]],
         momento: datetime,
     ) -> Path:
-        """`<raiz>/<CONJUNTO>/<EMPRESA>/<parte>/aaaa-mm-dd_hhmm.csv`, con la hora de Bogotá."""
-        return self._guardar_con_hora(self.raiz / conjunto / empresa / parte, columnas, filas, momento)
+        """`<raiz>/<CONJUNTO>/<EMPRESA>/<parte>/aaaa-mm-dd_hhmm.csv`, con la hora de Bogotá.
+
+        VENTAS no lleva la carpeta de la parte: `<raiz>/VENTAS/<EMPRESA>/aaaa-mm-dd_hhmm.csv`.
+        """
+        carpeta = self.raiz / conjunto / empresa
+        if conjunto not in CONJUNTOS_SIN_CARPETA_DE_PARTE:
+            carpeta = carpeta / parte
+        return self._guardar_con_hora(carpeta, columnas, filas, momento)
 
     def guardar_resumen_diagnostico(
         self, columnas: Sequence[str], filas: Iterable[Sequence[Any]], momento: datetime
@@ -277,6 +286,7 @@ class Carpeta:
         carpetas = [
             *self.raiz.glob("MAESTROS/*/*"),
             *self.raiz.glob("CARTERA/*/cartera"),
+            *(c for conjunto in CONJUNTOS_SIN_CARPETA_DE_PARTE for c in self.raiz.glob(f"{conjunto}/*")),
         ]
         borrados: list[Path] = []
         for carpeta in sorted(c for c in carpetas if c.is_dir()):

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import replace
 from datetime import date, datetime
 
 import pytest
 
+import consultas
 import esquema
 import extraccion
 from fake_hana import VpnFalsa, datos_empresa, fila, revisar_fases
@@ -37,14 +39,14 @@ def test_completa_de_las_dos_empresas(escenario):
     e = escenario
     resultados = _extraer(e, trabajos_completos(["SGX", "SDC"], HOY, []))
 
-    assert [r.error for r in resultados] == [None] * 4
+    assert [r.error for r in resultados] == [None] * 6
     assert e.vpn.conexiones == 1  # una sola sesión de VPN
     assert [ev for ev in e.linea if ev[:2] == ("hana", "conectar")] == [
         ("hana", "conectar", "SGX"), ("hana", "conectar", "SDC"),
     ]
     revisar_fases(e.linea)
 
-    sgx_maestros, sgx_cartera = resultados[0], resultados[1]
+    sgx_maestros, sgx_cartera, sgx_ventas = resultados[0], resultados[1], resultados[2]
     for parte in esquema.PARTES_POR_CONJUNTO["MAESTROS"]:
         # Precios: solo la lista 1 (2 de las 3 filas de prueba).
         esperadas = 2 if parte == "precios" else len(e.hana.datos["SGX"][parte])
@@ -53,9 +55,13 @@ def test_completa_de_las_dos_empresas(escenario):
         assert sgx_maestros.conteo_sap[parte] == esperadas
     assert sgx_cartera.conteo_sap == {"cartera": 3}
     assert sgx_cartera.columnas["cartera"][0] == "codigo_sn"
+    assert sgx_ventas.conteo_sap == {"ventas": 2}
+    assert sgx_ventas.columnas["ventas"] == esquema.PARTES["ventas"].nombres
+    assert sgx_ventas.ventana_desde == "2026-09-24"
+    assert sgx_maestros.ventana_desde is None and sgx_cartera.ventana_desde is None
     # Solo consultas sin filtro y conteos, y cada conteo justo después de su parte.
     tipos = [(x.tipo, x.parte) for x in e.hana.de("SGX")]
-    assert {t for t, _ in tipos} == {"todo", "contar"}
+    assert {t for t, _ in tipos} == {"todo", "contar", "ventana"}
     assert tipos[:4] == [("todo", "clientes"), ("contar", "clientes"),
                          ("todo", "proveedores"), ("contar", "proveedores")]
     assert sgx_maestros.extraida_en == "2026-10-26T02:00:05-05:00"
@@ -138,7 +144,7 @@ def test_falla_la_vpn(escenario):
     vpn = VpnFalsa(e.linea, fallar=True)
     e.hana.vpn = vpn
     resultados = _extraer(e, trabajos_completos(["SGX", "SDC"], HOY, []), robot_vpn=vpn)
-    assert [r.etapa for r in resultados] == ["VPN"] * 4
+    assert [r.etapa for r in resultados] == ["VPN"] * 6
     assert all("VPN" in r.error for r in resultados)
     assert e.hana.ejecutadas == []
     assert e.linea[-1] == ("vpn", "abajo")
@@ -149,8 +155,8 @@ def test_falla_la_conexion_de_una_empresa(escenario):
     e.hana.empresas_que_fallan.add("SGX")
     resultados = _extraer(e, trabajos_completos(["SGX", "SDC"], HOY, []))
     assert [(r.trabajo.nombre, r.etapa) for r in resultados] == [
-        ("MAESTROS SGX", "HANA"), ("CARTERA SGX", "HANA"),
-        ("MAESTROS SDC", None), ("CARTERA SDC", None),
+        ("MAESTROS SGX", "HANA"), ("CARTERA SGX", "HANA"), ("VENTAS SGX", "HANA"),
+        ("MAESTROS SDC", None), ("CARTERA SDC", None), ("VENTAS SDC", None),
     ]
     assert "SGX" in resultados[0].error
     revisar_fases(e.linea)
@@ -210,7 +216,7 @@ def test_valor_invalido_falla_sin_mostrar_el_valor(escenario):
 def test_precios_trae_solo_la_lista_configurada_de_la_empresa(escenario):
     e = escenario
     e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=2)
-    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (0, 2)])
+    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (0, 3)])
 
     assert [r.error for r in resultados] == [None, None]
     sgx, sdc = resultados
@@ -225,7 +231,7 @@ def test_precios_trae_solo_la_lista_configurada_de_la_empresa(escenario):
 
 def test_cartera_pide_las_cuentas_de_cada_empresa_con_la_misma_consulta(escenario):
     e = escenario
-    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (1, 3)])
+    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (1, 4)])
 
     assert [r.error for r in resultados] == [None, None]
     [sgx] = e.hana.de("SGX", "todo", "cartera")
@@ -240,10 +246,11 @@ def test_empresa_sin_lista_de_precios_falla_su_trabajo_con_un_mensaje_claro(esce
     e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=None)
     resultados = _extraer(e, trabajos_completos(["SDC"], HOY, []))
 
-    maestros, cartera = resultados
+    maestros, cartera, ventas = resultados
     assert maestros.etapa == "CONFIGURACION"
     assert "HANA_SDC_LISTA_PRECIOS" in maestros.error
     assert cartera.error is None  # la cartera de la empresa no depende de los precios
+    assert ventas.error is None  # las ventas tampoco
     assert not e.hana.de("SDC", parte="precios")
 
 
@@ -259,7 +266,7 @@ def test_sin_vpn_no_toca_la_vpn(escenario):
     e = escenario
     e.hana.vpn = None
     resultados = _extraer(e, trabajos_completos(["SGX"], HOY, []), sin_vpn=True)
-    assert [r.error for r in resultados] == [None, None]
+    assert [r.error for r in resultados] == [None, None, None]
     assert e.vpn.conexiones == 0
     assert not [ev for ev in e.linea if ev[0] == "vpn"]
 
@@ -280,7 +287,7 @@ def test_gancho_extra_por_empresa_no_afecta_los_trabajos(escenario):
 
     resultados = _extraer(e, trabajos_completos(["SGX", "SDC"], HOY, []), extra=extra)
     assert llamadas == [("SGX", "SGX"), ("SDC", "SDC")]
-    assert [r.error for r in resultados] == [None] * 4
+    assert [r.error for r in resultados] == [None] * 6
 
 
 def test_trabajo_sin_socios_no_trae_hijas(escenario):
@@ -299,3 +306,96 @@ def test_hija_todo_vacia_en_completa_falla(escenario, parte):
     [r] = _extraer(e, [trabajos_completos(["SGX"], HOY, [])[0]])
     assert r.etapa == "VALIDACION"
     assert parte in r.error
+
+
+# --- VENTAS: la ventana se pide a HANA (contrato §10.1) ----------------------------------
+
+
+def _ventas(empresa: str = "SGX", tipo: str = "completa") -> Trabajo:
+    return Trabajo(empresa, "VENTAS", tipo, {"ventas": "todo"})
+
+
+def test_ventas_pide_la_ventana_a_hana_antes_y_despues_en_la_misma_conexion(escenario):
+    e = escenario
+    [r] = _extraer(e, [_ventas()])
+    assert r.error is None
+    pasos = e.hana.de("SGX")
+    assert [(x.tipo, x.parte) for x in pasos] == [
+        ("ventana", "ventana"), ("todo", "ventas"), ("contar", "ventas"), ("ventana", "ventana"),
+    ]
+    assert [x.sql for x in pasos if x.tipo == "ventana"] == [consultas.SQL_VENTANA] * 2
+    assert {x.conexion for x in pasos} == {e.hana.conexiones} == {1}
+    assert r.ventana_desde == "2026-09-24"
+    assert r.conteo_sap == {"ventas": 2}
+    assert len(r.filas["ventas"]) == 2
+    revisar_fases(e.linea)
+
+
+def test_ventana_desde_es_la_de_hana_y_no_la_del_reloj_del_pc(escenario):
+    e = escenario
+    e.hana.ventana = date(2026, 9, 20)  # el reloj de la prueba dice 2026-10-26: su ventana es el 24/09
+    [r] = _extraer(e, [_ventas()])
+    assert r.error is None
+    assert r.ventana_desde == "2026-09-20"
+
+
+def test_ventana_que_cambia_repite_la_extraccion_una_vez(escenario, caplog):
+    e = escenario
+    e.hana.ventanas["SGX"] = [date(2026, 9, 23)]  # la primera vez cruzó la medianoche
+    with caplog.at_level(logging.WARNING, logger="bases_sap.extraccion"):
+        [r] = _extraer(e, [_ventas()])
+    assert r.error is None
+    assert r.ventana_desde == "2026-09-24"
+    assert [x.tipo for x in e.hana.de("SGX")] == [
+        "ventana", "todo", "contar", "ventana", "ventana", "todo", "contar", "ventana",
+    ]
+    assert r.conteo_sap == {"ventas": 2} and len(r.filas["ventas"]) == 2
+    assert "ventana" in caplog.text
+
+
+def test_ventana_que_cambia_dos_veces_falla_el_trabajo(escenario):
+    e = escenario
+    e.hana.ventanas["SGX"] = [date(2026, 9, 22), date(2026, 9, 23), date(2026, 9, 23)]
+    [r] = _extraer(e, [_ventas()])
+    assert r.etapa == "VALIDACION"
+    assert "ventana" in r.error and "2026-09-23" in r.error
+    assert r.filas == {} and r.conteo_sap is None
+    assert len(e.hana.de("SGX", "todo", "ventas")) == 2  # se repitió una sola vez
+
+
+def test_fila_anterior_a_la_ventana_falla_el_trabajo(escenario):
+    e = escenario
+    e.hana.datos["SGX"]["ventas"].append(fila("ventas", 3, fecha_contabilizacion=date(2026, 9, 23)))
+    [r] = _extraer(e, [_ventas(tipo="solicitud")])
+    assert r.etapa == "VALIDACION"
+    assert "1 filas" in r.error and "fecha_contabilizacion" in r.error and "2026-09-24" in r.error
+    assert r.ventana_desde == "2026-09-24"  # para abrir y fallar la corrida
+
+
+def test_ventas_de_solicitud_no_cuenta_y_falla_si_llega_vacia(escenario):
+    e = escenario
+    [r] = _extraer(e, [_ventas(tipo="solicitud")])
+    assert r.error is None and r.conteo_sap is None
+    e.hana.datos["SDC"]["ventas"] = []
+    [r] = _extraer(e, [_ventas("SDC", "solicitud")])
+    assert r.etapa == "VALIDACION" and "0 filas" in r.error
+
+
+def test_ventas_de_derivados_corre_con_el_id_del_pedido_de_la_app_en_null(escenario):
+    e = escenario
+    resultados = _extraer(e, [_ventas("SGX"), _ventas("SDC")])
+    assert [r.error for r in resultados] == [None, None]
+    for empresa, con_campo in (("SGX", True), ("SDC", False)):
+        for x in e.hana.de(empresa, parte="ventas"):
+            codigo = re.sub(r"--[^\n]*", "", x.sql)
+            assert ('"U_SGX_IdPedidoApp"' in codigo) is con_campo
+            # Las notas crédito ya lo traen en NULL; en Derivados también las facturas.
+            assert codigo.count('CAST(NULL AS NVARCHAR(254)) AS "IdPedidoApp"') == (1 if con_campo else 2)
+
+
+def test_ventana_que_no_es_una_fecha_falla_el_trabajo(escenario):
+    e = escenario
+    e.hana.ventana = "no es fecha"
+    [r] = _extraer(e, [_ventas()])
+    assert r.etapa == "VALIDACION"
+    assert "ventana" in r.error

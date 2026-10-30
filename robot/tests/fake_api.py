@@ -32,10 +32,12 @@ PARTES = {
         "condiciones_pago", "municipios",
     ),
     "CARTERA": ("cartera",),
+    "VENTAS": ("ventas",),
 }
 # Contrato §7.1: partes que trae una corrida según la parte pedida.
 PARTES_POR_SOLICITUD = {
     ("CARTERA", None): {"cartera"},
+    ("VENTAS", None): {"ventas"},
     ("MAESTROS", None): set(PARTES["MAESTROS"]),
     ("MAESTROS", "clientes"): {"clientes", "direcciones", "contactos"},
     ("MAESTROS", "proveedores"): {"proveedores", "direcciones", "contactos"},
@@ -60,6 +62,7 @@ _RE_FIRMA = re.compile(r"^sha256=[0-9a-f]{64}$")
 _RE_LOTES = re.compile(r"^/corridas/(\d+)/lotes$")
 _RE_CERRAR = re.compile(r"^/corridas/(\d+)/cerrar$")
 _RE_FALLAR = re.compile(r"^/corridas/(\d+)/fallar$")
+_RE_FECHA = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 @dataclass
@@ -96,6 +99,7 @@ class Corrida:
     lotes: dict[int, Lote] = field(default_factory=dict)
     conteo_sap: dict[str, int] | None = None
     error: str | None = None
+    ventana_desde: str | None = None  # solo VENTAS (contrato §10.1)
 
     def filas(self, parte: str) -> list[dict[str, Any]]:
         """Filas recibidas de una parte, como dicts columna -> valor, en orden de lote."""
@@ -348,6 +352,14 @@ class ApiFalsa:
             raise _rechazo("fecha_corte va solo, y siempre, en CARTERA.", "fecha_corte")
         if not datos.get("extraida_en"):
             raise _rechazo("extraida_en es obligatorio.", "extraida_en")
+        # Contrato §4.1: ventana_desde va solo, y siempre, en VENTAS. El robot ni siquiera
+        # manda la llave en los demás conjuntos.
+        ventana_desde = datos.get("ventana_desde")
+        if conjunto == "VENTAS":
+            if not isinstance(ventana_desde, str) or not _RE_FECHA.fullmatch(ventana_desde):
+                raise _rechazo("VENTAS lleva ventana_desde AAAA-MM-DD.", "ventana_desde")
+        elif "ventana_desde" in datos:
+            raise _rechazo("Solo VENTAS lleva ventana_desde.", "ventana_desde")
 
         for corrida in self.corridas.values():
             if (corrida.conjunto, corrida.empresa, corrida.estado) == (conjunto, empresa, "abierta"):
@@ -357,7 +369,7 @@ class ApiFalsa:
         self.siguiente_run_id += 1
         self.corridas[run_id] = Corrida(
             run_id, conjunto, empresa, tipo, dict(partes), list(solicitudes),
-            fecha_corte, datos["extraida_en"],
+            fecha_corte, datos["extraida_en"], ventana_desde=ventana_desde,
         )
         return 201, {"run_id": run_id, "estado": "abierta", "abierta_hasta": _hora_iso(self.reloj() + 1800)}
 
@@ -383,6 +395,12 @@ class ApiFalsa:
         for i, fila in enumerate(rows):
             if not isinstance(fila, list) or len(fila) != len(columns):
                 raise _rechazo("La fila no tiene un valor por columna.", f"rows.{i}")
+        # Contrato §10.1: una fila anterior a ventana_desde hace rechazar el lote.
+        if corrida.ventana_desde is not None and "fecha_contabilizacion" in columns:
+            posicion = columns.index("fecha_contabilizacion")
+            for i, fila in enumerate(rows):
+                if not isinstance(fila[posicion], str) or fila[posicion] < corrida.ventana_desde:
+                    raise _rechazo("Fila anterior a ventana_desde.", f"rows.{i}.fecha_contabilizacion")
         corrida.lotes[batch] = Lote(batch, parte, list(columns), rows, sha)
         return 201, {"batch": batch, "rows": len(rows)}
 

@@ -10,6 +10,11 @@ los envoltorios de consultas.py:
 - `X."codigo_socio" IN (?, ...)`      -> filas de esos socios;
 - `X."lista_codigo" = N`              -> filas de la lista de precios N.
 
+La consulta de la ventana de VENTAS (consultas.SQL_VENTANA) devuelve, por empresa, los
+días de `HanaFalsa.ventanas[empresa]` en orden y, cuando se acaban, `HanaFalsa.ventana`
+(2026-09-24: el primer día de la ventana el 26 de octubre). Cada ejecución anota el
+número de la conexión en la que corrió (`Ejecucion.conexion`).
+
 Las consultas del archivo, del catálogo y del diagnóstico (robot/queries/archivo,
 catalogo y diagnostico) también se reconocen por su texto; sus filas salen de
 `HanaFalsa.archivo[empresa][clave]` (clave = ruta sin .sql, ej:
@@ -63,6 +68,7 @@ class Ejecucion:
     parte: str  # parte, clave de archivo/catálogo/diagnóstico o tabla @HBT_*
     params: tuple
     sql: str = field(default="", compare=False, repr=False)
+    conexion: int = field(default=0, compare=False)
 
 
 OTRAS_CARPETAS = ("archivo", "catalogo", "diagnostico")
@@ -256,10 +262,11 @@ class VpnFalsa:
 
 
 class _Cursor:
-    def __init__(self, hana: "HanaFalsa", empresa: str, esquema_db: str) -> None:
+    def __init__(self, hana: "HanaFalsa", empresa: str, esquema_db: str, conexion: int = 0) -> None:
         self.hana = hana
         self.empresa = empresa
         self.esquema = esquema_db
+        self.conexion = conexion
         self.description: list[tuple] | None = None
         self._filas: list[tuple] = []
 
@@ -267,6 +274,9 @@ class _Cursor:
         h = self.hana
         if h.vpn is not None and not h.vpn.arriba:
             raise AssertionError("Consulta a HANA con la VPN abajo.")
+        if sql.strip() == consultas.SQL_VENTANA:
+            self._ventana(sql)
+            return
         parte = h.identificar(sql, self.esquema, self.empresa)
         params = tuple(params or ())
         if parte not in esquema.PARTES:
@@ -280,7 +290,7 @@ class _Cursor:
             tipo = "socios"
         else:
             tipo = "todo"
-        h.ejecutadas.append(Ejecucion(self.empresa, tipo, parte, params, sql))
+        h.ejecutadas.append(Ejecucion(self.empresa, tipo, parte, params, sql, self.conexion))
         h.linea.append(("hana", "consulta", self.empresa, parte, tipo))
         if (self.empresa, parte) in h.partes_que_fallan:
             raise RuntimeError(h.texto_de_falla)
@@ -303,6 +313,15 @@ class _Cursor:
         alias = [c.hana for c in esquema.PARTES[parte].columnas if c.nombre not in quitar]
         self.description = [(a,) for a in alias]
         self._filas = [tuple(f.get(a) for a in alias) for f in filas]
+
+    def _ventana(self, sql: str) -> None:
+        h = self.hana
+        h.ejecutadas.append(Ejecucion(self.empresa, "ventana", "ventana", (), sql, self.conexion))
+        h.linea.append(("hana", "consulta", self.empresa, "ventana", "ventana"))
+        pendientes = h.ventanas.get(self.empresa) or []
+        dia = pendientes.pop(0) if pendientes else h.ventana
+        self.description = [("ADD_DAYS(CURRENT_DATE,-6-DAYOFMONTH(CURRENT_DATE))",)]
+        self._filas = [(dia,)]
 
     def _otra(self, sql: str, clave: str, params: tuple) -> None:
         """Consultas del archivo, del catálogo, del diagnóstico y de tablas @HBT_*."""
@@ -334,13 +353,14 @@ class _Cursor:
 
 
 class ConexionFalsa:
-    def __init__(self, hana: "HanaFalsa", empresa: str, esquema_db: str) -> None:
+    def __init__(self, hana: "HanaFalsa", empresa: str, esquema_db: str, numero: int = 0) -> None:
         self.hana = hana
         self.empresa = empresa
         self.esquema = esquema_db
+        self.numero = numero
 
     def cursor(self) -> _Cursor:
-        return _Cursor(self.hana, self.empresa, self.esquema)
+        return _Cursor(self.hana, self.empresa, self.esquema, self.numero)
 
 
 @dataclass
@@ -356,6 +376,9 @@ class HanaFalsa:
     archivo: dict[str, dict[str, list[dict]]] = field(default_factory=dict)  # empresa -> clave -> filas
     _textos: dict[tuple[str, str], dict[str, str]] = field(default_factory=dict)
     _otras: dict[str, str] = field(default_factory=dict)
+    ventanas: dict[str, list[date]] = field(default_factory=dict)  # empresa -> días, en orden
+    ventana: date = date(2026, 9, 24)  # ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(...)) el 26/10
+    conexiones: int = 0  # conexiones abiertas: la última es la de número `conexiones`
 
     @property
     def otras(self) -> dict[str, str]:
@@ -375,7 +398,8 @@ class HanaFalsa:
         if empresa.codigo in self.empresas_que_fallan:
             raise HanaError(f"No se pudo conectar a HANA ({empresa.codigo}) tras 3 intentos: simulado")
         try:
-            yield ConexionFalsa(self, empresa.codigo, empresa.esquema)
+            self.conexiones += 1
+            yield ConexionFalsa(self, empresa.codigo, empresa.esquema, self.conexiones)
         finally:
             self.linea.append(("hana", "cerrar", empresa.codigo))
 

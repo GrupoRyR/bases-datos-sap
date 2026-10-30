@@ -25,7 +25,7 @@ def _leer_csv(ruta: Path) -> list[list[str]]:
     return [linea.split(";") for linea in ruta.read_text(encoding="utf-8-sig").splitlines()]
 
 
-def test_completa_cierra_las_cuatro_corridas(escenario):
+def test_completa_cierra_las_seis_corridas(escenario):
     e = escenario
     resultados = _resultados(e, trabajos_completos(["SGX", "SDC"], HOY, []))
     assert _enviar(e, resultados) == []
@@ -34,7 +34,9 @@ def test_completa_cierra_las_cuatro_corridas(escenario):
     corridas = list(e.servidor.corridas.values())
     assert [(c.conjunto, c.empresa, c.tipo, c.estado) for c in corridas] == [
         ("MAESTROS", "SGX", "completa", "cerrada"), ("CARTERA", "SGX", "completa", "cerrada"),
+        ("VENTAS", "SGX", "completa", "cerrada"),
         ("MAESTROS", "SDC", "completa", "cerrada"), ("CARTERA", "SDC", "completa", "cerrada"),
+        ("VENTAS", "SDC", "completa", "cerrada"),
     ]
     maestros = corridas[0]
     assert list(maestros.partes) == list(esquema.PARTES_POR_CONJUNTO["MAESTROS"])
@@ -53,6 +55,13 @@ def test_completa_cierra_las_cuatro_corridas(escenario):
     assert sorted(maestros.lotes) == list(range(1, len(maestros.partes) + 1))
     assert [maestros.lotes[n].parte for n in sorted(maestros.lotes)] == list(maestros.partes)
     assert sorted(cartera.lotes) == [1]
+    ventas = corridas[2]
+    assert (ventas.partes, ventas.fecha_corte, ventas.ventana_desde) == ({"ventas": "todo"}, None, "2026-09-24")
+    assert ventas.conteo_sap == {"ventas": 2} == ventas.total_filas()
+    # ventana_desde va solo en VENTAS: los demás conjuntos ni siquiera mandan la llave.
+    iniciar = [p.datos for p in e.servidor.peticiones_a("iniciar")]
+    assert [d["ventana_desde"] for d in iniciar if "ventana_desde" in d] == ["2026-09-24", "2026-09-24"]
+    assert [d["conjunto"] for d in iniciar if "ventana_desde" in d] == ["VENTAS", "VENTAS"]
 
 
 def test_completa_escribe_los_csv_y_la_foto_de_cartera(escenario):
@@ -84,6 +93,57 @@ def test_completa_escribe_los_csv_y_la_foto_de_cartera(escenario):
         assert [v for i, v in enumerate(fila_foto) if i != i_dias] == [
             v for i, v in enumerate(fila_actual) if i != i_dias
         ]
+
+
+def test_ventas_escribe_un_csv_por_corrida_sin_carpeta_de_parte(escenario):
+    e = escenario
+    _enviar(e, _resultados(e, [trabajos_completos(["SDC"], HOY, [])[2]]))
+    raiz = e.csv_dir / "VENTAS" / "SDC"
+    assert sorted(p.name for p in raiz.iterdir()) == ["2026-10-26_0200.csv"]
+    filas = _leer_csv(raiz / "2026-10-26_0200.csv")
+    assert filas[0] == esquema.PARTES["ventas"].nombres
+    assert len(filas) == 3
+    primera = dict(zip(filas[0], filas[1]))
+    assert (primera["cantidad"], primera["total"], primera["trm"]) == ("1.500000", "1000.50", "1.500000")
+    assert primera["fecha_contabilizacion"] == "2026-10-01"
+
+
+def test_solicitud_de_ventas_manda_la_ventana_sin_conteo(escenario):
+    e = escenario
+    e.servidor.encolar_solicitud({"id": 8, "empresa": "SGX", "conjunto": "VENTAS", "parte": None, "desde": {}})
+    tomadas = e.cliente.tomar_solicitudes(20)
+    assert _enviar(e, _resultados(e, trabajos_de_solicitudes(tomadas, HOY))) == []
+    [corrida] = e.servidor.corridas.values()
+    assert (corrida.conjunto, corrida.tipo, corrida.ventana_desde, corrida.conteo_sap) == (
+        "VENTAS", "solicitud", "2026-09-24", None)
+    assert corrida.fecha_corte is None
+    assert e.servidor.estado_solicitudes[8] == "terminada"
+
+
+def test_ventas_que_fallo_antes_de_tener_la_ventana_no_abre_la_corrida(escenario):
+    e = escenario
+    e.servidor.encolar_solicitud({"id": 9, "empresa": "SGX", "conjunto": "VENTAS", "parte": None, "desde": {}})
+    [trabajo] = trabajos_de_solicitudes(e.cliente.tomar_solicitudes(20), HOY)
+    resultado = Resultado(trabajo)
+    resultado.fallar("VPN", "No se pudo conectar la VPN tras 3 intentos.")
+    assert _enviar(e, [resultado]) == [("VPN", "VENTAS SGX: No se pudo conectar la VPN tras 3 intentos.")]
+    # Sin ventana de HANA no hay ventana_desde que mandar: la API la vence.
+    assert e.servidor.peticiones_a("iniciar") == []
+    assert e.servidor.estado_solicitudes[9] == "tomada"
+
+
+def test_ventas_que_fallo_con_la_ventana_leida_abre_y_falla_la_corrida(escenario):
+    e = escenario
+    e.servidor.encolar_solicitud({"id": 10, "empresa": "SDC", "conjunto": "VENTAS", "parte": None, "desde": {}})
+    [trabajo] = trabajos_de_solicitudes(e.cliente.tomar_solicitudes(20), HOY)
+    e.hana.partes_que_fallan.add(("SDC", "ventas"))
+    [resultado] = _resultados(e, [trabajo])
+    assert resultado.etapa == "HANA" and resultado.ventana_desde == "2026-09-24"
+    [(etapa, _)] = _enviar(e, [resultado])
+    assert etapa == "HANA"
+    [corrida] = e.servidor.corridas.values()
+    assert (corrida.conjunto, corrida.estado, corrida.ventana_desde) == ("VENTAS", "fallida", "2026-09-24")
+    assert e.servidor.estado_solicitudes[10] == "fallida"
 
 
 def test_solicitud_no_escribe_foto_ni_conteo(escenario):
