@@ -68,6 +68,7 @@ jobs:
       DB_DATABASE: bases_sap_test
       DB_MAESTROS_DATABASE: maestros_sap_test
       DB_CARTERA_DATABASE: cartera_sap_test
+      DB_VENTAS_DATABASE: ventas_sap_test
       DB_USERNAME: root
       DB_PASSWORD: root
     steps:
@@ -85,7 +86,8 @@ jobs:
           mysql -h 127.0.0.1 -uroot -proot -e
           "CREATE DATABASE IF NOT EXISTS bases_sap_test;
           CREATE DATABASE IF NOT EXISTS maestros_sap_test;
-          CREATE DATABASE IF NOT EXISTS cartera_sap_test;"
+          CREATE DATABASE IF NOT EXISTS cartera_sap_test;
+          CREATE DATABASE IF NOT EXISTS ventas_sap_test;"
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress

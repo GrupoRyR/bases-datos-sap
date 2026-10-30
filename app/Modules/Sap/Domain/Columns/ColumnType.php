@@ -16,6 +16,9 @@ enum ColumnType: string
     /** An amount as decimal text with a dot and up to 2 decimals: "1234567.89". */
     case Decimal = 'decimal';
 
+    /** A quantity or rate (only VENTAS) as decimal text with a dot and up to 6 decimals: "2.500000". */
+    case Quantity = 'quantity';
+
     /** JSON true or false. */
     case Boolean = 'boolean';
 

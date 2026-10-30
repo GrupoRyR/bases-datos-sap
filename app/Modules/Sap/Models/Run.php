@@ -23,6 +23,7 @@ use Illuminate\Support\LazyCollection;
  * @property array<string, string> $partes
  * @property list<int> $solicitudes
  * @property Carbon|null $fecha_corte
+ * @property Carbon|null $ventana_desde
  * @property Carbon $extraida_en
  * @property RunState $estado
  * @property string|null $abierta_lock
@@ -60,6 +61,7 @@ final class Run extends Model
             'conteo_sap' => 'array',
             'conteo' => 'array',
             'fecha_corte' => 'date',
+            'ventana_desde' => 'date',
             'extraida_en' => 'datetime',
             'abierta_hasta' => 'datetime',
             'aplicada_en' => 'datetime',

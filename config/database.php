@@ -70,9 +70,10 @@ return [
     | Database Connections
     |--------------------------------------------------------------------------
     |
-    | Three databases (docs/plan-bases-sap.md, section 3): "app" holds the
-    | app's own data, "maestros" and "cartera" each hold one SAP dataset.
-    | They live on the same server and are built by $connection above.
+    | Four databases (docs/plan-bases-sap.md, section 3): "app" holds the
+    | app's own data; "maestros", "cartera" and "ventas" each hold one SAP
+    | dataset. They live on the same server and are built by $connection
+    | above.
     |
     */
 
@@ -92,6 +93,12 @@ return [
             env('DB_CARTERA_DATABASE', 'cartera_sap'),
             env('DB_CARTERA_USERNAME') ?: null,
             env('DB_CARTERA_PASSWORD') ?: null,
+        ),
+
+        'ventas' => $connection(
+            env('DB_VENTAS_DATABASE', 'ventas_sap'),
+            env('DB_VENTAS_USERNAME') ?: null,
+            env('DB_VENTAS_PASSWORD') ?: null,
         ),
 
     ],

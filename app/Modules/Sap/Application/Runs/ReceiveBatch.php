@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Stores one batch of an open run until the run closes
- * (docs/contrato-robot.md, section 4.2). Nothing reaches MAESTROS or
- * CARTERA here, so a refused batch leaves every table as it was.
+ * (docs/contrato-robot.md, section 4.2). Nothing reaches the dataset
+ * tables here, so a refused batch leaves every table as it was.
  */
 final class ReceiveBatch
 {
@@ -60,6 +60,12 @@ final class ReceiveBatch
             $this->refuse($run, $checked['errors']);
         }
 
+        $outside = $this->outsideWindow($run, $part, $checked['rows']);
+
+        if ($outside !== []) {
+            $this->refuse($run, $outside);
+        }
+
         try {
             return $this->store($run, $number, $part, $checked['rows'], $sha256);
         } catch (RobotRequestRejected $rejected) {
@@ -70,6 +76,34 @@ final class ReceiveBatch
 
             throw $rejected;
         }
+    }
+
+    /**
+     * A VENTAS line posted before the run's window would reach a month the
+     * close never touches (contract section 10.1): the batch is refused.
+     *
+     * @param  list<list<mixed>>  $rows
+     * @return array<string, string>
+     */
+    private function outsideWindow(Run $run, Part $part, array $rows): array
+    {
+        // StartRun always stores the window of a VENTAS run.
+        $from = $run->ventana_desde?->toDateString();
+
+        if ($part !== Part::Sales || $from === null) {
+            return [];
+        }
+
+        $position = array_search('fecha_contabilizacion', array_keys($part->columns()), true);
+        $errors = [];
+
+        foreach ($rows as $index => $row) {
+            if ($row[$position] < $from) {
+                $errors["rows.{$index}.fecha_contabilizacion"] = "Es anterior a ventana_desde ({$from}).";
+            }
+        }
+
+        return array_slice($errors, 0, BatchRows::MAX_ERRORS, true);
     }
 
     /**

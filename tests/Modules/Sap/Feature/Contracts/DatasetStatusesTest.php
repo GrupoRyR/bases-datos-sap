@@ -31,11 +31,12 @@ it('lists every company and dataset in enum order', function () {
     $statuses = app(DatasetStatuses::class)->all();
 
     expect(array_map(fn (DatasetStatusData $status): string => $status->company->value.' '.$status->dataset->value, $statuses))
-        ->toBe(['SGX MAESTROS', 'SGX CARTERA', 'SDC MAESTROS', 'SDC CARTERA'])
+        ->toBe(['SGX MAESTROS', 'SGX CARTERA', 'SGX VENTAS', 'SDC MAESTROS', 'SDC CARTERA', 'SDC VENTAS'])
         ->and($statuses[0]->lastAppliedAt)->toBeNull()
         ->and($statuses[0]->lastRun)->toBeNull()
         ->and($statuses[0]->rows)->toHaveCount(count(Part::forDataset(Dataset::Maestros)))
-        ->and($statuses[1]->rows)->toBe(['cartera' => 0]);
+        ->and($statuses[1]->rows)->toBe(['cartera' => 0])
+        ->and($statuses[2]->rows)->toBe(['ventas' => 0]);
 });
 
 it('tells the last applied time and the latest run in any state', function () {
@@ -59,7 +60,7 @@ it('tells the last applied time and the latest run in any state', function () {
         ->and($sgx->lastRun?->finishedAt?->format('H:i'))->toBe('09:40');
 });
 
-it('counts the active master rows and every receivable line of each company', function () {
+it('counts the active master rows and every receivable and sales line of each company', function () {
     $synced = '2026-10-27 02:30:00';
     DB::connection('maestros')->table('clientes')->insert([
         ['empresa' => 'SGX', 'codigo' => 'C1', 'nombre' => 'Uno', 'activo' => true, 'sincronizado_en' => $synced],
@@ -71,12 +72,21 @@ it('counts the active master rows and every receivable line of each company', fu
         'empresa' => 'SGX', 'codigo_sn' => 'C1', 'documento' => $document, 'fecha_vencimiento' => '2026-10-01',
         'dias' => 26, 'saldo' => '1000.00', 'sincronizado_en' => $synced,
     ], ['F1', 'F2', 'F3']));
+    // Sales lines have no flag: every line counts, inside the window or not.
+    DB::connection('ventas')->table('ventas')->insert(array_map(fn (array $line): array => [
+        'empresa' => 'SDC', 'tipo_objeto' => 13, 'doc_entry' => 500, 'linea' => $line[0], 'numero_documento' => 9001,
+        'clase_documento' => 'factura', 'estado_documento' => 'abierto', 'fecha_documento' => $line[1],
+        'fecha_contabilizacion' => $line[1], 'slp_code' => 1, 'codigo_cliente' => 'C1', 'cantidad' => '1.000000',
+        'total' => '100.00', 'sincronizado_en' => $synced,
+    ], [[0, '2026-08-14'], [1, '2026-10-20']]));
 
     $statuses = app(DatasetStatuses::class)->all();
 
     expect($statuses[0]->rows['clientes'])->toBe(2)
         ->and($statuses[0]->rows['articulos'])->toBe(0)
         ->and($statuses[1]->rows)->toBe(['cartera' => 3])
-        ->and($statuses[2]->rows['clientes'])->toBe(1)
-        ->and($statuses[3]->rows)->toBe(['cartera' => 0]);
+        ->and($statuses[2]->rows)->toBe(['ventas' => 0])
+        ->and($statuses[3]->rows['clientes'])->toBe(1)
+        ->and($statuses[4]->rows)->toBe(['cartera' => 0])
+        ->and($statuses[5]->rows)->toBe(['ventas' => 2]);
 });

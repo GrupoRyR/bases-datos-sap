@@ -131,7 +131,7 @@ it('tells when each part of a dataset was last applied', function () {
 });
 
 it('validates the status query', function () {
-    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=VENTAS', bearer($this->key))
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=COMPRAS', bearer($this->key))
         ->assertUnprocessable()
         ->assertJsonValidationErrorFor('conjunto');
 });

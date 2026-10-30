@@ -7,8 +7,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /*
-| The tables and v_* views of MAESTROS (maestros_sap) and CARTERA
-| (cartera_sap): docs/plan-bases-sap.md, section 4, and docs/arquitectura.md, section 4.
+| The tables and v_* views of MAESTROS (maestros_sap), CARTERA (cartera_sap)
+| and VENTAS (ventas_sap): docs/plan-bases-sap.md, section 4, and
+| docs/arquitectura.md, section 4.
 */
 
 /** @return list<string> */
@@ -57,6 +58,7 @@ function inventedRow(Part $part, string $company, int|string $key = 'K1'): array
         $row[$name] = match ($column->type->value) {
             'integer' => is_int($key) ? $key : 1,
             'decimal' => '10.50',
+            'quantity' => '2.500000',
             'boolean' => true,
             'date' => '2026-10-25',
             'datetime' => '2026-10-25 09:15:02',
@@ -146,4 +148,35 @@ it('stores the daily photo of CARTERA by cut-off date and exposes it in a view',
     expect($columns)->toBe(collect([...expectedViewColumns(Part::Receivables), 'fecha_corte'])->sort()->values()->all())
         ->and($row['fecha_corte'])->toStartWith('2026-10-25')
         ->and($row['empresa'])->toBe('SDC');
+});
+
+it('keeps one VENTAS line per company, document type, document and line', function () {
+    $sales = DB::connection('ventas')->table('ventas');
+    $line = fn (string $company, int $type, int $entry, int $line): array => [
+        ...inventedRow(Part::Sales, $company), 'tipo_objeto' => $type, 'doc_entry' => $entry, 'linea' => $line,
+    ];
+
+    // An invoice and a credit note may share DocEntry; the other company too.
+    $sales->insert([$line('SGX', 13, 500, 0), $line('SGX', 13, 500, 1), $line('SGX', 14, 500, 0), $line('SDC', 13, 500, 0)]);
+
+    expect($sales->count())->toBe(4)
+        ->and(fn () => $sales->insert($line('SGX', 13, 500, 1)))->toThrow(QueryException::class);
+});
+
+it('stores VENTAS quantities and rates with 6 decimals and reads them through v_ventas', function () {
+    DB::connection('ventas')->table('ventas')->insert([
+        ...inventedRow(Part::Sales, 'SGX'),
+        'cantidad' => '-2.123456',
+        'trm' => '4123.456789',
+        'total' => '-2380.55',
+        'corrida_id' => 42,
+    ]);
+
+    $row = (array) DB::connection('ventas')->table('v_ventas')->sole();
+
+    expect((float) $row['cantidad'])->toBe(-2.123456)
+        ->and((string) $row['trm'])->toStartWith('4123.456789')
+        ->and((float) $row['total'])->toBe(-2380.55)
+        ->and($row['empresa'])->toBe('SGX')
+        ->and($row)->not->toHaveKeys(['id', 'corrida_id']);
 });
