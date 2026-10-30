@@ -30,7 +30,7 @@ Close the four items the panel left open, with no logic changes outside them.
 
 ### P1
 
-- `StartRunTest` froze the real second, so within 15 minutes of the 12:00 and 12:30 blocked slots a request was queued instead of taken, and two Derivados tests got 422. It now travels to 2026-10-23 10:45 Bogota.
+- `StartRunTest` froze the real second, so within 15 minutes of the 12:00 and 12:30 blocked slots a request was queued instead of taken, and two Derivados tests got 422. It now travels to 2026-10-23 10:45 Bogota and pins the blocked slots to their defaults, so a local `BASES_SAP_FRANJAS_BLOQUEADAS` cannot move them (code-review finding).
 - RED: the same file at 12:05 fails those 2 tests (24 of 26 pass). GREEN: at 10:45, 26 of 26 pass.
 
 ### P2

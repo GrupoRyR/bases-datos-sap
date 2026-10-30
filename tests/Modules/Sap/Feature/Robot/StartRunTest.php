@@ -18,6 +18,7 @@ use Tests\TestCase;
 beforeEach(function () {
     RobotClient::configure();
     // A fixed time outside the blocked slots, so a request is taken at once.
+    config(['sap.requests.blocked_slots' => '00:00,05:00,06:00,12:00,12:30']);
     $this->travelTo(now()->setDate(2026, 10, 23)->setTime(10, 45));
 });
 
