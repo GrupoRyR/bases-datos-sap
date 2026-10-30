@@ -8,25 +8,19 @@
 
     <form method="GET" action="{{ route('panel.solicitudes') }}" aria-label="{{ __('panel::solicitudes.filtros.titulo') }}"
         class="mb-6 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-        <div class="flex flex-col gap-1">
-            <label for="filtro-empresa" class="text-sm font-semibold text-text">{{ __('panel::solicitudes.filtros.empresa') }}</label>
-            <select id="filtro-empresa" name="empresa" class="min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-text">
-                <option value="">{{ __('panel::solicitudes.filtros.todas') }}</option>
-                @foreach ($filters['companies'] as $option)
-                    <option value="{{ $option['value'] }}" @selected($filters['empresa'] === $option['value'])>{{ $option['label'] }}</option>
-                @endforeach
-            </select>
-        </div>
+        <x-ui.field as="select" :label="__('panel::solicitudes.filtros.empresa')" name="empresa" id="filtro-empresa">
+            <option value="">{{ __('panel::solicitudes.filtros.todas') }}</option>
+            @foreach ($filters['companies'] as $option)
+                <option value="{{ $option['value'] }}" @selected($filters['empresa'] === $option['value'])>{{ $option['label'] }}</option>
+            @endforeach
+        </x-ui.field>
 
-        <div class="flex flex-col gap-1">
-            <label for="filtro-conjunto" class="text-sm font-semibold text-text">{{ __('panel::solicitudes.filtros.conjunto') }}</label>
-            <select id="filtro-conjunto" name="conjunto" class="min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-text">
-                <option value="">{{ __('panel::solicitudes.filtros.todos') }}</option>
-                @foreach ($filters['datasets'] as $option)
-                    <option value="{{ $option['value'] }}" @selected($filters['conjunto'] === $option['value'])>{{ $option['label'] }}</option>
-                @endforeach
-            </select>
-        </div>
+        <x-ui.field as="select" :label="__('panel::solicitudes.filtros.conjunto')" name="conjunto" id="filtro-conjunto">
+            <option value="">{{ __('panel::solicitudes.filtros.todos') }}</option>
+            @foreach ($filters['datasets'] as $option)
+                <option value="{{ $option['value'] }}" @selected($filters['conjunto'] === $option['value'])>{{ $option['label'] }}</option>
+            @endforeach
+        </x-ui.field>
 
         <x-ui.button type="submit" variant="secondary">{{ __('panel::solicitudes.filtros.boton') }}</x-ui.button>
     </form>

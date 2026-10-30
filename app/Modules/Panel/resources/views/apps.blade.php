@@ -10,17 +10,8 @@
         <form method="POST" action="{{ route('panel.apps.store') }}" class="flex flex-col gap-4 sm:flex-row sm:items-end">
             @csrf
 
-            <div class="flex min-w-0 flex-1 flex-col gap-1">
-                <label for="nombre" class="text-sm font-semibold text-text">{{ __('panel::apps.nueva.nombre') }}</label>
-
-                @error('nombre')
-                    <p id="error-nombre" class="text-sm font-semibold text-danger">{{ $message }}</p>
-                @enderror
-
-                <input id="nombre" type="text" name="nombre" value="{{ old('nombre') }}" required maxlength="100" autocomplete="off"
-                    class="min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-text"
-                    @error('nombre') aria-invalid="true" aria-describedby="error-nombre" @enderror>
-            </div>
+            <x-ui.field :label="__('panel::apps.nueva.nombre')" name="nombre" wrapper="min-w-0 flex-1"
+                value="{{ old('nombre') }}" required maxlength="100" autocomplete="off" />
 
             <x-ui.button type="submit" class="w-full sm:w-auto">{{ __('panel::apps.nueva.boton') }}</x-ui.button>
         </form>

@@ -237,7 +237,7 @@ El panel es de TI y lleva solo la marca de Segurex (§3 del plan). Las reglas sa
 | `<x-layouts.app title="…">` | Páginas con sesión: encabezado con logo, tema, usuario y «Cerrar sesión» (si existe `core.logout`); menú de `NavRegistry` por grupos, barra inferior en el celular para los ítems `mobile`; mensajes de `session('status')` y `session('error')`. |
 | `<x-layouts.guest title="…">` | Ingreso y «sin acceso»: tarjeta centrada bajo la franja gris del logo. |
 
-**Componentes** en `resources/views/components/ui/`: `button` (`primary`, `secondary`, `danger`; con `href` es un enlace), `card`, `page-header`, `alert` (`info`, `success`, `warning`, `danger`), `empty`, `badge` y `logo`. Ejemplo:
+**Componentes** en `resources/views/components/ui/`: `button` (`primary`, `secondary`, `danger`; con `href` es un enlace), `card`, `page-header`, `alert` (`info`, `success`, `warning`, `danger`), `empty`, `badge`, `logo` y `field` (etiqueta, campo o `select` y error de validación). Ejemplo:
 
 ```blade
 <x-layouts.app title="Solicitudes">

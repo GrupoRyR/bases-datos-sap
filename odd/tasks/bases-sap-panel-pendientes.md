@@ -16,7 +16,7 @@ Close the four items the panel left open, with no logic changes outside them.
 |---|---|---|---|
 | P1 | `StartRunTest` runs on a fixed clock, outside the blocked slots | inline (one test file) | done |
 | P2 | `IssuedAppKey` carries `keyPrefix`; the panel's new-key page uses it | inline (contract, two producers, one controller) | done |
-| P3 | Base form field component (label, control, error) used by the panel forms | delegated writer (2+ non-trivial files) | pending |
+| P3 | Base form field component (label, control, error) used by the panel forms | delegated writer (2+ non-trivial files) | done |
 | P4 | `bases-sap-cimientos.md` names the v2 brand PNG logo, not the SVG | inline (one doc) | done |
 
 ## Acceptance
@@ -42,6 +42,12 @@ Close the four items the panel left open, with no logic changes outside them.
 
 - `bases-sap-cimientos.md` T5 now names `public/img/logo-segurex-blanco.png` (brand manual v2, PR #39) and drops the open item to replace the SVG. Documentation only: structural readback (`git ls-files public/img` lists only that PNG).
 
+### P3
+
+- `<x-ui.field>` (`resources/views/components/ui/field.blade.php`): label, validation error and a text input or a `select` (`as="select"`, options in the slot); `readonly` gets `bg-subtle`; `aria-invalid` and `aria-describedby` on error. An `errors` prop takes a page's own error bag (`Support\LookupPage` passes it as view data, which anonymous components do not see).
+- Used in `apps` (`nombre`), `consulta` (`termino`), `solicitudes` (two selects) and `apps-llave` (read-only key). The radio fieldsets keep their own markup. `docs/arquitectura.md` §10 lists `field`.
+- RED: 8 new `ComponentsTest` cases failed (component missing). GREEN: `ComponentsTest` 25 of 25, `tests/Modules/Panel` 115 of 115, `composer test` 660 tests, 658 passed, 2 skipped. Boolean attributes now render as `required="required"`; same meaning.
+
 ## Next step
 
-P3.
+Code review, push and PR; the user approves the merge.

@@ -1,5 +1,8 @@
 <?php
 
+use Illuminate\Support\MessageBag;
+use Illuminate\Support\ViewErrorBag;
+
 it('renders a primary button with the brand button color and white text', function () {
     $this->blade('<x-ui.button type="submit">Guardar</x-ui.button>')
         ->assertSee('<button type="submit"', false)
@@ -84,3 +87,111 @@ it('renders badges by tone', function (string $tone, string $class) {
     'success' => ['success', 'bg-success-bg'],
     'danger' => ['danger', 'bg-danger-bg'],
 ]);
+
+it('renders a field with its label pointing at the text input', function () {
+    $html = (string) $this->blade('<x-ui.field label="Nombre" name="nombre" id="campo-nombre" value="Robot" required />');
+
+    expect($html)
+        ->toContain('<label for="campo-nombre"')
+        ->toContain('Nombre</label>')
+        ->toMatch('/<input id="campo-nombre" type="text" name="nombre"/')
+        ->toContain('value="Robot"')
+        ->toContain('required');
+});
+
+it('falls back to the name for the field id', function () {
+    $this->blade('<x-ui.field label="Término" name="termino" />')
+        ->assertSee('<label for="termino"', false)
+        ->assertSee('id="termino"', false)
+        ->assertSee('name="termino"', false);
+});
+
+it('renders no error state when the field is valid', function () {
+    $html = (string) $this->blade('<x-ui.field label="Nombre" name="nombre" />');
+
+    expect($html)
+        ->not->toContain('aria-invalid')
+        ->not->toContain('aria-describedby')
+        ->not->toContain('error-nombre')
+        ->not->toContain('text-danger');
+});
+
+it('links the validation error to the control', function () {
+    $html = (string) $this->withViewErrors(['nombre' => 'Escribe un nombre.'])
+        ->blade('<x-ui.field label="Nombre" name="nombre" />');
+
+    expect($html)
+        ->toContain('<p id="error-nombre" class="text-sm font-semibold text-danger">Escribe un nombre.</p>')
+        ->toContain('aria-invalid="true"')
+        ->toContain('aria-describedby="error-nombre"');
+
+    expect(strpos($html, '<label'))->toBeLessThan(strpos($html, 'id="error-nombre"'))
+        ->and(strpos($html, 'id="error-nombre"'))->toBeLessThan(strpos($html, '<input'));
+});
+
+it('reads an error bag the page passes in instead of the shared one', function () {
+    $errors = (new ViewErrorBag)->put('default', new MessageBag(['termino' => 'Escribe al menos 2 caracteres.']));
+
+    $html = (string) $this->blade('<x-ui.field label="Término" name="termino" :errors="$errors" />', ['errors' => $errors]);
+
+    expect($html)
+        ->toContain('<p id="error-termino" class="text-sm font-semibold text-danger">Escribe al menos 2 caracteres.</p>')
+        ->toContain('aria-invalid="true"')
+        ->toContain('aria-describedby="error-termino"')
+        ->not->toContain('errors=');
+});
+
+it('keeps a passed aria-describedby next to the error', function () {
+    $this->withViewErrors(['nombre' => 'Escribe un nombre.'])
+        ->blade('<x-ui.field label="Nombre" name="nombre" aria-describedby="ayuda" />')
+        ->assertSee('aria-describedby="ayuda error-nombre"', false);
+
+    $this->blade('<x-ui.field label="Llave" id="llave" aria-describedby="llave-aviso" readonly />')
+        ->assertSee('aria-describedby="llave-aviso"', false)
+        ->assertDontSee('aria-invalid', false);
+});
+
+it('paints read-only fields on the subtle color', function () {
+    $readonly = (string) $this->blade('<x-ui.field label="Llave" id="llave" value="abc" readonly class="font-mono" />');
+    $editable = (string) $this->blade('<x-ui.field label="Nombre" name="nombre" />');
+
+    expect($readonly)
+        ->toContain('bg-subtle')
+        ->not->toContain('bg-surface')
+        ->toContain('font-mono')
+        ->not->toContain('name=')
+        ->toMatch('/<input id="llave"[^>]*value="abc"[^>]*readonly/');
+
+    expect($editable)
+        ->toContain('bg-surface')
+        ->not->toContain('bg-subtle');
+});
+
+it('renders a select with the slotted options', function () {
+    $html = (string) $this->blade(<<<'BLADE'
+        <x-ui.field as="select" label="Empresa" name="empresa" id="filtro-empresa">
+            <option value="">Todas</option>
+            <option value="SDC" selected>Derivados</option>
+        </x-ui.field>
+        BLADE);
+
+    expect($html)
+        ->toContain('<label for="filtro-empresa"')
+        ->toMatch('/<select id="filtro-empresa" name="empresa"/')
+        ->toContain('<option value="SDC" selected>Derivados</option>')
+        ->toContain('bg-surface')
+        ->not->toContain('<input')
+        ->not->toContain('type=');
+});
+
+it('passes extra attributes, the input type and the wrapper classes through', function () {
+    $html = (string) $this->blade('<x-ui.field label="Correo" name="correo" type="email" wrapper="min-w-0 flex-1" data-test="ok" autocomplete="off" />');
+
+    expect($html)
+        ->toContain('type="email"')
+        ->not->toContain('type="text"')
+        ->toContain('data-test="ok"')
+        ->toContain('autocomplete="off"')
+        ->toMatch('/<div class="[^"]*\bmin-w-0\b[^"]*\bflex-1\b[^"]*"/')
+        ->toMatch('/<div class="[^"]*\bflex-col gap-1\b/');
+});
