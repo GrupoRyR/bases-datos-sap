@@ -41,7 +41,7 @@ it('declares the Segurex brand variables', function () {
 
     expect($css)->toContain(":root[data-brand='segurex']");
 
-    foreach (['accent', 'button', 'ink', 'text', 'dark'] as $name) {
+    foreach (['accent', 'button', 'ink', 'text', 'tint', 'head', 'head-fg', 'head-muted'] as $name) {
         expect($css)->toContain("--brand-{$name}:")
             ->toContain("--color-brand-{$name}: var(--brand-{$name});");
     }
@@ -54,7 +54,7 @@ it('scans the module views for utility classes', function () {
 });
 
 it('keeps fonts and brand colors out of the views', function () {
-    $forbidden = ['fonts.bunny.net', 'fonts.googleapis.com', '#f26522', '#c6531c', '#943e15', '#58595b'];
+    $forbidden = ['fonts.bunny.net', 'fonts.googleapis.com', '#f26522', '#c6531c', '#943e15', '#58595b', '#2b2c2f', '#fcede4', '#cacbcd'];
 
     foreach (designBladeFiles() as $file) {
         $contents = strtolower(File::get($file));
