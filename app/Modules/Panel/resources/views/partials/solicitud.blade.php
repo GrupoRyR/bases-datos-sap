@@ -1,7 +1,8 @@
 {{--
     One update request of the history: its number and result, what it asked
-    for, when and how long it took, and everyone who asked for it (the
-    first created it; the rest joined later). The state is always in words.
+    for, when and how long its run took (a dash until it has started and
+    finished), and everyone who asked for it (the first created it; the
+    rest joined later). The state is always in words.
 --}}
 <x-ui.card>
     <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -16,9 +17,7 @@
     <ul class="mt-2 text-sm text-muted">
         <li><time datetime="{{ $request['requestedAt']['iso'] }}">{{ __('panel::solicitudes.solicitud.pedida', ['momento' => $request['requestedAt']['text']]) }}</time></li>
 
-        @if ($request['duration'] !== null)
-            <li>{{ __('panel::solicitudes.solicitud.tardo', ['duracion' => $request['duration']]) }}</li>
-        @endif
+        <li>{{ __('panel::solicitudes.solicitud.tardo', ['duracion' => $request['duration'] ?? __('panel::solicitudes.solicitud.sin_duracion')]) }}</li>
 
         @if ($request['queued'])
             <li>{{ $request['runsAt'] !== null ? __('panel::solicitudes.solicitud.corre', ['cuando' => $request['runsAt']]) : __('panel::solicitudes.solicitud.espera') }}</li>

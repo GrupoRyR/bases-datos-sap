@@ -24,7 +24,7 @@ Todas piden sesión y un rol (`core.consultar`); las que cambian datos y la Cons
 | Consulta | `GET`, `POST /panel/consulta` | `panel.consulta`, `panel.consulta.buscar` | `core.administrar` |
 | Apps conectadas | `GET`, `POST /panel/apps`; `POST /panel/apps/{app}/llave` y `/revocar` | `panel.apps`, `panel.apps.store`, `panel.apps.rotate`, `panel.apps.revoke` | `core.administrar` |
 
-**Solicitudes** muestra el historial de `RequestHistory`, 25 por página y la más reciente primero, con los filtros opcionales `empresa` y `conjunto` (un valor desconocido se ignora).
+**Solicitudes** muestra el historial de `RequestHistory`, 25 por página y la más reciente primero, con los filtros opcionales `empresa` y `conjunto` (un valor desconocido se ignora). «Tardó» mide desde que el robot tomó la solicitud (`tomada_en`) hasta que terminó, así que la espera en cola no cuenta; si la corrida no ha empezado o no ha terminado, muestra «—».
 
 **Actualizar datos** pide con `UpdateRequests`, con las mismas reglas que las apps: se une a una igual o queda en cola, nunca se rechaza. Lo audita como `panel.request.placed` solo con los códigos de lo pedido. Sus opciones salen de `Support\UpdateOptions`: cada conjunto completo más las partes de `RequestScope::forDataset`, con valor `MAESTROS` o `MAESTROS:clientes`.
 

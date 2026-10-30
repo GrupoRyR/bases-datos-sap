@@ -66,17 +66,39 @@ it('does not say the creator joined their own request', function () {
     ($this->consulta)()->get('/panel/solicitudes')->assertDontSee('Se unió');
 });
 
-it('says how long a finished request took', function (?string $finishedAt, ?string $text) {
-    ($this->history)([FakeRequestHistory::item(finishedAt: $finishedAt)]);
+it('says how long a request took from the moment the robot took it', function (?string $finishedAt, string $text) {
+    ($this->history)([FakeRequestHistory::item(takenAt: '2026-10-29 10:40', finishedAt: $finishedAt)]);
 
-    $response = ($this->consulta)()->get('/panel/solicitudes');
-
-    $text === null ? $response->assertDontSee('Tardó') : $response->assertSee($text);
+    ($this->consulta)()->get('/panel/solicitudes')->assertSee($text);
 })->with([
     'minutes' => ['2026-10-29 10:44:59', 'Tardó 4 min'],
     'under a minute' => ['2026-10-29 10:40:45', 'Tardó menos de un minuto'],
     'hours' => ['2026-10-29 11:45', 'Tardó 1 h 5 min'],
-    'not finished' => [null, null],
+]);
+
+it('does not count the time a request waited in the queue', function () {
+    ($this->history)([FakeRequestHistory::item(
+        state: RequestState::Done,
+        runFrom: '2026-10-29 10:35',
+        takenAt: '2026-10-29 10:40',
+        finishedAt: '2026-10-29 10:44',
+        requestedAt: '2026-10-29 10:00',
+    )]);
+
+    ($this->consulta)()->get('/panel/solicitudes')
+        ->assertSee('Tardó 4 min')
+        ->assertDontSee('Tardó 44 min');
+});
+
+it('shows a dash when the run never started or has not finished', function (RequestState $state, ?string $takenAt, ?string $finishedAt) {
+    ($this->history)([FakeRequestHistory::item(state: $state, takenAt: $takenAt, finishedAt: $finishedAt)]);
+
+    ($this->consulta)()->get('/panel/solicitudes')->assertSee('Tardó —');
+})->with([
+    'pending' => [RequestState::Pending, null, null],
+    'queued' => [RequestState::Queued, null, null],
+    'closed without being taken' => [RequestState::Failed, null, '2026-10-29 10:44'],
+    'still running' => [RequestState::Taken, '2026-10-29 10:40', null],
 ]);
 
 it('shows the result of each state in words', function (RequestState $state, string $label, string $tone) {

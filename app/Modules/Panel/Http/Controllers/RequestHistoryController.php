@@ -74,7 +74,8 @@ final class RequestHistoryController
             'dataset' => Labels::dataset($request->dataset->value),
             'scope' => $request->scope === null ? null : Labels::scope($request->scope->value),
             'requestedAt' => ['iso' => Formats::isoDateTime($request->requestedAt), 'text' => Formats::dateTime($request->requestedAt)],
-            'duration' => $request->finishedAt === null ? null : Formats::duration($request->requestedAt, $request->finishedAt),
+            // From the moment the robot took it, so the queue wait does not count.
+            'duration' => $request->takenAt === null || $request->finishedAt === null ? null : Formats::duration($request->takenAt, $request->finishedAt),
             'state' => Labels::requestState($state),
             'tone' => Labels::requestStateTone($state),
             // Only a queued request says when it runs: at runFrom, or after the
