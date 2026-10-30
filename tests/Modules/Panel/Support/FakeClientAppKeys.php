@@ -43,7 +43,7 @@ final class FakeClientAppKeys implements ClientAppKeys
         $key = $this->newKey($id);
         $this->apps[$id] = new ClientAppData($id, $name, substr($key, 0, 12), CarbonImmutable::now(), null, null);
 
-        return new IssuedAppKey($id, $name, $key);
+        return new IssuedAppKey($id, $name, $key, substr($key, 0, 12));
     }
 
     public function revoke(int $appId): void
@@ -72,7 +72,7 @@ final class FakeClientAppKeys implements ClientAppKeys
 
         $this->apps[$appId] = new ClientAppData($app->id, $app->name, substr($key, 0, 12), $app->createdAt, $app->lastUsedAt, null);
 
-        return new IssuedAppKey($app->id, $app->name, $key);
+        return new IssuedAppKey($app->id, $app->name, $key, substr($key, 0, 12));
     }
 
     /**

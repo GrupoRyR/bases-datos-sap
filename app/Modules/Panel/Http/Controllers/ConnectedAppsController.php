@@ -43,7 +43,7 @@ final class ConnectedAppsController
                 ->redirectTo(route('panel.apps'));
         }
 
-        return $this->keyPage($issued, $keys, $audit, 'panel.app.created');
+        return $this->keyPage($issued, $audit, 'panel.app.created');
     }
 
     /**
@@ -65,7 +65,7 @@ final class ConnectedAppsController
             abort(404);
         }
 
-        return $this->keyPage($issued, $keys, $audit, 'panel.app.key_rotated');
+        return $this->keyPage($issued, $audit, 'panel.app.key_rotated');
     }
 
     public function revoke(int $app, ClientAppKeys $keys, AuditLogger $audit): RedirectResponse
@@ -85,11 +85,11 @@ final class ConnectedAppsController
      * Audits the new key by its prefix and shows it this once. no-store keeps
      * the page out of the browser cache and history.
      */
-    private function keyPage(IssuedAppKey $issued, ClientAppKeys $keys, AuditLogger $audit, string $action): Response
+    private function keyPage(IssuedAppKey $issued, AuditLogger $audit, string $action): Response
     {
         $audit->record($action, 'app', $issued->id, [
             'nombre' => $issued->name,
-            'prefijo' => $this->find($keys, $issued->id)?->keyPrefix,
+            'prefijo' => $issued->keyPrefix,
         ]);
 
         return response()

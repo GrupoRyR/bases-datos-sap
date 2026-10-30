@@ -37,18 +37,8 @@
                 </fieldset>
             @endforeach
 
-            <div class="flex flex-col gap-1">
-                <label for="termino" class="text-sm font-semibold text-text">{{ __('panel::consulta.termino') }}</label>
-
-                @error('termino')
-                    <p id="error-termino" class="text-sm font-semibold text-danger">{{ $message }}</p>
-                @enderror
-
-                <input id="termino" type="text" name="termino" value="{{ $values['termino'] }}" required minlength="2" maxlength="100"
-                    autocomplete="off" spellcheck="false"
-                    class="min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-text"
-                    @error('termino') aria-invalid="true" aria-describedby="error-termino" @enderror>
-            </div>
+            <x-ui.field :label="__('panel::consulta.termino')" name="termino" :errors="$errors"
+                value="{{ $values['termino'] }}" required minlength="2" maxlength="100" autocomplete="off" spellcheck="false" />
 
             <div>
                 <x-ui.button type="submit" class="w-full sm:w-auto">{{ __('panel::consulta.boton') }}</x-ui.button>
