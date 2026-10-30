@@ -139,6 +139,8 @@ def _valor(columna: esquema.Columna, i: int) -> Any:
         return i
     if columna.tipo == esquema.MONTO:
         return Decimal(f"{1000 * i}.50")
+    if columna.tipo == esquema.CANTIDAD:
+        return Decimal(f"{i}.5")
     if columna.tipo == esquema.FECHA:
         return date(2026, 10, 1)
     if columna.tipo == esquema.HORA:
@@ -265,7 +267,7 @@ class _Cursor:
         h = self.hana
         if h.vpn is not None and not h.vpn.arriba:
             raise AssertionError("Consulta a HANA con la VPN abajo.")
-        parte = h.identificar(sql, self.esquema)
+        parte = h.identificar(sql, self.esquema, self.empresa)
         params = tuple(params or ())
         if parte not in esquema.PARTES:
             self._otra(sql, parte, params)
@@ -352,7 +354,7 @@ class HanaFalsa:
     texto_de_falla: str = "falla simulada de la consulta"  # texto del driver en una falla
     columnas_que_faltan: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     archivo: dict[str, dict[str, list[dict]]] = field(default_factory=dict)  # empresa -> clave -> filas
-    _textos: dict[str, dict[str, str]] = field(default_factory=dict)
+    _textos: dict[tuple[str, str], dict[str, str]] = field(default_factory=dict)
     _otras: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -377,13 +379,17 @@ class HanaFalsa:
         finally:
             self.linea.append(("hana", "cerrar", empresa.codigo))
 
-    def identificar(self, sql: str, esquema_db: str) -> str:
-        if esquema_db not in self._textos:
-            self._textos[esquema_db] = {
-                nombre: consultas.leer(parte.consulta, esquema_db)
-                for nombre, parte in esquema.PARTES.items()
-            }
-        textos = {**self.otras, **self._textos[esquema_db]}
+    def identificar(self, sql: str, esquema_db: str, empresa: str = "") -> str:
+        # Ventas cambia por empresa (consultas.sql_id_pedido_app): se busca su texto ya cambiado.
+        if (esquema_db, empresa) not in self._textos:
+            textos_empresa: dict[str, str] = {}
+            for nombre, parte in esquema.PARTES.items():
+                texto = consultas.leer(parte.consulta, esquema_db)
+                if parte.conjunto == "VENTAS" and empresa:
+                    texto = consultas.sql_id_pedido_app(texto, empresa)
+                textos_empresa[nombre] = texto
+            self._textos[(esquema_db, empresa)] = textos_empresa
+        textos = {**self.otras, **self._textos[(esquema_db, empresa)]}
         encontradas = [n for n, texto in textos.items() if texto in sql]
         if not encontradas:
             m = _RE_HBT.search(sql)

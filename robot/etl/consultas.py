@@ -9,6 +9,7 @@ ORDER BY dentro de una subconsulta, así que el orden del archivo se conserva.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -17,6 +18,21 @@ from config import BOGOTA, EmpresaHana
 from esquema import PRECIOS, Parte
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
+
+# VENTAS (contrato §10): el id del pedido de la app (OINV.U_SGX_IdPedidoApp) solo existe
+# en Segurex. La consulta del gestor lleva la expresión de Segurex con el marcador
+# `-- @id_pedido_app` al final de la línea; en las demás empresas el robot la cambia por
+# un NULL del mismo tipo. La expresión regular es la del gestor (etl/config.py, 9e2f877).
+MARCADOR_ID_PEDIDO_APP = "@id_pedido_app"
+EMPRESAS_CON_ID_PEDIDO_APP = ("SGX",)
+ID_PEDIDO_APP_NULO = "CAST(NULL AS NVARCHAR(254))"
+_RE_ID_PEDIDO_APP = re.compile(
+    r'CAST\([^\n]*?\)(?=[ \t]+AS[ \t]+"IdPedidoApp"[ \t]*--[ \t]*@id_pedido_app)'
+)
+
+# Primer día de la ventana de VENTAS (contrato §10.1): la misma expresión de la consulta,
+# calculada por HANA. Nunca con el reloj del PC.
+SQL_VENTANA = "SELECT ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE)) FROM DUMMY"
 
 
 def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
@@ -85,6 +101,24 @@ def sql_cuentas(sql: str, cuentas: tuple[str, ...]) -> str:
     return _envolver(sql, f'X."Cuenta visible" IN ({lista})')
 
 
+def sql_id_pedido_app(sql: str, empresa: str) -> str:
+    """La consulta de ventas para una empresa: tal cual en Segurex; en las demás, con
+    la expresión marcada `-- @id_pedido_app` cambiada por un NULL (contrato §10).
+
+    Si el marcador falta, se repite o la expresión no se reconoce, falla en vez de
+    correr: sin él, Derivados pediría una columna que no tiene.
+    """
+    marcadores = sql.count(MARCADOR_ID_PEDIDO_APP)
+    cambiada, expresiones = _RE_ID_PEDIDO_APP.subn(ID_PEDIDO_APP_NULO, sql)
+    if marcadores != 1 or expresiones != 1:
+        raise config.ConfigError(
+            f"La consulta de ventas debe tener exactamente una expresión "
+            f'CAST(...) AS "IdPedidoApp" marcada con \'-- {MARCADOR_ID_PEDIDO_APP}\' en la misma '
+            f"línea (marcadores: {marcadores}, expresiones: {expresiones}); no se corre."
+        )
+    return sql if empresa in EMPRESAS_CON_ID_PEDIDO_APP else cambiada
+
+
 def leer_parte(parte: Parte, empresa: EmpresaHana) -> str:
     """Consulta de una parte para una empresa, con el filtro propio de la empresa.
 
@@ -92,8 +126,12 @@ def leer_parte(parte: Parte, empresa: EmpresaHana) -> str:
     corre tal cual en el Query Manager: `precios` trae todas las listas y el robot se
     queda con la pública, por número (HANA_<EMPRESA>_LISTA_PRECIOS); `cartera` trae
     todas las cuentas y se queda con las de la empresa (HANA_<EMPRESA>_CUENTAS_CARTERA).
+    `ventas` es la consulta del gestor: en Derivados cambia la expresión marcada del id
+    del pedido de la app por un NULL (sql_id_pedido_app).
     """
     sql = leer(parte.consulta, empresa.esquema)
+    if parte.conjunto == "VENTAS":
+        return sql_id_pedido_app(sql, empresa.codigo)
     if parte.nombre == PRECIOS:
         if empresa.lista_precios is None:
             raise empresa.error_sin_precios()

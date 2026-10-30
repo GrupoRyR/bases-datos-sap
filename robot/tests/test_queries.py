@@ -1,6 +1,7 @@
 """Revisión estática de robot/queries: reglas del plan §5 y columnas del contrato."""
 from __future__ import annotations
 
+import hashlib
 import re
 import sqlite3
 from datetime import date
@@ -197,7 +198,38 @@ def test_las_dos_empresas_ven_cuentas_distintas_en_la_misma_consulta():
     assert set(sgx) & set(sdc) == {fila for fila in sgx if "13051005" in fila}
 
 
+# --- Ventas: la consulta del gestor, copiada tal cual (contrato §10) ---------------------
+
+VENTAS = QUERIES / "ventas" / "ventas.sql"
+# Id del blob de etl/queries/ventas.sql en el gestor de cartera, main 9e2f877:
+#   git -C GESTOR_CARTERA rev-parse 9e2f877:etl/queries/ventas.sql
+BLOB_VENTAS_GESTOR = "c768a24e9a66cda617be8be6381ce26478e3bcd0"
+
+
+def test_ventas_es_la_consulta_del_gestor_sin_cambios():
+    contenido = VENTAS.read_bytes()
+    blob = hashlib.sha1(b"blob %d\0" % len(contenido) + contenido).hexdigest()
+    assert blob == BLOB_VENTAS_GESTOR
+    assert sorted(p.name for p in (QUERIES / "ventas").iterdir()) == ["ventas.sql"]
+
+
+def test_ventas_trae_las_etiquetas_del_esquema_y_un_solo_marcador():
+    sql = _texto(VENTAS)
+    alias = _alias(sql)
+    for columna in PARTES["ventas"].columnas:
+        assert columna.hana in alias, columna.hana
+    assert sql.count("-- @id_pedido_app") == 1
+    assert 'CAST(T0."U_SGX_IdPedidoApp" AS NVARCHAR(254)) AS "IdPedidoApp" -- @id_pedido_app' in sql
+
+
+def test_ventas_filtra_la_ventana_con_la_expresion_que_usa_el_robot():
+    codigo = _sin_comentarios(_texto(VENTAS))
+    expresion = consultas.SQL_VENTANA.removeprefix("SELECT ").removesuffix(" FROM DUMMY")
+    assert codigo.count(f'T0."DocDate" >= {expresion}') == 2  # facturas y notas crédito
+
+
 @pytest.mark.parametrize("archivo", [
+    "ventas/ventas.sql",
     "maestros/articulos.sql",
     "maestros/precios.sql",
     "maestros/municipios.sql",
