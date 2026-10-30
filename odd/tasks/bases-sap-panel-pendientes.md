@@ -17,7 +17,7 @@ Close the four items the panel left open, with no logic changes outside them.
 | P1 | `StartRunTest` runs on a fixed clock, outside the blocked slots | inline (one test file) | done |
 | P2 | `IssuedAppKey` carries `keyPrefix`; the panel's new-key page uses it | inline (contract, two producers, one controller) | done |
 | P3 | Base form field component (label, control, error) used by the panel forms | delegated writer (2+ non-trivial files) | pending |
-| P4 | `bases-sap-cimientos.md` names the v2 brand PNG logo, not the SVG | inline (one doc) | pending |
+| P4 | `bases-sap-cimientos.md` names the v2 brand PNG logo, not the SVG | inline (one doc) | done |
 
 ## Acceptance
 
@@ -38,6 +38,10 @@ Close the four items the panel left open, with no logic changes outside them.
 - `IssuedAppKey` gains `keyPrefix` (the stored first 12 characters). `AppKeys` and the panel fake fill it; the panel's new-key page audits `$issued->keyPrefix` instead of listing every app to find it again.
 - RED: `ClientAppKeysTest` 2 of 4 failed (`Undefined property IssuedAppKey::$keyPrefix`). GREEN: `ClientAppKeysTest` and `ConnectedAppsTest`, 23 of 23. `composer lint` passed.
 
+### P4
+
+- `bases-sap-cimientos.md` T5 now names `public/img/logo-segurex-blanco.png` (brand manual v2, PR #39) and drops the open item to replace the SVG. Documentation only: structural readback (`git ls-files public/img` lists only that PNG).
+
 ## Next step
 
-P4, then P3.
+P3.

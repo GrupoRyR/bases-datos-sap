@@ -147,11 +147,11 @@ Lay the foundation of «Bases de datos SAP» (plan §9, session 1) so the «Dato
   - `composer test`: 83 tests, 82 passed, 1 skipped (MySQL-only check).
   - `npm run build`: OK; `public/build` is ignored and not staged.
   - Visual check (static render served locally, 360 px and 1280 px, light and dark): no horizontal scroll at 360 px, the toggle cycles sistema → claro → oscuro and the choice survives a reload.
-- The logo PNG from the brand skill is corrupt (zlib data check fails), so the header uses the gestor de cartera's dark-background SVG (`public/img/logo-segurex.svg`) until the user provides a valid official file.
+- Logo: the header uses the white PNG of the Segurex brand manual v2, `public/img/logo-segurex-blanco.png`, through `<x-ui.logo>` (PR #39, `5160455` and `e4afe16`). The dark-background SVG used while the first brand PNG was corrupt is gone.
 - Size: 822 changed lines against `main` (811 added, 11 removed): about 265 tests, 33 docs, 520 CSS, JS and Blade. Over the 400-line advisory; it can split as (a) tokens and components, (b) layouts and docs.
 
 ## Next step
 
 - Merge PR #9 (layouts, logo and Core pages) after the user's approval; then the foundation is done.
-- Open for the user: replace `public/img/logo-segurex.svg` with a valid official Segurex logo (the skill's PNG is corrupt); decide the nightly photo cut-off vs `dias` (contract §6); copy the `.env.example` lines of PR #6; run `git config core.hooksPath .githooks` once per clone.
+- Open for the user: decide the nightly photo cut-off vs `dias` (contract §6); copy the `.env.example` lines of PR #6; run `git config core.hooksPath .githooks` once per clone.
 - CI lesson: MySQL reorders JSON object keys, so audit-context assertions use `toEqual()`.
