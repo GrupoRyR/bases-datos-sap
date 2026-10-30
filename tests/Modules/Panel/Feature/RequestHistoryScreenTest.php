@@ -156,7 +156,7 @@ it('passes the filters and the page to the contract', function () {
 it('ignores unknown filters and pages', function () {
     $fake = ($this->history)();
 
-    ($this->consulta)()->get('/panel/solicitudes?empresa=XYZ&conjunto=VENTAS&page=abc')->assertOk();
+    ($this->consulta)()->get('/panel/solicitudes?empresa=XYZ&conjunto=COMPRAS&page=abc')->assertOk();
 
     expect($fake->calls)->toBe([['page' => 1, 'perPage' => 25, 'company' => null, 'dataset' => null]]);
 });

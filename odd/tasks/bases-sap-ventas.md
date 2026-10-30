@@ -31,7 +31,7 @@ Comisiones in the gestor de cartera needs sales lines. The user moved VENTAS int
 | ID | Task | Branch | Route | Status |
 |---|---|---|---|---|
 | V1 | Contract §10 VENTAS and this feature document | `docs/contrato-ventas` | inline (one doc file) | PR open |
-| V2 | App: `ventas` connection, table and `v_ventas`, batch rules, window apply, requests, nightly count | — | delegated writer | pending |
+| V2 | App: `ventas` connection, table and `v_ventas`, batch rules, window apply, requests, nightly count | `feat/sap-ventas` | delegated writer | done, not pushed |
 | V3 | Robot: query copy, HANA window, nightly run, requests, `--diagnostico`, CSV and retention | — | delegated writer | pending |
 
 ## Acceptance
@@ -46,6 +46,31 @@ Comisiones in the gestor de cartera needs sales lines. The user moved VENTAS int
 
 - Contract section written; documentation only, structural readback.
 
+### V2
+
+Route: delegated writer (writer trigger: 2+ non-trivial files). Branch `feat/sap-ventas`, stacked on `docs/contrato-ventas`. Test first: the VENTAS tests were written and seen failing before the code.
+
+| Commit | Message | Changed lines |
+|---|---|---|
+| `d224cec` | feat(sap): add the VENTAS dataset schema and batch types | +314 −24 (18 files) |
+| `e20e473` | feat(sap): require the VENTAS window on run start and in batches | +255 −6 (6 files) |
+| `c496006` | feat(sap): replace only the VENTAS window on close | +262 −24 (9 files) |
+
+About 885 changed lines in total: over the 400-line budget for one PR, so it needs chained PRs (for example the first commit, then the other two).
+
+- `ventas` connection (`ventas_sap`) in `config/database.php`, `tests/TestCase.php`, `phpunit.xml`, CI and `docs/arquitectura.md` §4.
+- `Dataset::Ventas`, `Part::Sales` (key `tipo_objeto`, `doc_entry`, `linea`), `ColumnType::Quantity` (up to 6 decimals, `decimal(19,6)`), the 34 columns of §10.
+- Migrations `2026_11_02_000008_create_ventas_tables` (table `ventas`, unique key, index `empresa` + `fecha_contabilizacion`, view `v_ventas`) and `2026_11_02_000009_add_ventana_desde_to_robot_runs_table`.
+- `StartRun`: `ventana_desde` required in VENTAS (date, today minus 40 days to tomorrow, today in Bogota), refused elsewhere; `fecha_corte` refused in VENTAS. `ReceiveBatch`: 422 `rows.N.fecha_contabilizacion` before the window. `ApplyVentas`: deletes the company's window and inserts the received lines in one transaction. `CountRun`: `activas_mysql` counts the window. Requests: VENTAS whole only. README updated.
+
+Checks (2026-10-29, Bogota time):
+
+- `composer format`: passed.
+- `composer lint`: passed (Pint and Larastan, 0 errors).
+- `php artisan test tests/Modules/Sap` (12:47): 305 tests, 304 passed, 1 skipped (the MySQL-only key case test), 0 failed.
+- `composer test` (12:47): 507 tests, 505 passed, 2 skipped, 0 failed.
+- Earlier runs at 12:18 and 12:30 had 2 failures in `StartRunTest` (Derivados MAESTROS requests). They failed the same way on the base commit: those tests do not freeze the clock, so within 15 minutes of the 12:00 and 12:30 blocked slots the request is queued instead of taken. After 12:45 all 26 `StartRunTest` cases pass. This is flaky and existed before V2; V2 did not cause it.
+
 ## Next step
 
-User reviews the contract PR. Then V2 on a branch stacked on `docs/contrato-ventas`.
+User reviews the contract PR and V2 (`feat/sap-ventas`, not pushed). Then V3 (robot).

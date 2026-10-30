@@ -10,8 +10,9 @@ use Illuminate\Support\Facades\DB;
 /**
  * Compares a full run once applied (docs/contrato-robot.md, section 4.3):
  * per part, the SAP count the robot sent, the rows received and the active
- * rows of the company in MySQL. A mismatch never fails the run; it is kept
- * in daily_counts and counts against the 14 stable days (plan, section 6).
+ * rows of the company in MySQL (in VENTAS, the rows of its window). A
+ * mismatch never fails the run; it is kept in daily_counts and counts
+ * against the 14 stable days (plan, section 6).
  */
 final class CountRun
 {
@@ -58,13 +59,16 @@ final class CountRun
     }
 
     /**
-     * Active rows of the company; CARTERA lines have no flag, so all count.
+     * Active rows of the company. CARTERA lines have no flag, so all count;
+     * VENTAS counts the lines of the run's window, which is what the SAP
+     * count covers (contract section 10.2).
      */
     private function activeRows(Run $run, Part $part): int
     {
         return DB::connection($part->dataset()->connection())->table($part->table())
             ->where('empresa', $run->empresa->value)
             ->when($part->dataset() === Dataset::Maestros, fn ($query) => $query->where('activo', true))
+            ->when($part->dataset() === Dataset::Ventas, fn ($query) => $query->where('fecha_contabilizacion', '>=', $run->ventana_desde?->toDateString()))
             ->count();
     }
 }

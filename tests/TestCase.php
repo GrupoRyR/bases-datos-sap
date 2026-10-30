@@ -13,13 +13,13 @@ abstract class TestCase extends BaseTestCase
     use LazilyRefreshDatabase;
 
     /**
-     * The three databases (docs/plan-bases-sap.md, section 3). Touching any
+     * The four databases (docs/plan-bases-sap.md, section 3). Touching any
      * of them migrates the test databases and opens the test transaction on
-     * all three.
+     * all four.
      *
      * @var list<string>
      */
-    protected array $connectionsToTransact = ['app', 'maestros', 'cartera'];
+    protected array $connectionsToTransact = ['app', 'maestros', 'cartera', 'ventas'];
 
     /**
      * migrate:fresh wipes only the default connection, so the dataset

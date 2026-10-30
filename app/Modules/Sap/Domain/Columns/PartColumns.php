@@ -6,7 +6,7 @@ use App\Modules\Sap\Contracts\Enums\Part;
 
 /**
  * The columns of each part, exactly as docs/contrato-robot.md lists them
- * (sections 5.2 and 6), with the SAP source in the comments. Changing this
+ * (sections 5.2, 6 and 10), with the SAP source in the comments. Changing this
  * list changes the contract: the user approves it first.
  */
 final class PartColumns
@@ -103,6 +103,7 @@ final class PartColumns
                 Column::boolean('activo', required: true),
             ],
             Part::Receivables => self::receivables(),
+            Part::Sales => self::sales(),
         };
 
         $byName = [];
@@ -196,6 +197,54 @@ final class PartColumns
             ...array_map(fn (string $name): Column => Column::decimal($name), $amounts),
             Column::decimal('saldo', required: true),
             Column::text('rango', 50),
+        ];
+    }
+
+    /**
+     * The columns of etl/esquema.py of the gestor de cartera (batch
+     * "ventas"), with the same names and order: one row per invoice or
+     * credit note line (contract section 10). Credit notes bring negative
+     * quantity, cost, total and VAT; unit prices and costs come unsigned.
+     *
+     * @return list<Column>
+     */
+    private static function sales(): array
+    {
+        return [
+            Column::integer('tipo_objeto', required: true),         // ObjType: 13 invoice, 14 credit note
+            Column::integer('doc_entry', required: true),           // DocEntry
+            Column::integer('numero_documento', required: true),    // DocNum
+            Column::integer('linea', required: true),               // LineNum
+            Column::text('clase_documento', 20, required: true),    // factura, nota_debito or nota_credito
+            Column::text('estado_documento', 20, required: true),   // anulado, anulacion, cerrado or abierto
+            Column::date('fecha_documento', required: true),        // TaxDate, reference only
+            Column::date('fecha_contabilizacion', required: true),  // DocDate: the month of the sale and the window
+            Column::integer('slp_code', required: true),            // SlpCode, -1 without one
+            Column::text('vendedor'),
+            Column::text('canal'),
+            Column::text('codigo_cliente', 50, required: true),     // CardCode
+            Column::text('cliente'),
+            Column::text('nit', 50),
+            Column::text('ciudad'),
+            Column::text('pedido'),
+            Column::text('id_pedido_app'),                          // OINV.U_SGX_IdPedidoApp, only SGX
+            Column::text('oc_cliente'),
+            Column::text('ciudad_envio'),
+            Column::text('direccion_envio'),
+            Column::text('marca'),
+            Column::text('familia'),
+            Column::text('codigo_articulo', 50),                    // ItemCode
+            Column::text('descripcion'),
+            Column::quantity('cantidad', required: true),
+            Column::decimal('costo_unitario'),
+            Column::decimal('costo_total'),
+            Column::decimal('precio_lista'),
+            Column::decimal('precio_unitario'),
+            Column::decimal('total', required: true),
+            Column::decimal('iva'),
+            Column::text('moneda', 10),
+            Column::quantity('trm'),
+            Column::text('comentarios'),
         ];
     }
 }

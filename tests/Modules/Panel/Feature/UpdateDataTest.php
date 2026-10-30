@@ -119,7 +119,7 @@ it('rejects what is not an option without asking Sap', function (array $input, s
 })->with([
     'scope of cartera' => [['empresa' => 'SGX', 'datos' => 'CARTERA:clientes'], 'datos'],
     'unknown scope' => [['empresa' => 'SGX', 'datos' => 'MAESTROS:pedidos'], 'datos'],
-    'unknown dataset' => [['empresa' => 'SGX', 'datos' => 'VENTAS'], 'datos'],
+    'unknown dataset' => [['empresa' => 'SGX', 'datos' => 'COMPRAS'], 'datos'],
     'missing data' => [['empresa' => 'SGX'], 'datos'],
     'unknown company' => [['empresa' => 'XYZ', 'datos' => 'CARTERA'], 'empresa'],
     'missing company' => [['datos' => 'CARTERA'], 'empresa'],

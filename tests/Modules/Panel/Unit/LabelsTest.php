@@ -31,7 +31,7 @@ it('labels every company, dataset and part in Spanish', function () {
 
 it('falls back to the raw value of an unknown company, dataset, part or run', function () {
     expect(Labels::company('XYZ'))->toBe('XYZ')
-        ->and(Labels::dataset('VENTAS'))->toBe('VENTAS')
+        ->and(Labels::dataset('COMPRAS'))->toBe('COMPRAS')
         ->and(Labels::part('pedidos'))->toBe('pedidos')
         ->and(Labels::runType('manual'))->toBe('manual')
         ->and(Labels::runState('pausada'))->toBe('pausada')

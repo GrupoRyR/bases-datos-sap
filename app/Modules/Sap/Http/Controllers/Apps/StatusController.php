@@ -26,7 +26,7 @@ final class StatusController
         if ($company === null || $dataset === null) {
             throw RobotRequestRejected::invalid('La consulta no cumple el contrato.', array_filter([
                 'empresa' => $company === null ? 'Empresa desconocida: solo SGX o SDC.' : null,
-                'conjunto' => $dataset === null ? 'Conjunto desconocido: solo MAESTROS o CARTERA.' : null,
+                'conjunto' => $dataset === null ? 'Conjunto desconocido: solo MAESTROS, CARTERA o VENTAS.' : null,
             ]));
         }
 
