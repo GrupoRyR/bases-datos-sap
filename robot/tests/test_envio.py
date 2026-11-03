@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -286,6 +287,22 @@ def test_un_lote_rechazado_falla_esa_corrida_y_sigue_con_las_demas(escenario):
     assert e.servidor.corridas[1].estado == "fallida"
     assert "CSGX001" not in e.servidor.corridas[1].error
     assert e.servidor.corridas[2].estado == "cerrada"
+
+
+def test_el_texto_de_un_rechazo_de_la_api_no_llega_al_log(escenario, caplog):
+    e = escenario
+    e.servidor.programar_fallas("lote", status=422, datos={
+        "message": "El valor CSGX-DISTINTIVO no sirve.",
+        "errors": {"rows.0.codigo": ["El valor CSGX-DISTINTIVO no sirve."]},
+    })
+    resultados = _resultados(e, trabajos_completos(["SGX"], HOY, []))
+    with caplog.at_level(logging.DEBUG, logger="bases_sap"):
+        fallos = _enviar(e, resultados)
+    assert [etapa for etapa, _ in fallos] == ["API"]
+    registro = caplog.text
+    assert "MAESTROS SGX: falló el envío" in registro
+    assert "La API rechazó la petición (422) en rows.0.codigo." in registro
+    assert "CSGX-DISTINTIVO" not in registro
 
 
 def test_si_falla_la_carpeta_igual_se_envia(escenario, monkeypatch):

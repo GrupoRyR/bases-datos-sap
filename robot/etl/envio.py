@@ -95,7 +95,7 @@ def _fallar(api: ApiCliente, run_id: int, mensaje: str) -> None:
         api.fallar_corrida(run_id, mensaje)
         log.info("Corrida %s marcada fallida.", run_id)
     except Exception as exc:
-        log.error("No se pudo marcar fallida la corrida %s: %s", run_id, exc)
+        log.error("No se pudo marcar fallida la corrida %s: %s", run_id, _mensaje(exc))
 
 
 def _guardar_csv(carpeta: Carpeta, r: Resultado, momento: datetime) -> None:
@@ -158,8 +158,9 @@ def _enviar_resultado(api: ApiCliente, r: Resultado) -> None:
             _enviar_lote(api, run_id, lote)
         respuesta = _cerrar(api, run_id, r, lotes)
     except Exception as exc:
+        # El mismo texto seguro que va a /fallar y al correo: el de la API no entra al log.
         mensaje = _mensaje(exc)
-        log.error("%s: falló el envío (corrida %s): %s", t.nombre, run_id, exc)
+        log.error("%s: falló el envío (corrida %s): %s", t.nombre, run_id, mensaje)
         if run_id is not None:
             _fallar(api, run_id, mensaje)
         etapa = exc.etapa if isinstance(exc, FalloEnvio) else "API"
@@ -176,7 +177,7 @@ def _abrir_y_fallar(api: ApiCliente, r: Resultado, ahora: Callable[[], datetime]
     try:
         run_id = _iniciar(api, t, ahora().isoformat(timespec="seconds"), r.ventana_desde)
     except Exception as exc:
-        log.error("%s: no se pudo abrir la corrida para reportar el fallo: %s", t.nombre, exc)
+        log.error("%s: no se pudo abrir la corrida para reportar el fallo: %s", t.nombre, _mensaje(exc))
         return
     _fallar(api, run_id, r.error or "Falló la extracción.")
 

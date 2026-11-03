@@ -46,6 +46,19 @@ def registrar_secreto(valor: str | None) -> None:
         _SECRETOS.append(valor)
 
 
+def registrar_secretos(cfg: config.Config) -> None:
+    """Marca todos los secretos del robot/.env apenas carga la configuración.
+
+    Cada módulo vuelve a registrar el suyo donde lo usa (vpn, hana, notificar,
+    api); esto cubre lo que se escriba en el log antes de llegar ahí.
+    """
+    registrar_secreto(cfg.vpn.password)
+    for empresa in cfg.hana.empresas.values():
+        registrar_secreto(empresa.password)
+    registrar_secreto(cfg.api.secret)
+    registrar_secreto(cfg.alertas.smtp_password)
+
+
 def configurar(nivel: int = logging.INFO) -> logging.Logger:
     logger = logging.getLogger("bases_sap")
     if logger.handlers:

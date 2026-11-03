@@ -310,6 +310,7 @@ def main(
     cfg: Config | None = None
     try:
         cfg = cargar_config()
+        registro.registrar_secretos(cfg)
         # Solo la completa habla con la API; el archivo, el catálogo y el diagnóstico no.
         cfg.validar(requiere_vpn=not args.sin_vpn, requiere_api=completa, empresas=empresas)
     except ConfigError as exc:

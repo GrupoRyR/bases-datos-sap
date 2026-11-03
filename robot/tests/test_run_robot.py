@@ -439,6 +439,25 @@ def test_diagnostico_muestra_el_modo_tls_de_hana(entorno, correos, monkeypatch, 
     assert "Conexión a HANA: cifrado sí, validación de certificado no." in caplog.messages
 
 
+def test_los_secretos_se_registran_apenas_carga_la_configuracion(entorno, correos, monkeypatch):
+    import registro
+
+    e = entorno
+    monkeypatch.setenv("ALERTA_SMTP_PASSWORD", "clave-smtp-prueba")
+    monkeypatch.setattr(registro, "_SECRETOS", [])  # el escenario ya creó un cliente de la API
+    vistos: list[list[str]] = []
+
+    def leer_sin_conectar(cfg, empresas, leer, **kwargs):
+        vistos.append(list(registro._SECRETOS))  # antes de la VPN y de HANA
+        return []
+
+    monkeypatch.setattr(run_robot.extraccion, "sesion", leer_sin_conectar)
+    assert _main(e, "--diagnostico") == 0
+    assert set(vistos[0]) >= {
+        "clave-vpn-prueba", "clave-sgx-prueba", "clave-sdc-prueba", "secreto-robot-de-prueba", "clave-smtp-prueba",
+    }
+
+
 def test_archivo_si_falla_la_vpn_avisa_y_no_escribe(entorno, correos, monkeypatch):
     e = entorno
     prohibida = _sin_api(e, monkeypatch)

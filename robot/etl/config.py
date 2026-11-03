@@ -315,8 +315,9 @@ def cargar_config(env_path: Path | None = None) -> Config:
         if c.strip()
     ]
 
-    # Las contraseñas se registran en registro.registrar_secreto() donde se usan
-    # (vpn, hana, notificar, api): registro importa config, no al revés.
+    # Los secretos los registra registro.registrar_secretos(cfg) en run_robot.py, apenas
+    # carga la configuración, y cada módulo donde los usa (vpn, hana, notificar, api):
+    # registro importa config, no al revés.
     return Config(
         vpn=VpnConfig(
             cli=Path(_texto("SOPHOS_CLI", SOPHOS_CLI_POR_DEFECTO)),
