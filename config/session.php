@@ -167,9 +167,12 @@ return [
     | to the server if the browser has a HTTPS connection. This will keep
     | the cookie from being sent to you when it can't be done securely.
     |
+    | Without SESSION_SECURE_COOKIE it follows APP_URL: on with https (the
+    | server), off with http (local, "php artisan serve").
+    |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    'secure' => env('SESSION_SECURE_COOKIE', str_starts_with((string) env('APP_URL'), 'https://')),
 
     /*
     |--------------------------------------------------------------------------
