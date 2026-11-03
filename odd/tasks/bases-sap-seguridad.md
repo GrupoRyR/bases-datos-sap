@@ -22,8 +22,8 @@ Fix the code findings of the 2026-11-03 security audit of `main` at `db50da3`, o
 | T2 | 2 Robot guards | S-15, S-16, S-17, S-20 | delegated writer (4+ robot files) | done (#50, merged 5a323c9) |
 | T3 | 3 Sap signature and limits | S-08, S-09, S-11, S-21 if small | delegated writer (2+ Sap middleware, model and test files) | done (#51, merged 21697be) |
 | T4 | 4 Core Entra oid and guests | S-10 | delegated writer (2+ Core auth, controller and test files) | done (#52, merged 702d6a1) |
-| T5 | 5 Base HTTPS, CSP, headers | S-03, S-04, S-12 | delegated writer (2+ Core middleware, base config and test files) | in progress |
-| T6 | 6 Log redaction and rotation | S-05 | pending | pending |
+| T5 | 5 Base HTTPS, CSP, headers | S-03, S-04, S-12 | delegated writer (2+ Core middleware, base config and test files) | done (#54, merged af425f2) |
+| T6 | 6 Log redaction and rotation | S-05 | delegated writer (2+ base bootstrap, config and test files) | in progress |
 | T7 | 7 Dependencies | S-06, S-18 | pending | pending |
 
 ## Acceptance
@@ -169,6 +169,24 @@ Branch `fix/base-https-headers` from `main` at `702d6a1`, route: delegated write
 - Checks: `composer format` passed, `composer lint` passed (Pint and Larastan, 0 errors), `composer test` 716 passed, 2 skipped. `npm run build` passed; `public/build` stays ignored.
 - Pending before the merge: panel screenshots with the CSP active.
 
+### T6
+
+Branch `fix/log-redaction` from `main` at `af425f2`, route: delegated writer. The user approved the base-zone changes (`bootstrap/app.php`, `config/logging.php`). Full suite went from 716 to 721 passing tests (5 new, 2 skipped).
+
+- S-05 log values, `03bbced fix(base): keep query bindings and driver text out of the log`:
+  - A `QueryException` message holds every bound value, and MySQL's driver text can quote them (`Duplicate entry 'X'`). Applying a run upserts whole chunks of SAP rows, so one database error put NITs, phones and e-mails in `laravel.log`.
+  - `bootstrap/app.php` `withExceptions` registers a `report` callback for `QueryException` with `->stop()`. It logs one error, `database.query_failed`, with `connection`, `sqlstate`, `driver_code` (from `errorInfo` or the previous `PDOException`), `sql` (`getSql()`, with `?`) and `exception_class`. No message, bindings, driver text or trace. Rendering is unchanged.
+  - `tests/Feature/Security/QueryExceptionLogTest.php` sends the default channel to a Monolog `TestHandler` and formats each record as the file would, trace included. A real duplicate insert into `users` on the test connection carries `NIT-SECRETO-123`; a built `QueryException` copies MySQL's 1062 driver text. A `RuntimeException` is still reported in full.
+  - RED: 2 failed, 1 passed (the default report had no `connection` key and carried the message). GREEN: 3 passed. A temporary mutation that added `getMessage()` to the entry made the two secret checks fail; it was reverted.
+- S-05 rotation, `8309d30 fix(base): rotate the log daily at warning level by default`:
+  - `config/logging.php`: `LOG_STACK` defaults to `daily`; the `single` and `daily` channels default to `warning`; `LOG_DAILY_DAYS` stays at 14.
+  - `tests/Feature/Security/LoggingConfigTest.php` loads the file again with the logging variables cleared, as `SessionCookieTest` does.
+  - RED: 1 failed (`single` instead of `daily`), 1 passed. GREEN: 2 passed.
+- `docs/arquitectura.md` §11 says database errors are logged without values and the log rotates daily.
+- Checks: `composer format` passed, `composer lint` passed (Pint and Larastan, 0 errors), `composer test` 721 passed, 2 skipped.
+- Not changed: `mask_bindings_in_exception_messages` in `config/database.php` hides the bindings in the message, but not the driver text, so the reporter is still needed.
+- Pending: `.env.example` needs `LOG_STACK=daily`, `LOG_LEVEL=warning` and `LOG_DAILY_DAYS=14`. The user adds the lines, and sets the same values in the production `.env`, where they override these defaults.
+
 ## Next step
 
-T5: `code-review`, panel screenshots with the CSP active (`npm run build`, no `npm run dev`), push `fix/base-https-headers` and open the PR.
+T6: `code-review`, push `fix/log-redaction` and open the PR.
