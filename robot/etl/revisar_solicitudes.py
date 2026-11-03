@@ -165,6 +165,7 @@ def main(
     cfg: Config | None = None
     try:
         cfg = cargar_config()
+        registro.registrar_secretos(cfg)
         cfg.validar(requiere_vpn=True, requiere_api=True)
     except ConfigError as exc:
         log.error("Configuración incompleta:\n%s", exc)

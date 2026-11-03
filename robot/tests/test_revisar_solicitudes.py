@@ -46,6 +46,20 @@ def test_en_una_franja_no_pregunta_a_la_api(entorno, correos):
     assert correos == []
 
 
+def test_los_secretos_se_registran_apenas_carga_la_configuracion(entorno, correos, monkeypatch):
+    import registro
+
+    e = entorno
+    monkeypatch.setenv("ALERTA_SMTP_PASSWORD", "clave-smtp-prueba")
+    monkeypatch.setattr(registro, "_SECRETOS", [])  # el escenario ya creó un cliente de la API
+    a_las_12 = lambda: datetime(2026, 10, 26, 12, 5, tzinfo=config.BOGOTA)  # noqa: E731
+    # En la franja no se crea ningún componente: solo la carga registra los secretos.
+    assert _revisar(e, ahora=a_las_12, fabrica_api=_prohibida, fabrica_vpn=_prohibida) == 0
+    assert set(registro._SECRETOS) >= {
+        "clave-vpn-prueba", "clave-sgx-prueba", "clave-sdc-prueba", "secreto-robot-de-prueba", "clave-smtp-prueba",
+    }
+
+
 def test_con_el_candado_ocupado_no_pregunta_a_la_api(entorno, correos, candado_ajeno):
     e = entorno
     ruta = candado_ajeno()

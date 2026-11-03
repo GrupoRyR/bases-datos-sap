@@ -64,10 +64,11 @@ Branch `fix/robot-tls-logs`, route: delegated writer. Robot suite went from 677 
   - `envio` logs `_mensaje(exc)` instead of the raw exception in three places: failed send, failed open-to-fail and failed `/fallar`.
   - `registro.registrar_secretos(cfg)` registers the VPN password, the HANA password of each company, the robot secret and the SMTP password. `run_robot.main` calls it right after `cargar_config`.
   - RED: 3 failed, 69 passed in `test_envio.py`, `test_registro.py` and `test_run_robot.py`. GREEN: full suite 707 passed.
-- Pending:
-  - `revisar_solicitudes.main` also calls `cargar_config`, but it is outside T1's edit surface. It still relies on the registration each component already does: `vpn`, `hana`, `api` and `notificar`.
-  - `robot/.env.example` needs the two TLS variables. The parent handles it.
+- S-19 in `revisar_solicitudes`, `fix(robot): register secrets at load in revisar_solicitudes`:
+  - `revisar_solicitudes.main` also calls `registrar_secretos(cfg)` right after `cargar_config`.
+  - RED: the new test failed, because in a blocked slot no component registers anything. GREEN: full suite 708 passed.
+- Pending: `robot/.env.example` needs `HANA_ENCRYPT` and `HANA_SSL_VALIDATE`. The permission rules block it, so the user adds the lines.
 
 ## Next step
 
-T1: implement on `fix/robot-tls-logs`.
+T1: code-review, push `fix/robot-tls-logs`, open the PR and wait for green CI and the user's merge approval.
