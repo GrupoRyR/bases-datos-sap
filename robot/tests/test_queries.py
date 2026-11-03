@@ -300,6 +300,59 @@ def test_ohem_solo_nombre_cargo_area_y_correo():
     assert set(_columnas(sql)) == OHEM_PERMITIDAS
 
 
+# --- Columnas sensibles de empleados y usuarios (plan §5) ----------------------------
+#
+# Lista negra sobre CUALQUIER consulta, no solo la del archivo: si una consulta lee
+# OHEM (empleados) no puede traer cédula, pasaporte, salario, banco, teléfono o
+# dirección de la casa ni fecha de nacimiento; si lee OUSR o AUSR, ninguna columna
+# con PASSWORD en el nombre.
+OHEM_PROHIBIDAS = (
+    "govID", "passportNo", "salary", "salaryUnit", "bankCode", "bankBranch",
+    "bankAcount", "homeTel", "homeStreet", "birthDate",
+)
+PROHIBIDAS_POR_TABLA: dict[str, re.Pattern[str]] = {
+    "OHEM": re.compile(r"\b(?:" + "|".join(OHEM_PROHIBIDAS) + r")\b", re.IGNORECASE),
+    "OUSR": re.compile(r"\w*PASSWORD\w*", re.IGNORECASE),
+    "AUSR": re.compile(r"\w*PASSWORD\w*", re.IGNORECASE),
+}
+
+
+def _tablas_leidas(sql: str) -> set[str]:
+    """Tablas de los FROM y JOIN (sin comentarios), en mayúsculas."""
+    return {
+        t.upper()
+        for t in re.findall(r'\b(?:FROM|JOIN)\s+"?([\w@]+)"?', _sin_comentarios(sql), re.IGNORECASE)
+    }
+
+
+def columnas_sensibles(sql: str) -> list[str]:
+    """Columnas prohibidas que trae la consulta según las tablas que lee."""
+    codigo = _sin_comentarios(sql)
+    encontradas: list[str] = []
+    for tabla in sorted(_tablas_leidas(sql) & PROHIBIDAS_POR_TABLA.keys()):
+        encontradas += PROHIBIDAS_POR_TABLA[tabla].findall(codigo)
+    return encontradas
+
+
+@pytest.mark.parametrize("ruta", ARCHIVOS, ids=_id)
+def test_ninguna_consulta_trae_columnas_sensibles_de_empleados_o_usuarios(ruta: Path):
+    assert columnas_sensibles(_texto(ruta)) == []
+
+
+@pytest.mark.parametrize("sql, esperadas", [
+    ('SELECT T0."empID", T0."govID", T0."salary"\nFROM "OHEM" T0', ["govID", "salary"]),
+    ('SELECT T0."empID", T1."bankAcount"\nFROM "OUSR" T0\nJOIN "OHEM" T1 ON 1 = 1', ["bankAcount"]),
+    ('SELECT T0."USERID", T0."PASSWORD4"\nFROM "OUSR" T0', ["PASSWORD4"]),
+    ('SELECT T0."USERID", T0."U_Password"\nFROM "AUSR" T0', ["U_Password"]),
+    # Sin falsos positivos: otra tabla, otra columna parecida o solo en un comentario.
+    ('SELECT T0."salary"\nFROM "OCRD" T0', []),
+    ('SELECT T0."salaryHistory", T0."birthDateText"\nFROM "OHEM" T0', []),
+    ('-- nunca T0."govID" ni PASSWORD\nSELECT T0."empID"\nFROM "OHEM" T0', []),
+])
+def test_columnas_sensibles_detecta_solo_las_prohibidas(sql: str, esperadas: list[str]):
+    assert columnas_sensibles(sql) == esperadas
+
+
 def test_hbt_descubre_tablas_y_columnas_sin_parametros():
     for nombre in ("hbt_tablas.sql", "hbt_columnas.sql"):
         codigo = _sin_comentarios(_texto(QUERIES / "archivo" / nombre))
