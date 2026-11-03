@@ -24,7 +24,7 @@ Fix the code findings of the 2026-11-03 security audit of `main` at `db50da3`, o
 | T4 | 4 Core Entra oid and guests | S-10 | delegated writer (2+ Core auth, controller and test files) | done (#52, merged 702d6a1) |
 | T5 | 5 Base HTTPS, CSP, headers | S-03, S-04, S-12 | delegated writer (2+ Core middleware, base config and test files) | done (#54, merged af425f2) |
 | T6 | 6 Log redaction and rotation | S-05 | delegated writer (2+ base bootstrap, config and test files) | done (#55, merged 280b8ef) |
-| T7 | 7 Dependencies | S-06, S-18 | inline (lockfile and two requirements files) | in progress |
+| T7 | 7 Dependencies | S-06, S-18 | inline (lockfile and two requirements files) | done (#56, merged a270712) |
 
 ## Acceptance
 
@@ -199,6 +199,37 @@ Branch `fix/deps-security`, route: inline (mechanical version bumps).
   - Not done: hash pinning (`--require-hashes`). Both runtime packages are exact-pinned and have no transitive dependencies. Hashes would have to cover every platform wheel of hdbcli, and CI and LEEME would need a new install command. It is left as a possible follow-up.
 - `npm audit` was clean at the audit and was not touched.
 
+## IT list (final)
+
+These items are not code. IT owns them; the app and the robot already do their part.
+
+| ID | Item | Related |
+|---|---|---|
+| T-01 | Turn on AutoSSL in cPanel. `public/.htaccess` already redirects http to https and sends the security headers. After deploy, `curl -sI https://<host>/login` must show the 301 from http and the headers. | S-03, S-04 |
+| T-02 | Firewall: allow only the VPN pool to HANA:30015. When HANA gets a TLS certificate for SQL, set `HANA_SSL_VALIDATE=true`. | S-01 |
+| T-03 | A dedicated VPN account for the robot, with a rule that reaches only HANA:30015. The `sccli` password goes on the command line; this item is the user's accepted path for that, with no code change. | S-07 |
+| T-04 | Run the robot under a dedicated low-privilege account, from a clean clone that only that account can write (not a development worktree). Lock down `robot\.env` with `icacls`. | audit F4 |
+| T-05 | Read-only technical HANA users (SELECT on the read tables and `SYS.TABLES`, `SYS.TABLE_COLUMNS`, `SYS.SCHEMAS`). Reconsider the decision to never rotate their passwords. | audit F5 |
+| T-06 | BitLocker on the TI PC, and a retention policy for the CSV folder with personal data (Ley 1581). | S-17 |
+| T-07 | Entra enterprise app: "Assignment required = Yes", assigned to TI staff only. Optionally add the `acct` optional claim to the id token. After the first admin signs in, `CORE_ADMIN_EMAILS` can be emptied. | S-10 |
+| T-08 | The consumer apps' MySQL users get SELECT only. cPanel grants per database, not per table. | audit F10 |
+| T-09 | Install the scheduled tasks with `Unblock-File` and `RemoteSigned` instead of `-ExecutionPolicy Bypass`. | audit F12 |
+| T-10 | Production `.env`: `APP_ENV=production`, `APP_DEBUG=false`, `APP_URL` with https (the session cookie becomes `secure` from it), `LOG_STACK=daily`, `LOG_LEVEL=warning`, `LOG_DAILY_DAYS=14`, and `ROBOT_HMAC_KEYS` secrets of at least 32 random bytes. Robot `.env`: `HANA_ENCRYPT=true` and `HANA_SSL_VALIDATE=false`. | S-03, S-05, S-11, S-01 |
+
+## Post-merge checks (user)
+
+- [ ] `python run_robot.py --diagnostico` on the TI PC, against real HANA. With no HANA failures in the summary, the encrypted connection works.
+- [ ] A test alert email, to check that the SMTP certificate passes verification. The robot has no test-mail mode, so the existing functions are called directly from `robot\etl`:
+
+  ```powershell
+  ..\.venv\Scripts\python.exe -c "import registro, config, notificar; registro.configurar(); cfg = config.cargar_config(); registro.registrar_secretos(cfg); notificar.avisar_fallo(cfg.alertas, 'PRUEBA', 'Correo de prueba del certificado SMTP; no hay ningun fallo real.')"
+  ```
+
+  - Success: the console and `robot.log` show `Alerta enviada a: ...`.
+  - Failure: they show `No se pudo enviar la alerta por correo.` with the cause. `CERTIFICATE_VERIFY_FAILED` or a host name mismatch means the certificate is not trusted by Windows or does not match `ALERTA_SMTP_HOST`.
+  - The subject reads "[Bases SAP] Falló el robot - PRUEBA", so warn the recipients first.
+- [ ] The `LOG_*` lines in `.env.example`. The user adds them with the coordinator.
+
 ## Next step
 
-T7: `code-review`, push `fix/deps-security`, open the PR, and get the user's merge approval. After that the feature is done; what is left is the IT list (T-01 to T-10) and the user's `.env` lines (`LOG_STACK`, `LOG_LEVEL`, `LOG_DAILY_DAYS`).
+None in code: the feature is done. What remains is the IT list and the post-merge checks above.
