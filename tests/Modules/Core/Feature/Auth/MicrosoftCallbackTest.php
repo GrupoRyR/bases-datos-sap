@@ -11,6 +11,8 @@ const MICROSOFT_CALLBACK = '/auth/microsoft/callback?code=codigo-de-prueba&state
 
 const REJECTED_MESSAGE = 'No puedes entrar con esa cuenta. Si crees que es un error, habla con TI.';
 
+const GUEST_MESSAGE = 'Las cuentas de invitado no pueden entrar. Entra con tu cuenta del Grupo RYR o habla con TI.';
+
 /**
  * The audit entries in order, as action => context (decoded), plus user_id.
  * MySQL reorders the keys of a JSON object, so compare them with toEqual().
@@ -27,12 +29,13 @@ function signInAudit(): array
 }
 
 /**
- * Asserts the callback sends the guest back to /login with the one message
- * every rejection shows, and audits the rejection $reason for $email only.
+ * Asserts the callback sends the guest back to /login with $message (the one
+ * message every rejection but a B2B guest account shows), and audits the
+ * rejection $reason for $email only.
  */
-function assertSignInRejected(string $reason, string $email = 'ana.gomez@segurex.com'): void
+function assertSignInRejected(string $reason, string $email = 'ana.gomez@segurex.com', string $message = REJECTED_MESSAGE): void
 {
-    test()->get(MICROSOFT_CALLBACK)->assertRedirect('/login')->assertSessionHas('error', REJECTED_MESSAGE);
+    test()->get(MICROSOFT_CALLBACK)->assertRedirect('/login')->assertSessionHas('error', $message);
     test()->assertGuest();
 
     expect(signInAudit())->toEqual([[
@@ -198,6 +201,43 @@ describe('a rejected sign-in', function () {
         assertSignInRejected('identity_mismatch');
 
         expect($user->refresh()->microsoft_id)->toBe('oid-otra');
+    });
+
+    it('refuses a guest account of the tenant before looking anyone up', function () {
+        $this->microsoft->signsIn(FakeIdentityProvider::identity('ana@gmail.com', 'oid-invitada', guest: true));
+
+        assertSignInRejected('guest', 'ana@gmail.com', GUEST_MESSAGE);
+
+        expect(User::query()->count())->toBe(0);
+    });
+
+    it('never promotes a guest, even with an e-mail in core.admins', function () {
+        $this->microsoft->signsIn(FakeIdentityProvider::identity('ti@segurex.com', 'oid-invitada', guest: true));
+
+        assertSignInRejected('guest', 'ti@segurex.com', GUEST_MESSAGE);
+
+        expect(User::query()->count())->toBe(0);
+    });
+
+    it('leaves a registered user untouched when a guest account signs in with their e-mail', function () {
+        $user = User::factory()->consulta()->create(['email' => 'ti@segurex.com', 'name' => 'TI']);
+        $this->microsoft->signsIn(FakeIdentityProvider::identity('ti@segurex.com', 'oid-invitada', name: 'Invitada', guest: true));
+
+        assertSignInRejected('guest', 'ti@segurex.com', GUEST_MESSAGE);
+
+        expect($user->refresh()->microsoft_id)->toBeNull()
+            ->and($user->name)->toBe('TI')
+            ->and($user->role)->toBe(Role::Consulta)
+            ->and($user->last_signed_in_at)->toBeNull();
+    });
+
+    it('tells a guest on the sign-in page why they cannot enter', function () {
+        $this->microsoft->signsIn(FakeIdentityProvider::identity(guest: true));
+
+        $this->followingRedirects()->get(MICROSOFT_CALLBACK)
+            ->assertOk()
+            ->assertViewIs('core::auth.login')
+            ->assertSee(GUEST_MESSAGE);
     });
 
     it('refuses a Microsoft account that belongs to another user', function () {

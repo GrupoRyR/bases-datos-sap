@@ -11,7 +11,8 @@ use Illuminate\Database\ConnectionInterface;
 /**
  * Turns the identity Microsoft sent back into the user who signs in.
  *
- * 1. The "tid" claim must be the configured tenant.
+ * 1. The "tid" claim must be the configured tenant, and the account a
+ *    member of it: guest (B2B) accounts are turned away before any lookup.
  * 2. The user is found by Microsoft object id, else by e-mail. An account
  *    that belongs to another user, an e-mail linked to another account and
  *    a deactivated user are turned away; an unknown e-mail becomes a new
@@ -39,6 +40,10 @@ final class SignInWithMicrosoft
     {
         try {
             $this->ensureConfiguredTenant($identity);
+
+            if ($identity->guest) {
+                throw new SignInRejected(RejectionReason::Guest);
+            }
 
             return $this->database->transaction(fn (): User => $this->signIn($identity));
         } catch (SignInRejected $rejected) {

@@ -24,12 +24,14 @@ final readonly class MicrosoftIdentity
     /**
      * @param  string  $objectId  The object id (oid) of the account in Entra ID: users.microsoft_id.
      * @param  string|null  $tenantId  The "tid" claim of the id token; null when absent.
+     * @param  bool  $guest  A guest (B2B) account of the tenant, not a member.
      */
     public function __construct(
         public string $objectId,
         public ?string $tenantId,
         string $email,
         ?string $name = null,
+        public bool $guest = false,
     ) {
         $this->email = User::normalizeEmail($email);
         $this->name = $name === null || trim($name) === '' ? $this->email : trim($name);
@@ -40,20 +42,28 @@ final readonly class MicrosoftIdentity
      * "displayName"): the e-mail is "mail", or the user principal name for
      * accounts without a mailbox.
      *
+     * A guest is one the id token says is ("acct" claim 1, which Entra ID
+     * sends only when the app registration asks for it) or whose user
+     * principal name carries the "#EXT#" Entra ID gives every invited
+     * account, so guests are caught without that claim too.
+     *
      * @param  array<array-key, mixed>  $profile
      *
      * @throws UnexpectedValueException When the profile has no object id or no e-mail.
      */
-    public static function fromGraph(array $profile, ?string $tenantId): self
+    public static function fromGraph(array $profile, ?string $tenantId, bool $guestClaim = false): self
     {
         $objectId = self::text($profile, 'id');
-        $email = self::text($profile, 'mail') ?? self::text($profile, 'userPrincipalName');
+        $principalName = self::text($profile, 'userPrincipalName');
+        $email = self::text($profile, 'mail') ?? $principalName;
 
         if ($objectId === null || $email === null) {
             throw new UnexpectedValueException('The Microsoft profile has no object id or no e-mail.');
         }
 
-        return new self($objectId, $tenantId, $email, self::text($profile, 'displayName'));
+        $guest = $guestClaim || ($principalName !== null && stripos($principalName, '#EXT#') !== false);
+
+        return new self($objectId, $tenantId, $email, self::text($profile, 'displayName'), $guest);
     }
 
     /**

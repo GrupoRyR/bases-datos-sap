@@ -14,7 +14,8 @@ use Symfony\Component\HttpFoundation\RedirectResponse;
  * CoreServiceProvider registers for the configured tenant only (it refuses
  * to build without one). The driver checks the OAuth state, trades the code
  * for the tokens, validates the id token against the tenant's keys and reads
- * the Graph /me profile (scopes openid, profile and User.Read).
+ * the Graph /me profile (scopes openid, profile and User.Read). The optional
+ * "acct" claim of the id token marks a guest (B2B) account.
  */
 final class SocialiteMicrosoftIdentityProvider implements IdentityProvider
 {
@@ -30,9 +31,16 @@ final class SocialiteMicrosoftIdentityProvider implements IdentityProvider
         $driver = $this->driver();
         // First: it fills the token response the claims are read from.
         $profile = $driver->user()->getRaw();
-        $tenantId = $driver->getClaims()->tid ?? null;
+        $claims = $driver->getClaims();
+        $tenantId = $claims->tid ?? null;
+        // Optional claim: 1 for a guest, 0 for a member.
+        $account = $claims->acct ?? null;
 
-        return MicrosoftIdentity::fromGraph($profile, is_string($tenantId) && $tenantId !== '' ? $tenantId : null);
+        return MicrosoftIdentity::fromGraph(
+            $profile,
+            is_string($tenantId) && $tenantId !== '' ? $tenantId : null,
+            in_array($account, [1, '1'], true),
+        );
     }
 
     private function driver(): MicrosoftProvider

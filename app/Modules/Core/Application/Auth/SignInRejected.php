@@ -6,7 +6,7 @@ use RuntimeException;
 
 /**
  * SignInWithMicrosoft turned the account away. The message is for logs; the
- * user sees __('core::ingreso.rechazado').
+ * user sees __($exception->reason->messageKey()).
  */
 final class SignInRejected extends RuntimeException
 {

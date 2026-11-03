@@ -20,8 +20,8 @@ Fix the code findings of the 2026-11-03 security audit of `main` at `db50da3`, o
 |---|---|---|---|---|
 | T1 | 1 Robot TLS and logs | S-01, S-02, S-13, S-19 | delegated writer (4+ robot files) | done (#49, merged d0766af) |
 | T2 | 2 Robot guards | S-15, S-16, S-17, S-20 | delegated writer (4+ robot files) | done (#50, merged 5a323c9) |
-| T3 | 3 Sap signature and limits | S-08, S-09, S-11, S-21 if small | delegated writer (2+ Sap middleware, model and test files) | in progress |
-| T4 | 4 Core Entra oid and guests | S-10 | pending | pending |
+| T3 | 3 Sap signature and limits | S-08, S-09, S-11, S-21 if small | delegated writer (2+ Sap middleware, model and test files) | done (#51, merged 21697be) |
+| T4 | 4 Core Entra oid and guests | S-10 | delegated writer (2+ Core auth, controller and test files) | in progress |
 | T5 | 5 Base HTTPS, CSP, headers | S-03, S-04, S-12 | pending | pending |
 | T6 | 6 Log redaction and rotation | S-05 | pending | pending |
 | T7 | 7 Dependencies | S-06, S-18 | pending | pending |
@@ -126,6 +126,19 @@ Branch `fix/sap-robot-hardening` from `main` at `5a323c9`, route: delegated writ
 - Checks: `composer format` passed, `composer lint` passed (Pint and Larastan, 0 errors), `composer test` 670 passed, 2 skipped.
 - `code-review` (high), `fix(sap): let good app keys through an IP over the failed-key limit`: before this fix, a misconfigured app could lock out its sister apps on the same server. RED: the new good-key test got 429. GREEN: `composer test` 671 passed, 2 skipped; lint passed.
 
+### T4
+
+Branch `fix/core-entra-oid` from `main` at `21697be`, route: delegated writer. Full suite went from 671 to 686 passing tests (15 new, 2 skipped).
+
+- S-10, `9b06b27 fix(core): reject Entra guest accounts at sign-in`:
+  - `MicrosoftIdentity` gets `guest`. `fromGraph($profile, $tenantId, $guestClaim = false)` marks a guest when the `acct` claim is 1 or the user principal name contains `#EXT#` in any case, as in the gestor.
+  - `SocialiteMicrosoftIdentityProvider` passes the optional `acct` claim of the id token (`1` or `"1"`).
+  - `SignInWithMicrosoft::handle` throws `RejectionReason::Guest` right after the tenant check, before any lookup or write. It is audited as `core.auth.rejected` with reason `guest` and the e-mail, without tokens. A guest is never created, linked or promoted, even with an e-mail in `core.admins`.
+  - The login page tells a guest `Las cuentas de invitado no pueden entrar. Entra con tu cuenta del Grupo RYR o habla con TI.` (`core::ingreso.invitado`, via `RejectionReason::messageKey()`). Every other reason keeps the one `rechazado` message. This is a deviation from "the same message for every reason": the guest message only describes the guest's own account, as in the gestor.
+  - RED: 4 failed and 11 errors, 59 passed in `tests/Modules/Core/Feature/Auth` (guests signed in; `guest` was undefined). GREEN: Core suite 135 passed.
+- Existing users keep access, no new commit: `MicrosoftCallbackTest` already pins it. "recognizes a registered user by e-mail in any case and links their Microsoft account" stores `microsoft_id` for a user without one and keeps their role. "recognizes a registered user by Microsoft id, even after an e-mail change" signs a linked user in by oid when `mail` changed.
+- Checks: `composer format` passed, `composer lint` passed (Pint and Larastan, 0 errors), `composer test` 686 passed, 2 skipped.
+
 ## Next step
 
-T3: `code-review`, push `fix/sap-robot-hardening` and open the PR. Before the merge, the user confirms that the production and robot HMAC secrets are at least 32 bytes; a shorter one stops the robot with 401. The user also confirms the one-line contract change of S-08.
+T4: `code-review`, push `fix/core-entra-oid` and open the PR. After the merge, IT can also set "Assignment required = Yes" on the Entra enterprise app (T-07).

@@ -17,7 +17,8 @@ use Illuminate\Support\Facades\Auth;
  *
  * A failure of Microsoft (invalid state, a failed request, an invalid id
  * token) is reported and the guest may try again; a rejected account goes
- * back to the sign-in page with one message, whatever the reason. A user who
+ * back to the sign-in page with the message of its reason: one for every
+ * reason but a B2B guest account, which gets its own. A user who
  * signs in starts a new session and goes to the page they asked for, or home.
  */
 final class MicrosoftCallbackController
@@ -38,8 +39,8 @@ final class MicrosoftCallbackController
 
         try {
             $user = $signIn->handle($identity);
-        } catch (SignInRejected) {
-            return redirect()->route('core.login')->with('error', __('core::ingreso.rechazado'));
+        } catch (SignInRejected $rejected) {
+            return redirect()->route('core.login')->with('error', __($rejected->reason->messageKey()));
         }
 
         Auth::login($user);
