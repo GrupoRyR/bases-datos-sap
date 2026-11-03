@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 from email.message import EmailMessage
 
 import pytest
@@ -12,9 +13,11 @@ class SmtpFalso:
     instancias: list["SmtpFalso"] = []
     fallar = False
 
-    def __init__(self, host: str, port: int, timeout: int = 0) -> None:
+    def __init__(self, host: str, port: int, timeout: int = 0, context: ssl.SSLContext | None = None) -> None:
         self.host = host
         self.port = port
+        self.contexto = context  # el de SMTP_SSL (465)
+        self.contexto_starttls: ssl.SSLContext | None = None
         self.enviados: list[EmailMessage] = []
         self.login_con: tuple[str, str] | None = None
         SmtpFalso.instancias.append(self)
@@ -25,8 +28,8 @@ class SmtpFalso:
     def __exit__(self, *args: object) -> None:
         return None
 
-    def starttls(self) -> None:
-        pass
+    def starttls(self, context: ssl.SSLContext | None = None) -> None:
+        self.contexto_starttls = context
 
     def login(self, usuario: str, clave: str) -> None:
         self.login_con = (usuario, clave)
@@ -120,3 +123,29 @@ def test_puerto_465_usa_ssl_sin_starttls(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert isinstance(SmtpFalso.instancias[-1], SmtpSslFalso)
     assert len(SmtpFalso.instancias[-1].enviados) == 1
+
+
+def _verifica(contexto: ssl.SSLContext | None) -> bool:
+    return (
+        isinstance(contexto, ssl.SSLContext)
+        and contexto.check_hostname is True
+        and contexto.verify_mode == ssl.CERT_REQUIRED
+    )
+
+
+def test_puerto_587_verifica_el_certificado_en_starttls(smtp: type[SmtpFalso]) -> None:
+    notificar.avisar_fallo(_cfg(), "VPN", "sin túnel")
+
+    assert _verifica(smtp.instancias[0].contexto_starttls)
+
+
+def test_puerto_465_verifica_el_certificado(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SmtpSslFalso(SmtpFalso):
+        pass
+
+    monkeypatch.setattr(notificar.smtplib, "SMTP_SSL", SmtpSslFalso)
+    cfg = AlertaConfig("smtp.prueba.test", 465, "robot@prueba.test", "clave-smtp-prueba", ["ti@prueba.test"])
+
+    notificar.avisar_fallo(cfg, "VPN", "sin túnel")
+
+    assert _verifica(SmtpFalso.instancias[-1].contexto)
