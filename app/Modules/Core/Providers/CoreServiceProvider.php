@@ -7,6 +7,7 @@ use App\Modules\Core\Application\Auth\IdentityProvider;
 use App\Modules\Core\Console\SetRoleCommand;
 use App\Modules\Core\Contracts\AuditLogger;
 use App\Modules\Core\Contracts\Enums\Role;
+use App\Modules\Core\Http\Middleware\ContentSecurityPolicy;
 use App\Modules\Core\Http\Middleware\EnsureUserIsActive;
 use App\Modules\Core\Infrastructure\Audit\DatabaseAuditLogger;
 use App\Modules\Core\Infrastructure\Auth\SocialiteMicrosoftIdentityProvider;
@@ -59,9 +60,12 @@ final class CoreServiceProvider extends ModuleServiceProvider
         // Appended through the HTTP kernel, not only the router: resolving the
         // kernel after boot (as tests do) syncs its groups into the router and
         // would drop a router-only push.
+        // Every response, the API, redirects and error pages included, gets
+        // the Content-Security-Policy: it is global middleware, not a group's.
         $this->callAfterResolving(HttpKernel::class, function (HttpKernel $kernel): void {
             if ($kernel instanceof FoundationHttpKernel) {
                 $kernel->appendMiddlewareToGroup('web', EnsureUserIsActive::class);
+                $kernel->pushMiddleware(ContentSecurityPolicy::class);
             }
         });
 

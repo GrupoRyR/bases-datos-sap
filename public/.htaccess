@@ -1,9 +1,25 @@
+# No directory listings, with or without mod_negotiation.
+Options -Indexes
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
-        Options -MultiViews -Indexes
+        Options -MultiViews
     </IfModule>
 
     RewriteEngine On
+
+    # Plain http goes to https. X-Forwarded-Proto covers a TLS proxy in front
+    # of the host; .well-known stays on http because cPanel AutoSSL validates
+    # its certificates there. "php artisan serve" ignores this file, so a
+    # local run stays on http.
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+    RewriteCond %{REQUEST_URI} !^/\.well-known/
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Dotfiles and dot folders (.env, .git, .htaccess, build/.vite) are never
+    # served; .well-known is the only exception.
+    RewriteRule (^|/)\.(?!well-known/) - [F,L]
 
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
@@ -22,4 +38,21 @@
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    # Security headers on every response, the app's pages included. "always"
+    # also covers redirects and errors. HSTS goes out only over https and
+    # without includeSubDomains: other subdomains of the company are not ours.
+    # The Content-Security-Policy comes from the app (it needs a nonce).
+    Header always set Strict-Transport-Security "max-age=31536000" env=HTTPS
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+    # Do not tell which PHP version runs the app. PHP adds the header to the
+    # success table, so unset it in both.
+    Header always unset X-Powered-By
+    Header unset X-Powered-By
 </IfModule>

@@ -21,8 +21,8 @@ Fix the code findings of the 2026-11-03 security audit of `main` at `db50da3`, o
 | T1 | 1 Robot TLS and logs | S-01, S-02, S-13, S-19 | delegated writer (4+ robot files) | done (#49, merged d0766af) |
 | T2 | 2 Robot guards | S-15, S-16, S-17, S-20 | delegated writer (4+ robot files) | done (#50, merged 5a323c9) |
 | T3 | 3 Sap signature and limits | S-08, S-09, S-11, S-21 if small | delegated writer (2+ Sap middleware, model and test files) | done (#51, merged 21697be) |
-| T4 | 4 Core Entra oid and guests | S-10 | delegated writer (2+ Core auth, controller and test files) | in progress |
-| T5 | 5 Base HTTPS, CSP, headers | S-03, S-04, S-12 | pending | pending |
+| T4 | 4 Core Entra oid and guests | S-10 | delegated writer (2+ Core auth, controller and test files) | done (#52, merged 702d6a1) |
+| T5 | 5 Base HTTPS, CSP, headers | S-03, S-04, S-12 | delegated writer (2+ Core middleware, base config and test files) | in progress |
 | T6 | 6 Log redaction and rotation | S-05 | pending | pending |
 | T7 | 7 Dependencies | S-06, S-18 | pending | pending |
 
@@ -139,6 +139,36 @@ Branch `fix/core-entra-oid` from `main` at `21697be`, route: delegated writer. F
 - Existing users keep access, no new commit: `MicrosoftCallbackTest` already pins it. "recognizes a registered user by e-mail in any case and links their Microsoft account" stores `microsoft_id` for a user without one and keeps their role. "recognizes a registered user by Microsoft id, even after an e-mail change" signs a linked user in by oid when `mail` changed.
 - Checks: `composer format` passed, `composer lint` passed (Pint and Larastan, 0 errors), `composer test` 686 passed, 2 skipped.
 
+### T5
+
+Branch `fix/base-https-headers` from `main` at `702d6a1`, route: delegated writer. The user approved the base-zone changes (`config/`, `public/`, `resources/views`). Full suite went from 686 to 716 passing tests (30 new, 2 skipped).
+
+- S-04 CSP, `f483a29 fix(core): send a nonce-based Content-Security-Policy`:
+  - `App\Modules\Core\Http\Middleware\ContentSecurityPolicy` mirrors the gestor. `CoreServiceProvider` pushes it as global middleware in the same `callAfterResolving(HttpKernel)` hook that appends `EnsureUserIsActive`, so redirects, 404s and the API get it too.
+  - Policy: `default-src 'self'; script-src 'self' 'nonce-…'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`.
+  - No `'unsafe-eval'`: there is no Alpine in `package.json` or `resources/js`, and the built JS has no `eval(` or `new Function`.
+  - `style-src` keeps `'unsafe-inline'`: no app view has a `style=""` or `<style>`, but the framework's error pages (404, 419, 500…) print their CSS in a `<style>` block.
+  - Deviation from the gestor: the policy is skipped only while the Vite dev server runs (`Vite::isRunningHot()`), not in every local run, so a local run with `npm run build` gets the production policy.
+  - The inline theme script in `head.blade.php` carries `nonce="{{ Vite::cspNonce() }}"`.
+  - The Microsoft sign-in is an `<a href>` to `/auth/microsoft` and a 302, not a form post, so `form-action 'self'` does not touch it. The only forms (logout, dev sign-in, panel) post to the app.
+  - The test swaps in a Vite with its own hot file, so `npm run dev` next to the suite does not skip the policy.
+  - RED: 8 failed and 3 errors, 1 passed in `tests/Modules/Core/Feature/Security`. The hot-skip case passed trivially; a mutation that removed the check made it fail. GREEN: 12 passed. Full suite: 698 passed, 2 skipped.
+- S-03 and S-04 Apache, `874a332 fix(base): force https and send security headers from .htaccess`:
+  - `public/.htaccess` gets the gestor's `Options -Indexes` at the top, the http-to-https 301 with the `X-Forwarded-Proto` and `.well-known` exceptions, the dotfile block, and the `mod_headers` block: HSTS only over https without `includeSubDomains`, `nosniff`, `X-Frame-Options DENY`, `Referrer-Policy`, `Permissions-Policy` and unset `X-Powered-By`. This repo's rewrite rules stay.
+  - Skipped: the gestor's manifest, deflate and cache rules. This repo has no manifest or service worker.
+  - `php artisan serve` ignores `.htaccess`, so local stays on http. No test runs Apache: `tests/Feature/Security/HtaccessTest.php` only reads the file, so nobody drops a rule silently.
+  - RED: 10 failed, 1 passed. GREEN: 11 passed.
+- S-03 cookie, `c966d5f fix(base): mark the session cookie secure on https`:
+  - `config/session.php`: `'secure' => env('SESSION_SECURE_COOKIE', str_starts_with((string) env('APP_URL'), 'https://'))`, as in the gestor.
+  - The test loads `config/session.php` again with only the given `APP_URL` and `SESSION_SECURE_COOKIE`, and restores the environment, so a cached config or the checkout's `.env` does not change it.
+  - RED: 3 failed (`secure` was null), 2 passed. GREEN: 5 passed.
+- S-12, `5e70f7e fix(base): stop serving local files through signed routes`:
+  - `config/filesystems.php`: `'serve' => false` on the local disk. Nothing in the app builds `temporaryUrl`s.
+  - RED: 2 failed (`storage.local` registered, `/storage/robot.log` got 403). GREEN: 2 passed.
+- `docs/arquitectura.md` §11 says where the headers live and states the nonce rule for inline scripts.
+- Checks: `composer format` passed, `composer lint` passed (Pint and Larastan, 0 errors), `composer test` 716 passed, 2 skipped. `npm run build` passed; `public/build` stays ignored.
+- Pending before the merge: panel screenshots with the CSP active.
+
 ## Next step
 
-T4: `code-review`, push `fix/core-entra-oid` and open the PR. After the merge, IT can also set "Assignment required = Yes" on the Entra enterprise app (T-07).
+T5: `code-review`, panel screenshots with the CSP active (`npm run build`, no `npm run dev`), push `fix/base-https-headers` and open the PR.

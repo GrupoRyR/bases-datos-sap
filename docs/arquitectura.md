@@ -250,3 +250,7 @@ El panel es de TI y lleva solo la marca de Segurex (§3 del plan). Las reglas sa
 ```
 
 Textos en español, tuteando y en tipo oración; zonas táctiles de 44 px; foco visible; sin desplazamiento horizontal a 360 px.
+
+## 11. Cabeceras de seguridad
+
+La Content-Security-Policy sale de la app: `App\Modules\Core\Http\Middleware\ContentSecurityPolicy`, middleware global que `CoreServiceProvider` agrega, así que también la llevan las redirecciones, los errores y la API. Usa un nonce nuevo en cada petición y no permite `'unsafe-eval'`. Todo `<script>` en línea lleva `nonce="{{ Vite::cspNonce() }}"`; `tests/Modules/Core/Feature/Security/ContentSecurityPolicyTest.php` falla si una vista trae uno sin él. Con el servidor de Vite corriendo (`npm run dev`) no hay política; con `npm run build`, la local es igual a la de producción. Lo demás está en `public/.htaccess`: la redirección a https, HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy` y `Permissions-Policy`. `php artisan serve` ignora ese archivo, así que local sigue en http.

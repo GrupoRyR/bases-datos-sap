@@ -33,7 +33,8 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // Private files are never served over HTTP, not even by signed URL.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],
