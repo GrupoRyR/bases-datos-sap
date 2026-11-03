@@ -36,8 +36,10 @@ return [
 
     'sesion_cerrada' => 'Cerraste sesión.',
     'error' => 'No pudimos completar el ingreso con Microsoft. Inténtalo de nuevo.',
-    // The same for every Application\Auth\RejectionReason: the audit log keeps the reason.
+    // The same for every Application\Auth\RejectionReason but Guest: the audit log keeps the reason.
     'rechazado' => 'No puedes entrar con esa cuenta. Si crees que es un error, habla con TI.',
+    // RejectionReason::Guest: a B2B guest account of the tenant.
+    'invitado' => 'Las cuentas de invitado no pueden entrar. Entra con tu cuenta del Grupo RYR o habla con TI.',
     'cuenta_desactivada' => 'Tu cuenta está desactivada. Si crees que es un error, habla con TI.',
 
 ];

@@ -37,15 +37,16 @@ final class FakeIdentityProvider implements IdentityProvider
     }
 
     /**
-     * An identity of the configured tenant, unless $tenantId says otherwise.
+     * A member of the configured tenant, unless $tenantId or $guest say otherwise.
      */
     public static function identity(
         string $email = 'ana.gomez@segurex.com',
         string $objectId = 'oid-ana',
         ?string $tenantId = self::TENANT,
         ?string $name = 'Ana Gómez',
+        bool $guest = false,
     ): MicrosoftIdentity {
-        return new MicrosoftIdentity($objectId, $tenantId, $email, $name);
+        return new MicrosoftIdentity($objectId, $tenantId, $email, $name, $guest);
     }
 
     public function signsIn(MicrosoftIdentity $identity): self
