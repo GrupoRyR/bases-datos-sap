@@ -252,3 +252,41 @@ def test_leer_query(tmp_path: Path) -> None:
     assert config.leer_query("maestros/clientes.sql") == "SELECT 1 FROM DUMMY"
     with pytest.raises(ConfigError, match="no_existe.sql"):
         config.leer_query("no_existe.sql")
+
+
+@pytest.mark.parametrize(
+    ("valor", "esperado"),
+    [("true", True), ("1", True), ("yes", True),
+     ("false", False), ("0", False), ("no", False), ("NO", False), (" no ", False), ("n", False),
+     ("ture", True), ("apagado", True), ("", True), (None, True)],
+)
+def test_bool_seguro_solo_se_apaga_con_un_no_explicito(valor: str | None, esperado: bool) -> None:
+    # Un error de tipeo (HANA_ENCRYPT=ture) no debe apagar la protección sin querer.
+    assert config._bool_seguro(valor, True) is esperado
+
+
+def test_por_defecto_hana_cifra_y_valida_el_certificado() -> None:
+    hana = cargar_config().hana
+
+    assert hana.encrypt is True
+    assert hana.validar_certificado is True
+
+
+def test_el_cifrado_y_la_validacion_se_pueden_apagar(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HANA_ENCRYPT", "false")
+    monkeypatch.setenv("HANA_SSL_VALIDATE", " No ")
+
+    hana = cargar_config().hana
+
+    assert hana.encrypt is False
+    assert hana.validar_certificado is False
+
+
+def test_un_valor_raro_deja_el_cifrado_encendido(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HANA_ENCRYPT", "flase")
+    monkeypatch.setenv("HANA_SSL_VALIDATE", "off?")
+
+    hana = cargar_config().hana
+
+    assert hana.encrypt is True
+    assert hana.validar_certificado is True

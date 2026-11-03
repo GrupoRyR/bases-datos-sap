@@ -253,6 +253,9 @@ def _solo_carpeta(
     )
     for paso in pasos:  # FASE 2: la VPN ya está abajo
         fallos += paso.escribir()
+    if modo == "diagnostico":
+        # Lo configurado, no lo probado: la prueba es que el resumen no traiga fallos de HANA.
+        log.info("Modo TLS configurado para HANA: %s.", hana.describir_cifrado(cfg.hana))
     return fallos
 
 
@@ -307,6 +310,7 @@ def main(
     cfg: Config | None = None
     try:
         cfg = cargar_config()
+        registro.registrar_secretos(cfg)
         # Solo la completa habla con la API; el archivo, el catálogo y el diagnóstico no.
         cfg.validar(requiere_vpn=not args.sin_vpn, requiere_api=completa, empresas=empresas)
     except ConfigError as exc:

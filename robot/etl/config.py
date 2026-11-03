@@ -38,6 +38,7 @@ SOPHOS_CLI_POR_DEFECTO = r"C:\Program Files (x86)\Sophos\Connect\sccli.exe"
 
 _RE_FRANJA = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 _RE_CUENTA = re.compile(r"[0-9]+")
+_VERDADEROS = frozenset({"1", "true", "si", "sí", "yes", "y"})
 
 
 def ahora() -> datetime:
@@ -52,7 +53,19 @@ class ConfigError(RuntimeError):
 def _bool(valor: str | None, por_defecto: bool = False) -> bool:
     if valor is None or valor.strip() == "":
         return por_defecto
-    return valor.strip().lower() in {"1", "true", "si", "sí", "yes", "y"}
+    return valor.strip().lower() in _VERDADEROS
+
+
+def _bool_seguro(valor: str | None, por_defecto: bool) -> bool:
+    """Como _bool, pero un valor que no se reconoce deja el valor por defecto:
+    para banderas de seguridad, donde un error de tipeo (HANA_ENCRYPT=ture) no
+    debe apagar la protección sin querer."""
+    texto = (valor or "").strip().lower()
+    if texto in _VERDADEROS:
+        return True
+    if texto in {"0", "false", "no", "n"}:
+        return False
+    return por_defecto
 
 
 def _int(nombre: str, por_defecto: int, invalidos: list[str]) -> int:
@@ -178,6 +191,9 @@ class HanaConfig:
     port: int
     timeout: int
     empresas: dict[str, EmpresaHana] = field(default_factory=dict)
+    # TLS hacia HANA. Se apaga desde robot/.env solo si el servidor no lo soporta.
+    encrypt: bool = True
+    validar_certificado: bool = True
 
     def sin_precios(self) -> frozenset[str]:
         """Códigos de las empresas sin lista de precios pública."""
@@ -300,8 +316,9 @@ def cargar_config(env_path: Path | None = None) -> Config:
         if c.strip()
     ]
 
-    # Las contraseñas se registran en registro.registrar_secreto() donde se usan
-    # (vpn, hana, notificar, api): registro importa config, no al revés.
+    # Los secretos los registra registro.registrar_secretos(cfg) en cada punto de entrada
+    # (run_robot.py, revisar_solicitudes.py) apenas carga la configuración, y cada módulo
+    # donde los usa (vpn, hana, notificar, api): registro importa config, no al revés.
     return Config(
         vpn=VpnConfig(
             cli=Path(_texto("SOPHOS_CLI", SOPHOS_CLI_POR_DEFECTO)),
@@ -330,6 +347,8 @@ def cargar_config(env_path: Path | None = None) -> Config:
                 )
                 for codigo in EMPRESAS
             },
+            encrypt=_bool_seguro(os.getenv("HANA_ENCRYPT"), True),
+            validar_certificado=_bool_seguro(os.getenv("HANA_SSL_VALIDATE"), True),
         ),
         api=ApiConfig(
             url=_texto("BASES_SAP_API_URL").rstrip("/"),

@@ -70,3 +70,21 @@ def test_la_traza_de_una_excepcion_tampoco_lleva_secretos() -> None:
 
     assert "secreto-en-la-traza" not in texto
     assert "RuntimeError" in texto
+
+
+def test_los_secretos_del_env_se_registran_al_cargar(entorno_completo, monkeypatch) -> None:
+    import config
+
+    monkeypatch.setenv("ALERTA_SMTP_PASSWORD", "clave-smtp-prueba")
+    cfg = config.cargar_config()
+
+    registro.registrar_secretos(cfg)
+
+    secretos = ["clave-vpn-prueba", "clave-sgx-prueba", "clave-sdc-prueba",
+                "secreto-robot-de-prueba", "clave-smtp-prueba"]
+    record = _registro("Valores: %s", " ".join(secretos))
+    registro._RedactarSecretos().filter(record)
+    mensaje = record.getMessage()
+    for secreto in secretos:
+        assert secreto not in mensaje
+    assert mensaje == "Valores: " + " ".join(["***"] * len(secretos))

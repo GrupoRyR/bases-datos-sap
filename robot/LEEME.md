@@ -38,6 +38,19 @@ py -3.14 -m venv .venv
 
 El `.env` nunca se sube a Git. Los CSV quedan en `BASES_SAP_CSV_DIR`, fuera del repo.
 
+### Cifrado con HANA (TLS)
+
+La conexión a HANA va cifrada con TLS, como en el robot del gestor de cartera. Dos variables, las dos encendidas por defecto:
+
+- `HANA_ENCRYPT`: cifra la conexión.
+- `HANA_SSL_VALIDATE`: comprueba el certificado del servidor.
+
+Solo `false`, `0`, `no` o `n` las apagan; vacía, ausente o con un valor que no se entiende (por ejemplo `ture`), quedan encendidas, para que un error de tipeo no apague el cifrado.
+
+Hoy producción corre con `HANA_SSL_VALIDATE=false`: HANA no tiene un certificado disponible, así que la conexión va cifrada pero sin validar el certificado, expuesta a un intermediario activo. El robot lo deja en el log como advertencia en cada ejecución. `HANA_ENCRYPT=false` solo si el servidor no soporta TLS, y avisa a TI: el tráfico entre la VPN y HANA viajaría en claro (también queda como advertencia).
+
+La prueba real es `run_robot.py --diagnostico`. Si el resumen no trae fallos de HANA, la conexión cifrada funciona. Al final muestra el modo configurado (`Modo TLS configurado para HANA: cifrado sí, validación de certificado no.`). Si la conexión falla por TLS, el error en `robot\logs\robot.log` explica qué cambiar. El correo solo dice que revises el log.
+
 ## Primera ejecución con SAP real
 
 Antes de programar las tareas, corre esto desde `robot\etl` (no envía nada a la app):
@@ -143,7 +156,7 @@ Las categorías del archivo (`AUDITORIA`, `CONTABILIDAD`, `USUARIOS_Y_PERMISOS`,
 
 ## Registro y estado
 
-- `robot\logs\robot.log`: el detalle de cada ejecución (rota a los 5 MB). Las contraseñas nunca se escriben. Una revisión de solicitudes sin trabajo no escribe nada.
+- `robot\logs\robot.log`: el detalle de cada ejecución (rota a los 5 MB). Las contraseñas y el secreto de la API nunca se escriben: se marcan para ocultarlas apenas carga el `.env`. De un rechazo de la API solo queda el estado y los campos (`rows.12.codigo`), no su texto, que podría repetir un valor de SAP. Una revisión de solicitudes sin trabajo no escribe nada.
 - Un cliente o proveedor que llega de SAP sin nombre no frena la corrida: se envía con su código como nombre y queda un aviso (`WARNING ... llegó sin nombre`) en el log, para que TI le ponga el nombre en SAP.
 - `robot\state\ultima_ejecucion.json`: cómo terminó la última ejecución. Nunca lleva datos de SAP.
 - `robot\state\robot.lock`: el candado, mientras el robot corre.
@@ -151,6 +164,8 @@ Las categorías del archivo (`AUDITORIA`, `CONTABILIDAD`, `USUARIOS_Y_PERMISOS`,
 ## Correos de fallo
 
 Si llenas `ALERTA_SMTP_*` y `ALERTA_DESTINATARIOS`, el robot manda un correo con todos los fallos de cada ejecución. La app sigue con los últimos datos buenos de lo que falló.
+
+La conexión al servidor de correo va cifrada (puerto 465, o 587 con STARTTLS) y comprueba su certificado: si el certificado no es válido para `ALERTA_SMTP_HOST`, el correo no sale y el error queda en el log.
 
 Para no llenar el buzón, los avisos de la revisión de cada minuto tienen límite: la configuración incompleta avisa una vez al día y un error al tomar las solicitudes o uno inesperado, una vez por hora. El diagnóstico no avisa: lo corres tú y ves el resumen.
 

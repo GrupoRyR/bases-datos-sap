@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import smtplib
 import socket
+import ssl
 from email.message import EmailMessage
 
 from config import AlertaConfig
@@ -45,11 +46,17 @@ def avisar_fallos(
 
     try:
         # El puerto 465 es TLS desde el inicio; los demás (587) suben a TLS con STARTTLS.
+        # En los dos casos se verifica el certificado y el nombre del servidor: sin
+        # contexto, smtplib cifra pero acepta cualquier certificado.
+        contexto = ssl.create_default_context()
         ssl_directo = cfg.smtp_port == 465
-        clase = smtplib.SMTP_SSL if ssl_directo else smtplib.SMTP
-        with clase(cfg.smtp_host, cfg.smtp_port, timeout=30) as smtp:
+        if ssl_directo:
+            servidor = smtplib.SMTP_SSL(cfg.smtp_host, cfg.smtp_port, timeout=30, context=contexto)
+        else:
+            servidor = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30)
+        with servidor as smtp:
             if not ssl_directo:
-                smtp.starttls()
+                smtp.starttls(context=contexto)
             if cfg.smtp_user:
                 smtp.login(cfg.smtp_user, cfg.smtp_password)
             smtp.send_message(msg)

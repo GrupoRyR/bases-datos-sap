@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import config
+import hana
 import registro
 
 PREFIJOS = ("SOPHOS_", "HANA_", "BASES_SAP_", "ALERTA_")
@@ -34,6 +35,8 @@ def aislar_entorno(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(config, "STATE_DIR", tmp_path / "state")
     monkeypatch.setattr(config, "QUERIES_DIR", tmp_path / "queries")
     monkeypatch.setattr(registro, "_SECRETOS", [])
+    # El modo TLS de HANA se anuncia una vez por proceso: cada prueba es una ejecución nueva.
+    monkeypatch.setattr(hana, "_modo_tls_avisado", False, raising=False)
     yield
     _limpiar_variables()
 
