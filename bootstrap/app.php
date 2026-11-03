@@ -1,9 +1,11 @@
 <?php
 
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -20,4 +22,21 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        // A failed query's message holds every bound value, and the driver
+        // text can quote them too (MySQL's "Duplicate entry 'X'"). SAP rows
+        // carry personal data, so the log gets only the SQL template and the
+        // error codes; the default report, with message and trace, is skipped.
+        $exceptions->report(function (QueryException $e): void {
+            $previous = $e->getPrevious();
+            $errorInfo = $e->errorInfo ?? ($previous instanceof PDOException ? $previous->errorInfo : null);
+
+            Log::error('database.query_failed', [
+                'connection' => $e->getConnectionName(),
+                'sqlstate' => $errorInfo[0] ?? null,
+                'driver_code' => $errorInfo[1] ?? null,
+                'sql' => $e->getSql(),
+                'exception_class' => $e::class,
+            ]);
+        })->stop();
     })->create();
