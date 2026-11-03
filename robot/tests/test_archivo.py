@@ -264,9 +264,22 @@ def test_hbt_si_falla_el_descubrimiento_siguen_las_demas(escenario):
     assert (_tabla(e, "CONFIGURACION", "NNM1") / "2026-10-26.csv").is_file()
 
 
-@pytest.mark.parametrize("nombre", ["U_PASSWORD", "U_Pwd_Web", "U_ClaveApi", "U_Contraseña", "Pass1"])
+@pytest.mark.parametrize("nombre", [
+    "U_PASSWORD", "U_Pwd_Web", "U_ClaveApi", "U_Contraseña", "Pass1",
+    "U_TOKEN", "U_AccessToken", "U_SECRET", "U_Secreto", "U_ClientSecret",
+    "U_PIN", "PIN_ACCESO", "U_Pin2", "U_API_KEY", "APIKEY", "U_APIKEY", "U_ApiKey",
+    "U_KEY", "KEY", "U_PRIVATE_KEY", "U_AccessKey", "U_KEY_WEB",
+])
 def test_es_clave(nombre):
     assert archivo.es_clave(nombre)
+
+
+@pytest.mark.parametrize("nombre", [
+    "Code", "Name", "U_SHIPPING", "U_OPINION", "U_KEYWORD", "U_MONKEY", "U_SPINE",
+    "U_PINTURA", "U_Turkey", "U_KEYS_WORD", "U_CodigoPostal", "U_Pais",
+])
+def test_no_es_clave(nombre):
+    assert not archivo.es_clave(nombre)
 
 
 def test_sql_hbt_rechaza_nombres_raros():

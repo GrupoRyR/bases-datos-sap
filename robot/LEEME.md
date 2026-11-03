@@ -154,6 +154,8 @@ Todo queda en `BASES_SAP_CSV_DIR` (UTF-8 con BOM, separador `;`):
 
 Las categorías del archivo (`AUDITORIA`, `CONTABILIDAD`, `USUARIOS_Y_PERMISOS`, `CONFIGURACION`, …) solo van a esta carpeta: nunca se envían a la app.
 
+Las tablas `@HBT_*` de `CONFIGURACION` se leen columna por columna y el robot salta las que parecen claves: las que tienen `PASS`, `PWD`, `CLAVE`, `CONTRASE`, `TOKEN` o `SECRET` en el nombre, y las que tienen `KEY`, `APIKEY` o `PIN` como una parte entera del nombre (`U_PIN`, `U_API_KEY`, no `U_SHIPPING` ni `U_KEYWORD`). Cada columna saltada queda en el log.
+
 ## Registro y estado
 
 - `robot\logs\robot.log`: el detalle de cada ejecución (rota a los 5 MB). Las contraseñas y el secreto de la API nunca se escriben: se marcan para ocultarlas apenas carga el `.env`. De un rechazo de la API solo queda el estado y los campos (`rows.12.codigo`), no su texto, que podría repetir un valor de SAP. Una revisión de solicitudes sin trabajo no escribe nada.
