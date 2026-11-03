@@ -23,8 +23,8 @@ Fix the code findings of the 2026-11-03 security audit of `main` at `db50da3`, o
 | T3 | 3 Sap signature and limits | S-08, S-09, S-11, S-21 if small | delegated writer (2+ Sap middleware, model and test files) | done (#51, merged 21697be) |
 | T4 | 4 Core Entra oid and guests | S-10 | delegated writer (2+ Core auth, controller and test files) | done (#52, merged 702d6a1) |
 | T5 | 5 Base HTTPS, CSP, headers | S-03, S-04, S-12 | delegated writer (2+ Core middleware, base config and test files) | done (#54, merged af425f2) |
-| T6 | 6 Log redaction and rotation | S-05 | delegated writer (2+ base bootstrap, config and test files) | in progress |
-| T7 | 7 Dependencies | S-06, S-18 | pending | pending |
+| T6 | 6 Log redaction and rotation | S-05 | delegated writer (2+ base bootstrap, config and test files) | done (#55, merged 280b8ef) |
+| T7 | 7 Dependencies | S-06, S-18 | inline (lockfile and two requirements files) | in progress |
 
 ## Acceptance
 
@@ -187,6 +187,18 @@ Branch `fix/log-redaction` from `main` at `af425f2`, route: delegated writer. Th
 - Not changed: `mask_bindings_in_exception_messages` in `config/database.php` hides the bindings in the message, but not the driver text, so the reporter is still needed.
 - Pending: `.env.example` needs `LOG_STACK=daily`, `LOG_LEVEL=warning` and `LOG_DAILY_DAYS=14`. The user adds the lines, and sets the same values in the production `.env`, where they override these defaults.
 
+### T7
+
+Branch `fix/deps-security`, route: inline (mechanical version bumps).
+
+- S-06, `bc52504 fix(deps): update symfony/mime to 7.4.22 for CVE-2026-45070`: `composer update symfony/mime` moved only that package, from 7.4.19 to 7.4.22. `composer audit` is clean afterwards. `composer lint` passed; `composer test` gave 721 passed, 2 skipped.
+- S-18, `969cc09 fix(deps): update python-dotenv to 1.2.4 and pytest to 9.1.1`:
+  - python-dotenv 1.0.1 has GHSA-mf9w-mj56-hr94 (fixed in 1.2.2), and pytest 8.4.2 has GHSA-6w46-j5rx-g56g (fixed in 9.0.3). OSV lists nothing for 1.2.4 or 9.1.1.
+  - pytest stays on 9.1.1 because 9.2.0 was released on 2026-10-27, less than two weeks earlier.
+  - The user's condition holds: all 826 robot tests pass on pytest 9.1.1.
+  - Not done: hash pinning (`--require-hashes`). Both runtime packages are exact-pinned and have no transitive dependencies. Hashes would have to cover every platform wheel of hdbcli, and CI and LEEME would need a new install command. It is left as a possible follow-up.
+- `npm audit` was clean at the audit and was not touched.
+
 ## Next step
 
-T6: `code-review`, push `fix/log-redaction` and open the PR.
+T7: `code-review`, push `fix/deps-security`, open the PR, and get the user's merge approval. After that the feature is done; what is left is the IT list (T-01 to T-10) and the user's `.env` lines (`LOG_STACK`, `LOG_LEVEL`, `LOG_DAILY_DAYS`).
