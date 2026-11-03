@@ -177,3 +177,58 @@ it('limits each key on its own, so apps on one server do not share the limit', f
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertStatus(429);
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($other))->assertOk();
 });
+
+it('answers 429 to an IP over the failed-key limit without looking the key up', function () {
+    config(['sap.apps.failed_auth_per_minute' => 3]);
+
+    // Random keys get a fresh "sap-apps" bucket each, so only the IP can stop them.
+    foreach (range(1, 3) as $attempt) {
+        $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer("bsap_falsa_{$attempt}"))->assertUnauthorized();
+    }
+
+    $lookups = 0;
+    DB::listen(function ($query) use (&$lookups) {
+        $lookups += str_contains($query->sql, 'client_apps') ? 1 : 0;
+    });
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa_4'))
+        ->assertStatus(429)
+        ->assertHeader('Retry-After')
+        ->assertExactJson(['message' => 'Demasiados intentos con una llave inválida.']);
+
+    expect($lookups)->toBe(0);
+});
+
+it('counts every kind of failed key against the IP', function () {
+    config(['sap.apps.failed_auth_per_minute' => 3]);
+    $revoked = app(ClientAppKeys::class)->issue('Toma de pedidos');
+    app(ClientAppKeys::class)->revoke($revoked->id);
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA')->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($revoked->key))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertStatus(429);
+});
+
+it('keeps the failed-key limit to the IP that failed', function () {
+    config(['sap.apps.failed_auth_per_minute' => 1]);
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertStatus(429);
+
+    $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.2'])
+        ->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))
+        ->assertOk();
+});
+
+it('does not count good keys against the failed-key limit', function () {
+    config(['sap.apps.failed_auth_per_minute' => 2]);
+
+    foreach (range(1, 5) as $request) {
+        $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertOk();
+    }
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertStatus(429);
+});

@@ -43,6 +43,10 @@ return [
     'apps' => [
         // Per key; beyond it, 429 with Retry-After.
         'requests_per_minute' => 60,
+
+        // Missing, unknown or revoked keys per IP; beyond it, 429 with
+        // Retry-After before any key is looked up.
+        'failed_auth_per_minute' => 10,
     ],
 
     /*
