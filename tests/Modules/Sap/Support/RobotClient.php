@@ -16,7 +16,7 @@ final class RobotClient
 {
     public const KEY = 'r2026a';
 
-    public const SECRET = 'robot-secreto-de-prueba';
+    public const SECRET = 'robot-secreto-de-prueba-de-32-bytes';
 
     /** Registers the test key as ROBOT_HMAC_KEYS would. */
     public static function configure(): void

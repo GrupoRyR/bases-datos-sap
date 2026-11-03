@@ -95,15 +95,47 @@ it('rejects a replayed nonce of the same key', function () {
 });
 
 it('accepts the same nonce under another key', function () {
-    config(['sap.robot.keys' => RobotClient::KEY.':'.RobotClient::SECRET.', r2027b:otro-secreto-de-prueba']);
+    config(['sap.robot.keys' => RobotClient::KEY.':'.RobotClient::SECRET.', r2027b:otro-secreto-de-prueba-de-32-bytes']);
     $nonce = bin2hex(random_bytes(16));
     $timestamp = time();
 
     RobotClient::post($this, ROBOT_TEST_PATH, [], nonce: $nonce)->assertOk();
     RobotClient::post($this, ROBOT_TEST_PATH, [], timestamp: $timestamp, nonce: $nonce, headers: [
         'X-Robot-Key' => 'r2027b',
-        'X-Robot-Signature' => RobotClient::sign('otro-secreto-de-prueba', $timestamp, $nonce, ROBOT_TEST_PATH, '{}'),
+        'X-Robot-Signature' => RobotClient::sign('otro-secreto-de-prueba-de-32-bytes', $timestamp, $nonce, ROBOT_TEST_PATH, '{}'),
     ])->assertOk();
+});
+
+it('treats a key with a secret under 32 bytes as unknown', function (int $bytes, int $status) {
+    $secret = str_repeat('s', $bytes);
+    config(['sap.robot.keys' => "r2027b:{$secret}"]);
+    $timestamp = time();
+    $nonce = bin2hex(random_bytes(16));
+
+    RobotClient::post($this, ROBOT_TEST_PATH, [], timestamp: $timestamp, nonce: $nonce, headers: [
+        'X-Robot-Key' => 'r2027b',
+        'X-Robot-Signature' => RobotClient::sign($secret, $timestamp, $nonce, ROBOT_TEST_PATH, '{}'),
+    ])->assertStatus($status);
+})->with([
+    '31 bytes' => [31, 401],
+    '32 bytes' => [32, 200],
+]);
+
+it('warns about a short secret by key id only', function () {
+    Log::spy();
+    $secret = str_repeat('s', 31);
+    config(['sap.robot.keys' => "r2027b:{$secret}"]);
+    $timestamp = time();
+    $nonce = bin2hex(random_bytes(16));
+
+    RobotClient::post($this, ROBOT_TEST_PATH, [], timestamp: $timestamp, nonce: $nonce, headers: [
+        'X-Robot-Key' => 'r2027b',
+        'X-Robot-Signature' => RobotClient::sign($secret, $timestamp, $nonce, ROBOT_TEST_PATH, '{}'),
+    ]);
+
+    Log::shouldHaveReceived('warning')->twice();
+    Log::shouldHaveReceived('warning', ['sap.robot.short_secret', ['key' => 'r2027b']])->once();
+    Log::shouldHaveReceived('warning', ['sap.robot.signature_rejected', ['reason' => 'unknown_key', 'key' => 'r2027b', 'ip' => '127.0.0.1']])->once();
 });
 
 it('stores a nonce only after the signature checks out', function () {

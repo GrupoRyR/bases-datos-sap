@@ -10,7 +10,8 @@ return [
     | What the robot sends and how it is checked (docs/contrato-robot.md,
     | sections 2 and 3). Keys come from ROBOT_HMAC_KEYS as "id:secret"
     | pairs separated by commas; to rotate, add the new pair next to the old
-    | one, move the robot to it and then remove the old one.
+    | one, move the robot to it and then remove the old one. A secret under
+    | 32 bytes is ignored: its key is unknown and a warning names the key id.
     |
     */
 

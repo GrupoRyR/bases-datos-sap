@@ -21,6 +21,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class VerifyRobotSignature
 {
+    private const MIN_SECRET_BYTES = 32;
+
     public function __construct(private readonly NonceStore $nonces) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -74,15 +76,25 @@ final class VerifyRobotSignature
 
     /**
      * The secret of a key id in ROBOT_HMAC_KEYS ("id:secret,id2:secret2").
+     * A secret under 32 bytes (contract section 3) makes its key unknown and
+     * is logged by key id only.
      */
     private function secretFor(string $key): ?string
     {
         foreach (explode(',', (string) config('sap.robot.keys')) as $pair) {
             [$id, $secret] = array_pad(explode(':', trim($pair), 2), 2, '');
 
-            if ($id === $key && $secret !== '') {
-                return $secret;
+            if ($id !== $key || $secret === '') {
+                continue;
             }
+
+            if (strlen($secret) < self::MIN_SECRET_BYTES) {
+                Log::warning('sap.robot.short_secret', ['key' => $key]);
+
+                return null;
+            }
+
+            return $secret;
         }
 
         return null;
