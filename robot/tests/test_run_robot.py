@@ -431,6 +431,14 @@ def test_diagnostico_con_errores_sale_con_1_sin_correo(entorno, correos, monkeyp
     assert [etapa for etapa, _ in estado["fallos"]] == ["DIAGNOSTICO"]
 
 
+def test_diagnostico_muestra_el_modo_tls_de_hana(entorno, correos, monkeypatch, caplog):
+    e = entorno
+    monkeypatch.setenv("HANA_SSL_VALIDATE", "false")
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert _main(e, "--diagnostico", fabrica_api=_sin_api(e, monkeypatch)) == 0
+    assert "Conexión a HANA: cifrado sí, validación de certificado no." in caplog.messages
+
+
 def test_archivo_si_falla_la_vpn_avisa_y_no_escribe(entorno, correos, monkeypatch):
     e = entorno
     prohibida = _sin_api(e, monkeypatch)

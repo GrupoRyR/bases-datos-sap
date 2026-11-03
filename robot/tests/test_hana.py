@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import sys
 import types
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -123,6 +125,118 @@ def test_sin_ruta_al_puerto_falla(dbapi: DbapiFalso, monkeypatch: pytest.MonkeyP
             pass
 
     assert dbapi.llamadas == []
+
+
+def _textos(caplog: pytest.LogCaptureFixture, nivel: int = logging.INFO) -> str:
+    return "\n".join(r.getMessage() for r in caplog.records if r.levelno >= nivel)
+
+
+def test_por_defecto_cifra_y_valida_el_certificado(dbapi: DbapiFalso, caplog) -> None:
+    cfg = _cfg()
+
+    with caplog.at_level(logging.INFO, logger="bases_sap.hana"):
+        with hana.conectar(cfg, cfg.empresas["SGX"]):
+            pass
+
+    llamada = dbapi.llamadas[0]
+    assert llamada["encrypt"] is True
+    assert llamada["sslValidateCertificate"] is True
+    assert "sslTrustStore" not in llamada
+    assert "Conexión a HANA cifrada (TLS)" in _textos(caplog)
+    assert _textos(caplog, logging.WARNING) == ""
+
+
+def test_hana_encrypt_false_conecta_sin_cifrar_y_avisa(dbapi: DbapiFalso, caplog) -> None:
+    cfg = replace(_cfg(), encrypt=False)
+
+    with caplog.at_level(logging.INFO, logger="bases_sap.hana"):
+        with hana.conectar(cfg, cfg.empresas["SGX"]):
+            pass
+
+    llamada = dbapi.llamadas[0]
+    assert llamada["encrypt"] is False
+    assert llamada["sslValidateCertificate"] is False
+    avisos = _textos(caplog, logging.WARNING)
+    assert "sin cifrar" in avisos and "HANA_ENCRYPT=false" in avisos
+
+
+def test_sin_validar_el_certificado_cifra_y_avisa(dbapi: DbapiFalso, caplog) -> None:
+    cfg = replace(_cfg(), validar_certificado=False)
+
+    with caplog.at_level(logging.INFO, logger="bases_sap.hana"):
+        with hana.conectar(cfg, cfg.empresas["SGX"]):
+            pass
+
+    llamada = dbapi.llamadas[0]
+    assert llamada["encrypt"] is True
+    assert llamada["sslValidateCertificate"] is False
+    assert "HANA_SSL_VALIDATE=false" in _textos(caplog, logging.WARNING)
+
+
+def test_el_modo_tls_se_anuncia_una_vez_por_ejecucion(dbapi: DbapiFalso, caplog) -> None:
+    cfg = replace(_cfg(), validar_certificado=False)
+
+    with caplog.at_level(logging.INFO, logger="bases_sap.hana"):
+        for codigo in ("SGX", "SDC"):
+            with hana.conectar(cfg, cfg.empresas[codigo]):
+                pass
+
+    assert len(dbapi.llamadas) == 2
+    assert all(llamada["sslValidateCertificate"] is False for llamada in dbapi.llamadas)
+    assert _textos(caplog).count("Conexión a HANA cifrada (TLS)") == 1
+    assert _textos(caplog, logging.WARNING).count("HANA_SSL_VALIDATE=false") == 1
+
+
+ERROR_TLS = "(-10709, 'Connection failed (RTE:[300015] SSL certificate validation failed: host name mismatch')"
+
+
+def test_un_error_de_tls_explica_como_corregirlo(dbapi: DbapiFalso) -> None:
+    dbapi.errores = [RuntimeError(ERROR_TLS)] * 3
+    cfg = _cfg()
+
+    with pytest.raises(HanaError) as error:
+        with hana.conectar(cfg, cfg.empresas["SGX"]):
+            pass
+
+    mensaje = str(error.value)
+    assert "robot/.env" in mensaje
+    assert "HANA_SSL_VALIDATE=false" in mensaje
+    assert "HANA_ENCRYPT=false" in mensaje
+    assert "--diagnostico" in mensaje
+    assert "TRUSTSTORE" not in mensaje
+
+
+def test_un_error_que_no_es_de_tls_no_sugiere_apagar_el_cifrado(dbapi: DbapiFalso) -> None:
+    dbapi.errores = [RuntimeError("Connection refused")] * 3
+    cfg = _cfg()
+
+    with pytest.raises(HanaError) as error:
+        with hana.conectar(cfg, cfg.empresas["SGX"]):
+            pass
+
+    assert len(dbapi.llamadas) == 3
+    assert "HANA_ENCRYPT" not in str(error.value)
+
+
+def test_sin_cifrado_un_error_de_tls_no_trae_la_ayuda(dbapi: DbapiFalso) -> None:
+    dbapi.errores = [RuntimeError(ERROR_TLS)] * 3
+    cfg = replace(_cfg(), encrypt=False)
+
+    with pytest.raises(HanaError) as error:
+        with hana.conectar(cfg, cfg.empresas["SGX"]):
+            pass
+
+    assert "HANA_SSL_VALIDATE" not in str(error.value)
+
+
+def test_describir_cifrado_resume_el_modo() -> None:
+    cfg = _cfg()
+
+    assert hana.describir_cifrado(cfg) == "cifrado sí, validación de certificado sí"
+    assert hana.describir_cifrado(replace(cfg, validar_certificado=False)) == (
+        "cifrado sí, validación de certificado no"
+    )
+    assert hana.describir_cifrado(replace(cfg, encrypt=False)) == "cifrado no, validación de certificado no"
 
 
 def test_ejecutar_devuelve_columnas_y_filas_y_pasa_parametros() -> None:

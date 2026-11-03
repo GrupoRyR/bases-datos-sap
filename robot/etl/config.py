@@ -55,6 +55,18 @@ def _bool(valor: str | None, por_defecto: bool = False) -> bool:
     return valor.strip().lower() in {"1", "true", "si", "sí", "yes", "y"}
 
 
+def _bool_seguro(valor: str | None, por_defecto: bool) -> bool:
+    """Como _bool, pero un valor que no se reconoce deja el valor por defecto:
+    para banderas de seguridad, donde un error de tipeo (HANA_ENCRYPT=ture) no
+    debe apagar la protección sin querer."""
+    texto = (valor or "").strip().lower()
+    if texto in {"1", "true", "si", "sí", "yes", "y"}:
+        return True
+    if texto in {"0", "false", "no", "n"}:
+        return False
+    return por_defecto
+
+
 def _int(nombre: str, por_defecto: int, invalidos: list[str]) -> int:
     """Entero de la variable; si falta, el valor por defecto.
 
@@ -178,6 +190,9 @@ class HanaConfig:
     port: int
     timeout: int
     empresas: dict[str, EmpresaHana] = field(default_factory=dict)
+    # TLS hacia HANA. Se apaga desde robot/.env solo si el servidor no lo soporta.
+    encrypt: bool = True
+    validar_certificado: bool = True
 
     def sin_precios(self) -> frozenset[str]:
         """Códigos de las empresas sin lista de precios pública."""
@@ -330,6 +345,8 @@ def cargar_config(env_path: Path | None = None) -> Config:
                 )
                 for codigo in EMPRESAS
             },
+            encrypt=_bool_seguro(os.getenv("HANA_ENCRYPT"), True),
+            validar_certificado=_bool_seguro(os.getenv("HANA_SSL_VALIDATE"), True),
         ),
         api=ApiConfig(
             url=_texto("BASES_SAP_API_URL").rstrip("/"),

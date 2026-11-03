@@ -38,6 +38,19 @@ py -3.14 -m venv .venv
 
 El `.env` nunca se sube a Git. Los CSV quedan en `BASES_SAP_CSV_DIR`, fuera del repo.
 
+### Cifrado con HANA (TLS)
+
+La conexión a HANA va cifrada con TLS, como en el robot del gestor de cartera. Dos variables, las dos encendidas por defecto:
+
+- `HANA_ENCRYPT`: cifra la conexión.
+- `HANA_SSL_VALIDATE`: comprueba el certificado del servidor.
+
+Solo `false`, `0`, `no` o `n` las apagan; vacía, ausente o con un valor que no se entiende (por ejemplo `ture`), quedan encendidas, para que un error de tipeo no apague el cifrado.
+
+Hoy producción corre con `HANA_SSL_VALIDATE=false`: HANA no tiene un certificado disponible, así que la conexión va cifrada pero sin validar el certificado, expuesta a un intermediario activo. El robot lo deja en el log como advertencia en cada ejecución. `HANA_ENCRYPT=false` solo si el servidor no soporta TLS, y avisa a TI: el tráfico entre la VPN y HANA viajaría en claro (también queda como advertencia).
+
+La prueba real del modo es `run_robot.py --diagnostico`: si conecta, el TLS funciona, y al final del resumen muestra el modo (`Conexión a HANA: cifrado sí, validación de certificado no.`). Si la conexión falla por TLS, el error explica qué cambiar.
+
 ## Primera ejecución con SAP real
 
 Antes de programar las tareas, corre esto desde `robot\etl` (no envía nada a la app):
