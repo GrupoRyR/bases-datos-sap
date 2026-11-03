@@ -178,7 +178,7 @@ it('limits each key on its own, so apps on one server do not share the limit', f
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($other))->assertOk();
 });
 
-it('answers 429 to an IP over the failed-key limit without looking the key up', function () {
+it('answers 429 to bad keys from an IP over the failed-key limit', function () {
     config(['sap.apps.failed_auth_per_minute' => 3]);
 
     // Random keys get a fresh "sap-apps" bucket each, so only the IP can stop them.
@@ -186,17 +186,20 @@ it('answers 429 to an IP over the failed-key limit without looking the key up', 
         $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer("bsap_falsa_{$attempt}"))->assertUnauthorized();
     }
 
-    $lookups = 0;
-    DB::listen(function ($query) use (&$lookups) {
-        $lookups += str_contains($query->sql, 'client_apps') ? 1 : 0;
-    });
-
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa_4'))
         ->assertStatus(429)
         ->assertHeader('Retry-After')
         ->assertExactJson(['message' => 'Demasiados intentos con una llave inválida.']);
+});
 
-    expect($lookups)->toBe(0);
+it('lets a good key through from an IP over the failed-key limit', function () {
+    config(['sap.apps.failed_auth_per_minute' => 1]);
+
+    // The apps on one server share its IP: one with a revoked key must not lock out the rest.
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertStatus(429);
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertOk();
 });
 
 it('counts every kind of failed key against the IP', function () {

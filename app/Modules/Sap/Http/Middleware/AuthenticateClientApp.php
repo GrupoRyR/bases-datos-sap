@@ -15,8 +15,9 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Every 401 counts against the IP. The "sap-apps" limit goes by key, so a
  * client trying random keys would get a fresh bucket each time; past
- * sap.apps.failed_auth_per_minute failures the IP gets 429 before any key
- * is looked up. A good key never counts.
+ * sap.apps.failed_auth_per_minute failures the IP's bad keys get 429. A good
+ * key never counts and always goes through: the apps on one server share
+ * its IP, and one with a revoked key must not lock out the rest.
  */
 final class AuthenticateClientApp
 {
@@ -26,18 +27,18 @@ final class AuthenticateClientApp
 
     public function handle(Request $request, Closure $next): Response
     {
-        $failures = 'sap-apps-fail|'.$request->ip();
-
-        if (RateLimiter::tooManyAttempts($failures, (int) config('sap.apps.failed_auth_per_minute'))) {
-            return response()->json(['message' => 'Demasiados intentos con una llave inválida.'], 429, [
-                'Retry-After' => RateLimiter::availableIn($failures),
-            ]);
-        }
-
         $key = (string) $request->bearerToken();
         $app = $key === '' ? null : $this->keys->find($key);
 
         if ($app === null) {
+            $failures = 'sap-apps-fail|'.$request->ip();
+
+            if (RateLimiter::tooManyAttempts($failures, (int) config('sap.apps.failed_auth_per_minute'))) {
+                return response()->json(['message' => 'Demasiados intentos con una llave inválida.'], 429, [
+                    'Retry-After' => RateLimiter::availableIn($failures),
+                ]);
+            }
+
             RateLimiter::hit($failures, self::DECAY_SECONDS);
 
             return response()->json(['message' => 'Llave inválida.'], 401);

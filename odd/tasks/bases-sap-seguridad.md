@@ -113,7 +113,7 @@ Branch `fix/sap-robot-hardening` from `main` at `5a323c9`, route: delegated writ
   - RED: 2 failing in `RobotTransportTest.php` (200 instead of 400, no warning logged), 35 passed. GREEN: 37 passed.
 - S-09, `f5f5cd8 fix(sap): limit failed app-key attempts per IP`:
   - `AuthenticateClientApp` counts each 401 (missing, unknown or revoked key) under `sap-apps-fail|<ip>` for 60 seconds. Past `sap.apps.failed_auth_per_minute` (default 10, module config, no env var) it answers 429 `Demasiados intentos con una llave inválida.` with `Retry-After`, before any key lookup. A good key never counts.
-  - While an IP is over the limit, a good key from that same IP also gets 429 until the window passes.
+  - Changed after code-review: the key is looked up first. A good key always goes through, even from an IP over the limit, because the apps on one server share its IP and one with a revoked key must not lock out the rest. Only that IP's bad keys get 429.
   - RED: 4 failed in `AppApiTest.php` (401 instead of 429), 17 passed. GREEN: 21 passed.
 - S-11, `adf4efe fix(sap): ignore robot keys with a short secret`:
   - `VerifyRobotSignature::secretFor` is the only place that parses `ROBOT_HMAC_KEYS`. A pair whose secret is under 32 bytes (`strlen`) makes its key unknown (`unknown_key`) and logs `sap.robot.short_secret` with the key id only.
@@ -124,6 +124,7 @@ Branch `fix/sap-robot-hardening` from `main` at `5a323c9`, route: delegated writ
   - Four test fixtures that build finished runs use `Run::forceCreate`.
   - RED: 3 failed in the new `MassAssignmentTest.php`. GREEN: module suites 580 passed, 1 skipped.
 - Checks: `composer format` passed, `composer lint` passed (Pint and Larastan, 0 errors), `composer test` 670 passed, 2 skipped.
+- `code-review` (high), `fix(sap): let good app keys through an IP over the failed-key limit`: before this fix, a misconfigured app could lock out its sister apps on the same server. RED: the new good-key test got 429. GREEN: `composer test` 671 passed, 2 skipped; lint passed.
 
 ## Next step
 
