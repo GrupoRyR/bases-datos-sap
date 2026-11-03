@@ -19,8 +19,8 @@ Fix the code findings of the 2026-11-03 security audit of `main` at `db50da3`, o
 | ID | PR | Findings | Route | Status |
 |---|---|---|---|---|
 | T1 | 1 Robot TLS and logs | S-01, S-02, S-13, S-19 | delegated writer (4+ robot files) | done (#49, merged d0766af) |
-| T2 | 2 Robot guards | S-15, S-16, S-17, S-20 | delegated writer (4+ robot files) | in progress |
-| T3 | 3 Sap signature and limits | S-08, S-09, S-11, S-21 if small | pending | pending |
+| T2 | 2 Robot guards | S-15, S-16, S-17, S-20 | delegated writer (4+ robot files) | done (#50, merged 5a323c9) |
+| T3 | 3 Sap signature and limits | S-08, S-09, S-11, S-21 if small | delegated writer (2+ Sap middleware, model and test files) | in progress |
 | T4 | 4 Core Entra oid and guests | S-10 | pending | pending |
 | T5 | 5 Base HTTPS, CSP, headers | S-03, S-04, S-12 | pending | pending |
 | T6 | 6 Log redaction and rotation | S-05 | pending | pending |
@@ -101,6 +101,30 @@ Branch `fix/robot-guards` from `main` at `d0766af`, route: delegated writer. Rob
     - camelCase `KEY`/`PIN` names such as `U_UserPin` are not skipped. Catching them would also skip innocent names.
     - the temp purge walks the CSV tree on every run with work. That costs little and the robot holds a single lock.
 
+### T3
+
+Branch `fix/sap-robot-hardening` from `main` at `5a323c9`, route: delegated writer. Full suite went from 658 to 670 passing tests (12 new, 2 skipped).
+
+- S-08, `2acf05d fix(sap): reject robot requests with a query string`:
+  - `VerifyRobotSignature` answers 400 `Las rutas del robot no llevan query string.` to any robot request with a query string, before the signature check, so it never burns a nonce. It logs `sap.robot.signature_rejected` with reason `query_string`, the key id and the IP.
+  - The robot never sends one: `robot/etl/api.py` builds the URL as `BASES_SAP_API_URL` plus a fixed path.
+  - Contract change, pending the user's confirmation on the PR: §3 gains one line saying a query string gets 400 and does not spend the nonce.
+  - `RobotClient::post` takes a `query` that goes in the URL but not in the signature.
+  - RED: 2 failing in `RobotTransportTest.php` (200 instead of 400, no warning logged), 35 passed. GREEN: 37 passed.
+- S-09, `f5f5cd8 fix(sap): limit failed app-key attempts per IP`:
+  - `AuthenticateClientApp` counts each 401 (missing, unknown or revoked key) under `sap-apps-fail|<ip>` for 60 seconds. Past `sap.apps.failed_auth_per_minute` (default 10, module config, no env var) it answers 429 `Demasiados intentos con una llave inválida.` with `Retry-After`, before any key lookup. A good key never counts.
+  - While an IP is over the limit, a good key from that same IP also gets 429 until the window passes.
+  - RED: 4 failed in `AppApiTest.php` (401 instead of 429), 17 passed. GREEN: 21 passed.
+- S-11, `adf4efe fix(sap): ignore robot keys with a short secret`:
+  - `VerifyRobotSignature::secretFor` is the only place that parses `ROBOT_HMAC_KEYS`. A pair whose secret is under 32 bytes (`strlen`) makes its key unknown (`unknown_key`) and logs `sap.robot.short_secret` with the key id only.
+  - The test secrets grow to 35 and 34 bytes. The contract test vector keeps its 23-byte secret: it checks `RobotSignature::sign`, not the middleware.
+  - RED: the 31-byte case got 200 and no warning was logged (2 failing of 40). With the check in place, 126 Sap tests failed with 401 until the test secret was lengthened. GREEN: Sap suite 342 passed, 1 skipped.
+- S-21, `d6bfb18 refactor(sap): replace guarded with fillable on Sap models`:
+  - `ClientApp` fills `nombre` only; `AppKeys::issue` force-fills the hash and prefix, as `rotate` already did. `Run` fills what `StartRun` sets. `UpdateRequest` fills what `PlaceRequest` sets. Everything else already used `forceFill` or query updates.
+  - Four test fixtures that build finished runs use `Run::forceCreate`.
+  - RED: 3 failed in the new `MassAssignmentTest.php`. GREEN: module suites 580 passed, 1 skipped.
+- Checks: `composer format` passed, `composer lint` passed (Pint and Larastan, 0 errors), `composer test` 670 passed, 2 skipped.
+
 ## Next step
 
-T2: code-review, push `fix/robot-guards`, open the PR and wait for green CI and the user's merge approval.
+T3: `code-review`, push `fix/sap-robot-hardening` and open the PR. Before the merge, the user confirms that the production and robot HMAC secrets are at least 32 bytes; a shorter one stops the robot with 401. The user also confirms the one-line contract change of S-08.
