@@ -20,7 +20,7 @@ beforeEach(function () {
 /** @param  array<string, mixed>  $attributes */
 function statusRun(Company $company, Dataset $dataset, array $attributes): Run
 {
-    return Run::create(array_merge([
+    return Run::forceCreate(array_merge([
         'conjunto' => $dataset, 'empresa' => $company, 'tipo' => 'solicitud', 'partes' => ['clientes' => 'cambios'],
         'solicitudes' => [], 'extraida_en' => '2026-10-27 02:00:00', 'estado' => 'cerrada',
         'abierta_hasta' => '2026-10-27 02:30:00', 'robot_key' => 'r2026a',

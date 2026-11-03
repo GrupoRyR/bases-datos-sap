@@ -112,7 +112,7 @@ it('shows a request only to the apps that joined it', function () {
 });
 
 it('tells when each part of a dataset was last applied', function () {
-    $closed = fn (array $parts, string $appliedAt, Company $company = Company::Sgx) => Run::create([
+    $closed = fn (array $parts, string $appliedAt, Company $company = Company::Sgx) => Run::forceCreate([
         'conjunto' => Dataset::Maestros, 'empresa' => $company, 'tipo' => 'solicitud', 'partes' => $parts,
         'solicitudes' => [], 'extraida_en' => $appliedAt, 'estado' => 'cerrada', 'abierta_hasta' => $appliedAt,
         'robot_key' => 'r2026a', 'aplicada_en' => $appliedAt,

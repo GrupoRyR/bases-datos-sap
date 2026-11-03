@@ -20,7 +20,7 @@ beforeEach(function () {
 
 function stabilityRun(string $day, Company $company, Dataset $dataset, string $state = 'cerrada'): Run
 {
-    return Run::create([
+    return Run::forceCreate([
         'conjunto' => $dataset, 'empresa' => $company, 'tipo' => 'completa', 'partes' => [], 'solicitudes' => [],
         'extraida_en' => "{$day} 02:10:00", 'estado' => $state, 'abierta_hasta' => "{$day} 02:40:00",
         'robot_key' => 'r2026a', 'terminada_en' => "{$day} 02:20:00",

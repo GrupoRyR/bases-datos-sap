@@ -31,7 +31,8 @@ final class AppKeys implements ClientAppKeys
 
         $key = $this->newKey();
 
-        $app = ClientApp::create(['nombre' => $name, ...$this->stored($key)]);
+        $app = (new ClientApp(['nombre' => $name]))->forceFill($this->stored($key));
+        $app->save();
 
         return new IssuedAppKey($app->id, $app->nombre, $key, $app->key_prefix);
     }
