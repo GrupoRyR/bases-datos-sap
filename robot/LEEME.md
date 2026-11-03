@@ -151,6 +151,9 @@ Todo queda en `BASES_SAP_CSV_DIR` (UTF-8 con BOM, separador `;`):
 | `<categoría>\<empresa>\<tabla>\aaaa-mm.csv` | Registros del archivo, por mes | Siempre |
 | `_CATALOGO\<empresa>\<consulta>\aaaa-mm-dd.csv` | Catálogo | 52 semanas |
 | `_DIAGNOSTICO\<empresa>\<parte>\…` y `_DIAGNOSTICO\resumen\…` | Diagnóstico | 90 días |
+| `.<archivo>.<letras>.tmp`, en cualquier carpeta | Temporal de una escritura que se cortó (el robot se cerró a la mitad); trae datos de SAP | 1 día: lo borra la siguiente nocturna o revisión de solicitudes |
+
+Cada CSV se escribe primero en un temporal que luego se renombra, así que nunca queda un archivo a medias. Un temporal con menos de un día no se toca, porque otra ejecución podría estar escribiéndolo. El log solo dice cuántos temporales se borraron.
 
 Las categorías del archivo (`AUDITORIA`, `CONTABILIDAD`, `USUARIOS_Y_PERMISOS`, `CONFIGURACION`, …) solo van a esta carpeta: nunca se envían a la app.
 

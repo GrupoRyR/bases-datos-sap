@@ -10,6 +10,7 @@ Estructura (plan §5):
     _CATALOGO\\<SGX|SDC>\\<consulta>\\aaaa-mm-dd.csv      foto del catálogo, 52 semanas
     _DIAGNOSTICO\\<SGX|SDC>\\<parte>\\aaaa-mm-dd_hhmm.csv y
     _DIAGNOSTICO\\resumen\\aaaa-mm-dd_hhmm.csv               una por ejecución, 90 días
+    .<nombre>.*.tmp en cualquier carpeta                     temporal huérfano, 1 día
 
 CSV: UTF-8 con BOM (Excel lo abre bien), separador `;`, encabezado con los
 nombres del contrato. Se escribe a un temporal en la misma carpeta y se
@@ -22,6 +23,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -34,6 +36,8 @@ log = obtener("carpeta")
 
 RETENCION_DIAS = 90
 RETENCION_FOTOS_DIAS = 364  # 52 semanas
+RETENCION_TEMPORALES_DIAS = 1  # temporales de una escritura cortada
+PATRON_TEMPORAL = re.compile(r"^\..+\.tmp$")  # los de tempfile.mkstemp en escribir_csv y anexar_csv
 PATRON_CORRIDA = re.compile(r"^(\d{4}-\d{2}-\d{2})_\d{4}(?:-\d+)?\.csv$")
 PATRON_FOTO = re.compile(r"^(\d{4}-\d{2}-\d{2})\.csv$")
 PATRON_MES = re.compile(r"^(\d{4}-\d{2})\.csv$")
@@ -293,4 +297,32 @@ class Carpeta:
             borrados.extend(purgar_por_fecha(carpeta, PATRON_CORRIDA, limite))
         if borrados:
             log.info("Retención: %d CSV de corridas con más de %d días borrados.", len(borrados), dias)
+        return borrados
+
+    def purgar_temporales(self, dias: int = RETENCION_TEMPORALES_DIAS) -> list[Path]:
+        """Borra en toda la carpeta los temporales `.<nombre>.*.tmp` que dejó una
+        escritura cortada (escribir_csv o anexar_csv con el proceso muerto) y que
+        llevan más de `dias` sin cambiar.
+
+        Uno más nuevo no se toca: una corrida podría estar escribiéndolo. La edad
+        sale de la hora de modificación del archivo contra el reloj del PC. Nunca
+        se lee el contenido (trae datos de SAP): el log solo dice cuántos se borraron.
+        """
+        borrados: list[Path] = []
+        if not self.raiz.is_dir():
+            return borrados
+        limite = time.time() - dias * 24 * 3600
+        for ruta in sorted(self.raiz.rglob("*.tmp")):
+            if not PATRON_TEMPORAL.match(ruta.name):
+                continue
+            try:
+                if not ruta.is_file() or ruta.stat().st_mtime >= limite:
+                    continue
+                ruta.unlink()
+                borrados.append(ruta)
+            except OSError as exc:
+                log.warning("No se pudo borrar el temporal %s: %s", ruta, exc)
+        if borrados:
+            log.info("Retención: %d temporales huérfanos con más de %d %s borrados.",
+                     len(borrados), dias, "día" if dias == 1 else "días")
         return borrados
