@@ -67,6 +67,10 @@ Branch `fix/robot-tls-logs`, route: delegated writer. Robot suite went from 677 
 - S-19 in `revisar_solicitudes`, `fix(robot): register secrets at load in revisar_solicitudes`:
   - `revisar_solicitudes.main` also calls `registrar_secretos(cfg)` right after `cargar_config`.
   - RED: the new test failed, because in a blocked slot no component registers anything. GREEN: full suite 708 passed.
+- `code-review` (high), 6 findings, `fix(robot): address review of the HANA TLS hint and diagnostic line`:
+  - Fixed: the TLS hint leaves out `HANA_SSL_VALIDATE=false` when it is already off. The diagnostic line now says "Modo TLS configurado". `LEEME.md` says the hint is in `robot.log`, not in the email. The secret-registration comment is fixed. `_bool` and `_bool_seguro` share `_VERDADEROS`.
+  - Not changed in code: a verified SMTP certificate can stop alerts if the mail server's certificate is private. After the merge, TI sends a test alert.
+  - RED: 2 failed. GREEN: full suite 709 passed.
 - Pending: `robot/.env.example` needs `HANA_ENCRYPT` and `HANA_SSL_VALIDATE`. The permission rules block it, so the user adds the lines.
 
 ## Next step

@@ -49,7 +49,7 @@ Solo `false`, `0`, `no` o `n` las apagan; vacía, ausente o con un valor que no 
 
 Hoy producción corre con `HANA_SSL_VALIDATE=false`: HANA no tiene un certificado disponible, así que la conexión va cifrada pero sin validar el certificado, expuesta a un intermediario activo. El robot lo deja en el log como advertencia en cada ejecución. `HANA_ENCRYPT=false` solo si el servidor no soporta TLS, y avisa a TI: el tráfico entre la VPN y HANA viajaría en claro (también queda como advertencia).
 
-La prueba real del modo es `run_robot.py --diagnostico`: si conecta, el TLS funciona, y al final del resumen muestra el modo (`Conexión a HANA: cifrado sí, validación de certificado no.`). Si la conexión falla por TLS, el error explica qué cambiar.
+La prueba real es `run_robot.py --diagnostico`. Si el resumen no trae fallos de HANA, la conexión cifrada funciona. Al final muestra el modo configurado (`Modo TLS configurado para HANA: cifrado sí, validación de certificado no.`). Si la conexión falla por TLS, el error en `robot\logs\robot.log` explica qué cambiar. El correo solo dice que revises el log.
 
 ## Primera ejecución con SAP real
 

@@ -16,13 +16,18 @@ LOTE = 5000  # filas por fetch, para no cargar todo en memoria de golpe
 # Texto (en minúsculas) de los errores del driver que vienen del TLS.
 _PISTAS_TLS = ("ssl", "tls", "certificate", "handshake")
 
-AYUDA_TLS = (
-    "El fallo parece del cifrado TLS con HANA. Para corregirlo, en robot/.env:\n"
-    "  1. Solo como último recurso, HANA_SSL_VALIDATE=false (cifra, pero no "
-    "comprueba el certificado).\n"
-    "  2. Si el servidor no soporta TLS, HANA_ENCRYPT=false y avisa a TI.\n"
-    "Después vuelve a correr: python run_robot.py --diagnostico"
-)
+
+def _ayuda_tls(cfg: HanaConfig) -> str:
+    """Qué cambiar en robot/.env ante un error de TLS; no sugiere lo que ya está apagado."""
+    pasos = []
+    if cfg.validar_certificado:
+        pasos.append("Solo como último recurso, HANA_SSL_VALIDATE=false (cifra, pero no "
+                     "comprueba el certificado).")
+    pasos.append("Si el servidor no soporta TLS, HANA_ENCRYPT=false y avisa a TI.")
+    lineas = "\n".join(f"  {n}. {paso}" for n, paso in enumerate(pasos, 1))
+    return ("El fallo parece del cifrado TLS con HANA. Para corregirlo, en robot/.env:\n"
+            f"{lineas}\nDespués vuelve a correr: python run_robot.py --diagnostico")
+
 
 # El modo TLS se anuncia una sola vez por ejecución, aunque se conecte a cada empresa.
 _modo_tls_avisado = False
@@ -157,7 +162,7 @@ def conectar(cfg: HanaConfig, empresa: EmpresaHana, intentos: int = 3) -> Iterat
     if conn is None:
         mensaje = f"No se pudo conectar a HANA ({codigo}) tras {intentos} intentos: {ultimo}"
         if cfg.encrypt and ultimo is not None and _es_error_tls(ultimo):
-            mensaje = f"{mensaje}\n{AYUDA_TLS}"
+            mensaje = f"{mensaje}\n{_ayuda_tls(cfg)}"
         raise HanaError(mensaje) from ultimo
 
     try:

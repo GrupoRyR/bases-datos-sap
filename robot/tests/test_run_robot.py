@@ -436,7 +436,7 @@ def test_diagnostico_muestra_el_modo_tls_de_hana(entorno, correos, monkeypatch, 
     monkeypatch.setenv("HANA_SSL_VALIDATE", "false")
     with caplog.at_level(logging.INFO, logger="bases_sap"):
         assert _main(e, "--diagnostico", fabrica_api=_sin_api(e, monkeypatch)) == 0
-    assert "Conexión a HANA: cifrado sí, validación de certificado no." in caplog.messages
+    assert "Modo TLS configurado para HANA: cifrado sí, validación de certificado no." in caplog.messages
 
 
 def test_los_secretos_se_registran_apenas_carga_la_configuracion(entorno, correos, monkeypatch):

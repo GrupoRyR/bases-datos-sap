@@ -38,6 +38,7 @@ SOPHOS_CLI_POR_DEFECTO = r"C:\Program Files (x86)\Sophos\Connect\sccli.exe"
 
 _RE_FRANJA = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 _RE_CUENTA = re.compile(r"[0-9]+")
+_VERDADEROS = frozenset({"1", "true", "si", "sí", "yes", "y"})
 
 
 def ahora() -> datetime:
@@ -52,7 +53,7 @@ class ConfigError(RuntimeError):
 def _bool(valor: str | None, por_defecto: bool = False) -> bool:
     if valor is None or valor.strip() == "":
         return por_defecto
-    return valor.strip().lower() in {"1", "true", "si", "sí", "yes", "y"}
+    return valor.strip().lower() in _VERDADEROS
 
 
 def _bool_seguro(valor: str | None, por_defecto: bool) -> bool:
@@ -60,7 +61,7 @@ def _bool_seguro(valor: str | None, por_defecto: bool) -> bool:
     para banderas de seguridad, donde un error de tipeo (HANA_ENCRYPT=ture) no
     debe apagar la protección sin querer."""
     texto = (valor or "").strip().lower()
-    if texto in {"1", "true", "si", "sí", "yes", "y"}:
+    if texto in _VERDADEROS:
         return True
     if texto in {"0", "false", "no", "n"}:
         return False
@@ -315,9 +316,9 @@ def cargar_config(env_path: Path | None = None) -> Config:
         if c.strip()
     ]
 
-    # Los secretos los registra registro.registrar_secretos(cfg) en run_robot.py, apenas
-    # carga la configuración, y cada módulo donde los usa (vpn, hana, notificar, api):
-    # registro importa config, no al revés.
+    # Los secretos los registra registro.registrar_secretos(cfg) en cada punto de entrada
+    # (run_robot.py, revisar_solicitudes.py) apenas carga la configuración, y cada módulo
+    # donde los usa (vpn, hana, notificar, api): registro importa config, no al revés.
     return Config(
         vpn=VpnConfig(
             cli=Path(_texto("SOPHOS_CLI", SOPHOS_CLI_POR_DEFECTO)),

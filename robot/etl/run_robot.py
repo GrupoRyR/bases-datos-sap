@@ -254,8 +254,8 @@ def _solo_carpeta(
     for paso in pasos:  # FASE 2: la VPN ya está abajo
         fallos += paso.escribir()
     if modo == "diagnostico":
-        # Junto al resumen: el diagnóstico es la prueba real del modo TLS (robot/LEEME.md).
-        log.info("Conexión a HANA: %s.", hana.describir_cifrado(cfg.hana))
+        # Lo configurado, no lo probado: la prueba es que el resumen no traiga fallos de HANA.
+        log.info("Modo TLS configurado para HANA: %s.", hana.describir_cifrado(cfg.hana))
     return fallos
 
 

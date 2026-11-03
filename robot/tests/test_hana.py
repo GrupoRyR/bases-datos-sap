@@ -229,6 +229,19 @@ def test_sin_cifrado_un_error_de_tls_no_trae_la_ayuda(dbapi: DbapiFalso) -> None
     assert "HANA_SSL_VALIDATE" not in str(error.value)
 
 
+def test_sin_validar_la_ayuda_no_sugiere_lo_que_ya_esta_apagado(dbapi: DbapiFalso) -> None:
+    dbapi.errores = [RuntimeError(ERROR_TLS)] * 3
+    cfg = replace(_cfg(), validar_certificado=False)
+
+    with pytest.raises(HanaError) as error:
+        with hana.conectar(cfg, cfg.empresas["SGX"]):
+            pass
+
+    mensaje = str(error.value)
+    assert "HANA_SSL_VALIDATE" not in mensaje
+    assert "HANA_ENCRYPT=false" in mensaje
+
+
 def test_describir_cifrado_resume_el_modo() -> None:
     cfg = _cfg()
 
