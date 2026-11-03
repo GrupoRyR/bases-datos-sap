@@ -71,7 +71,7 @@ Branch `fix/robot-tls-logs`, route: delegated writer. Robot suite went from 677 
   - Fixed: the TLS hint leaves out `HANA_SSL_VALIDATE=false` when it is already off. The diagnostic line now says "Modo TLS configurado". `LEEME.md` says the hint is in `robot.log`, not in the email. The secret-registration comment is fixed. `_bool` and `_bool_seguro` share `_VERDADEROS`.
   - Not changed in code: a verified SMTP certificate can stop alerts if the mail server's certificate is private. After the merge, TI sends a test alert.
   - RED: 2 failed. GREEN: full suite 709 passed.
-- Pending: `robot/.env.example` needs `HANA_ENCRYPT` and `HANA_SSL_VALIDATE`. The permission rules block it, so the user adds the lines.
+- `robot/.env.example` got `HANA_ENCRYPT` and `HANA_SSL_VALIDATE` in #53, added by the user because the permission rules block that file for the agent.
 
 ### T2
 
