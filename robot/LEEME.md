@@ -36,6 +36,8 @@ py -3.14 -m venv .venv
 4. La cartera sale de las cuentas contables de cada empresa: `HANA_SGX_CUENTAS_CARTERA` (por defecto `13050505,13051005`) y `HANA_SDC_CUENTAS_CARTERA` (por defecto `13050501,13051005`), separadas por coma y solo dígitos. Casi nunca hay que tocarlas.
 5. Las ventas (facturas, notas débito y notas crédito de clientes) salen de la consulta del gestor de cartera, copiada tal cual en `queries\ventas\ventas.sql`. No llevan variables: en Derivados el robot cambia el id del pedido de la app (`U_SGX_IdPedidoApp`, que solo existe en Segurex) por un vacío.
 
+6. La carpeta de los CSV es `BASES_SAP_CSV_DIR`. Si no la pones, el robot usa `C:\Users\Claude\Documents\CEREBRO\SAP\BASES_DE_DATOS`, la carpeta real del PC de TI. En cualquier otro PC ponla siempre a mano, con una ruta **fuera del repo**: los CSV traen datos de SAP y nunca se suben a Git.
+
 El `.env` nunca se sube a Git. Los CSV quedan en `BASES_SAP_CSV_DIR`, fuera del repo.
 
 ### Cifrado con HANA (TLS)
