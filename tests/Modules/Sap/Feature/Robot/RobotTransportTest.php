@@ -128,6 +128,26 @@ it('logs why a signature failed with the key and the IP, never the secret', func
     });
 });
 
+it('answers 400 to a query string before the signature, without burning the nonce', function () {
+    $nonce = bin2hex(random_bytes(16));
+
+    // The signature covers the path and the body only, so a query string
+    // would slip unsigned values into the input.
+    RobotClient::post($this, ROBOT_TEST_PATH, [], nonce: $nonce, query: 'conjunto=MAESTROS')
+        ->assertStatus(400)
+        ->assertExactJson(['message' => 'Las rutas del robot no llevan query string.']);
+
+    RobotClient::post($this, ROBOT_TEST_PATH, [], nonce: $nonce)->assertOk()->assertJsonPath('input', []);
+});
+
+it('logs a query string with its reason, the key and the IP', function () {
+    Log::spy();
+
+    RobotClient::post($this, ROBOT_TEST_PATH, [], query: 'max=500');
+
+    Log::shouldHaveReceived('warning')->once()->with('sap.robot.signature_rejected', ['reason' => 'query_string', 'key' => RobotClient::KEY, 'ip' => '127.0.0.1']);
+});
+
 it('answers 413 to a body over 10 MB before looking at the signature', function () {
     RobotClient::post($this, ROBOT_TEST_PATH, str_repeat('a', 10 * 1024 * 1024 + 1), headers: ['X-Robot-Signature' => null])
         ->assertStatus(413)

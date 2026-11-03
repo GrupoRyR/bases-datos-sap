@@ -96,12 +96,13 @@ final class RobotClient
 
     /**
      * POSTs a signed request. $headers overrides or removes (null) any header
-     * after signing, to build broken requests.
+     * after signing, to build broken requests. $query is appended to the URL
+     * but left out of the signature, as the server signs the path alone.
      *
      * @param  array<string, mixed>|string  $body
      * @param  array<string, string|null>  $headers
      */
-    public static function post(TestCase $test, string $path, array|string $body = [], bool $gzip = false, array $headers = [], ?int $timestamp = null, ?string $nonce = null): TestResponse
+    public static function post(TestCase $test, string $path, array|string $body = [], bool $gzip = false, array $headers = [], ?int $timestamp = null, ?string $nonce = null, ?string $query = null): TestResponse
     {
         $json = is_string($body) ? $body : (string) json_encode((object) $body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $wire = $gzip ? (string) gzencode($json) : $json;
@@ -124,6 +125,6 @@ final class RobotClient
             $server[in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true) ? $key : 'HTTP_'.$key] = $value;
         }
 
-        return $test->call('POST', $path, [], [], [], $server, $wire);
+        return $test->call('POST', $query === null ? $path : "{$path}?{$query}", [], [], [], $server, $wire);
     }
 }
