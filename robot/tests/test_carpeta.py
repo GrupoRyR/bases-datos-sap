@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -233,6 +235,63 @@ def test_purgar_fotos_52_semanas_y_nunca_registros(tmp_path: Path):
     assert sorted(p.name for p in borrados) == ["2025-01-01.csv", "2025-10-26.csv"]
     assert sorted(p.name for p in tabla.iterdir()) == ["2024-01.csv", "2025-10-27.csv"]
     assert (tmp_path / "MAESTROS" / "SGX" / "clientes" / "2025-01-01.csv").exists()
+
+
+# --- Temporales huérfanos ---------------------------------------------------------
+
+UN_DIA = 24 * 3600
+
+
+def _envejecer(ruta: Path, segundos: float) -> Path:
+    momento = time.time() - segundos
+    os.utime(ruta, (momento, momento))
+    return ruta
+
+
+def test_purgar_temporales_borra_solo_los_de_mas_de_un_dia(tmp_path: Path, caplog):
+    viejo = _tocar(tmp_path / "MAESTROS" / "SGX" / "clientes" / ".2026-10-25_0200.csv.ab12cd.tmp")
+    viejo_archivo = _tocar(tmp_path / "AUDITORIA" / "SGX" / "USR5" / ".2026-10.csv.x9y8z7.tmp")
+    viejo_raiz = _tocar(tmp_path / ".suelto.csv.q1w2e3.tmp")
+    nuevo = _tocar(tmp_path / "MAESTROS" / "SGX" / "clientes" / ".2026-10-26_0200.csv.ef34gh.tmp")
+    csv_viejo = _tocar(tmp_path / "MAESTROS" / "SGX" / "clientes" / "2026-07-01_0200.csv")
+    historico = _tocar(tmp_path / "CARTERA" / "SGX" / "historico" / "2025-01-01.csv")
+    otro_tmp = _tocar(tmp_path / "MAESTROS" / "notas.tmp")  # sin punto al inicio: no es nuestro
+    for ruta in (viejo, viejo_archivo, viejo_raiz, csv_viejo, historico, otro_tmp):
+        _envejecer(ruta, 2 * UN_DIA)
+    _envejecer(nuevo, UN_DIA - 3600)  # una corrida podría estar escribiéndolo
+
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        borrados = Carpeta(tmp_path).purgar_temporales()
+
+    assert sorted(borrados) == sorted([viejo, viejo_archivo, viejo_raiz])
+    for ruta in (viejo, viejo_archivo, viejo_raiz):
+        assert not ruta.exists()
+    for ruta in (nuevo, csv_viejo, historico, otro_tmp):
+        assert ruta.exists()
+    assert "Retención: 3 temporales huérfanos con más de 1 día borrados." in caplog.messages
+
+
+def test_purgar_temporales_sin_carpeta_o_sin_temporales_no_falla(tmp_path: Path, caplog):
+    assert Carpeta(tmp_path / "no-existe").purgar_temporales() == []
+    _envejecer(_tocar(tmp_path / "MAESTROS" / "SGX" / "clientes" / "2026-07-01_0200.csv"), 2 * UN_DIA)
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert Carpeta(tmp_path).purgar_temporales() == []
+    assert not any("temporales" in m for m in caplog.messages)
+
+
+def test_purgar_temporales_sigue_si_uno_no_se_puede_borrar(tmp_path: Path, monkeypatch):
+    a = _envejecer(_tocar(tmp_path / "VENTAS" / "SGX" / ".a.csv.111111.tmp"), 2 * UN_DIA)
+    b = _envejecer(_tocar(tmp_path / "VENTAS" / "SGX" / ".b.csv.222222.tmp"), 2 * UN_DIA)
+    original = Path.unlink
+
+    def unlink(self, *args, **kwargs):
+        if self.name == a.name:
+            raise PermissionError("en uso")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert Carpeta(tmp_path).purgar_temporales() == [b]
+    assert a.exists() and not b.exists()
 
 
 def test_diagnostico_resumen_y_purga_de_90_dias(tmp_path: Path):

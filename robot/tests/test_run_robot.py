@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -270,6 +272,21 @@ def test_retencion_borra_corridas_viejas(entorno, correos):
     assert _main(e, "--completa") == 0
     assert not vieja.exists() and not vieja_ventas.exists()
     assert foto.exists() and ventas_90_dias.exists()
+
+
+def test_retencion_borra_temporales_huerfanos_de_mas_de_un_dia(entorno, correos):
+    e = entorno
+    clientes = e.csv_dir / "MAESTROS" / "SGX" / "clientes"
+    huerfano = clientes / ".2026-07-01_0200.csv.ab12cd.tmp"
+    reciente = clientes / ".2026-10-26_0200.csv.ef34gh.tmp"
+    clientes.mkdir(parents=True, exist_ok=True)
+    for ruta, edad in ((huerfano, 2 * 24 * 3600), (reciente, 3600)):
+        ruta.write_text("x", encoding="utf-8")
+        momento = time.time() - edad
+        os.utime(ruta, (momento, momento))
+    assert _main(e, "--completa") == 0
+    assert not huerfano.exists()
+    assert reciente.exists()
 
 
 def test_ejecutar_trabajos_de_una_solicitud_de_clientes(escenario):

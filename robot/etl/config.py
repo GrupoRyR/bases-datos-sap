@@ -32,6 +32,7 @@ CUENTAS_CARTERA_POR_DEFECTO: dict[str, tuple[str, ...]] = {
     "SGX": ("13050505", "13051005"),
     "SDC": ("13050501", "13051005"),
 }
+# Carpeta real del PC de TI, fuera del repo. En otro PC se pone BASES_SAP_CSV_DIR (LEEME).
 CSV_DIR_POR_DEFECTO = r"C:\Users\Claude\Documents\CEREBRO\SAP\BASES_DE_DATOS"
 FRANJAS_POR_DEFECTO = "00:00,05:00,06:00,12:00,12:30"
 SOPHOS_CLI_POR_DEFECTO = r"C:\Program Files (x86)\Sophos\Connect\sccli.exe"

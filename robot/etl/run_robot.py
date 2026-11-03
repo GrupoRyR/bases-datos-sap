@@ -120,6 +120,11 @@ def ejecutar_trabajos(
     except OSError as exc:
         log.error("Falló la retención de la carpeta: %s", exc)
         fallos.append(("CARPETA", f"Falló la retención de la carpeta: {exc}"))
+    try:
+        carpeta.purgar_temporales()
+    except OSError as exc:
+        log.error("Falló la limpieza de temporales de la carpeta: %s", exc)
+        fallos.append(("CARPETA", f"Falló la limpieza de temporales de la carpeta: {exc}"))
     return fallos
 
 

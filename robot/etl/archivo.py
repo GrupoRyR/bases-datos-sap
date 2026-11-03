@@ -37,8 +37,16 @@ CONFIGURACION = "CONFIGURACION"
 HBT_TABLAS = "archivo/hbt_tablas.sql"
 HBT_COLUMNAS = "archivo/hbt_columnas.sql"
 RE_NOMBRE_HBT = re.compile(r"^@HBT\w*$", re.IGNORECASE)
-# Columnas que parecen claves: nunca se leen de una tabla @HBT_*.
-RE_CLAVE = re.compile(r"PASS|PWD|CLAVE|CONTRASE", re.IGNORECASE)
+# Columnas que parecen claves: nunca se leen de una tabla @HBT_*. PASS, PWD, CLAVE,
+# CONTRASE, TOKEN y SECRET (también SECRETO) en cualquier parte del nombre. KEY
+# (también APIKEY, ACCESSKEY y PRIVATEKEY) y PIN solo como una parte entera del
+# nombre, separada por "_" (con dígitos al final, como U_PIN2), para no saltar
+# U_SHIPPING, U_OPINION, U_KEYWORD ni U_MONKEY.
+RE_CLAVE = re.compile(
+    r"PASS|PWD|CLAVE|CONTRASE|TOKEN|SECRET"
+    r"|(?:^|_)(?:(?:API|ACCESS|PRIVATE)?KEY|PIN)\d*(?:_|$)",
+    re.IGNORECASE,
+)
 AVISO_GRANDE = (
     "omitida hasta que TI confirme su tamaño en el catálogo "
     "(BASES_SAP_ARCHIVO_HISTORIAL_DOCUMENTOS)"
