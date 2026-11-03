@@ -19,7 +19,8 @@ final class ClientApp extends Model
 {
     protected $table = 'client_apps';
 
-    protected $guarded = [];
+    /** The key hash, prefix and revocation go through forceFill only. */
+    protected $fillable = ['nombre'];
 
     protected $hidden = ['key_hash'];
 

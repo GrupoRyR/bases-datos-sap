@@ -46,7 +46,11 @@ final class Run extends Model
 
     protected $table = 'robot_runs';
 
-    protected $guarded = [];
+    /** What opening a run sets; results and state changes go through forceFill. */
+    protected $fillable = [
+        'conjunto', 'empresa', 'tipo', 'partes', 'solicitudes', 'fecha_corte', 'ventana_desde',
+        'extraida_en', 'estado', 'abierta_lock', 'abierta_hasta', 'robot_key',
+    ];
 
     protected function casts(): array
     {

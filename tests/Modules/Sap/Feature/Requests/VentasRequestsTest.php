@@ -83,7 +83,7 @@ it('is taken without desde and finished by the VENTAS run that serves it', funct
 });
 
 it('says when VENTAS was last updated', function () {
-    Run::create([
+    Run::forceCreate([
         'conjunto' => 'VENTAS', 'empresa' => 'SGX', 'tipo' => 'solicitud', 'partes' => ['ventas' => 'todo'], 'solicitudes' => [],
         'ventana_desde' => '2026-09-24', 'extraida_en' => now(), 'estado' => 'cerrada', 'abierta_hasta' => now(),
         'robot_key' => RobotClient::KEY, 'aplicada_en' => now()->subHour(),

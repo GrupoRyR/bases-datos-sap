@@ -95,15 +95,47 @@ it('rejects a replayed nonce of the same key', function () {
 });
 
 it('accepts the same nonce under another key', function () {
-    config(['sap.robot.keys' => RobotClient::KEY.':'.RobotClient::SECRET.', r2027b:otro-secreto-de-prueba']);
+    config(['sap.robot.keys' => RobotClient::KEY.':'.RobotClient::SECRET.', r2027b:otro-secreto-de-prueba-de-32-bytes']);
     $nonce = bin2hex(random_bytes(16));
     $timestamp = time();
 
     RobotClient::post($this, ROBOT_TEST_PATH, [], nonce: $nonce)->assertOk();
     RobotClient::post($this, ROBOT_TEST_PATH, [], timestamp: $timestamp, nonce: $nonce, headers: [
         'X-Robot-Key' => 'r2027b',
-        'X-Robot-Signature' => RobotClient::sign('otro-secreto-de-prueba', $timestamp, $nonce, ROBOT_TEST_PATH, '{}'),
+        'X-Robot-Signature' => RobotClient::sign('otro-secreto-de-prueba-de-32-bytes', $timestamp, $nonce, ROBOT_TEST_PATH, '{}'),
     ])->assertOk();
+});
+
+it('treats a key with a secret under 32 bytes as unknown', function (int $bytes, int $status) {
+    $secret = str_repeat('s', $bytes);
+    config(['sap.robot.keys' => "r2027b:{$secret}"]);
+    $timestamp = time();
+    $nonce = bin2hex(random_bytes(16));
+
+    RobotClient::post($this, ROBOT_TEST_PATH, [], timestamp: $timestamp, nonce: $nonce, headers: [
+        'X-Robot-Key' => 'r2027b',
+        'X-Robot-Signature' => RobotClient::sign($secret, $timestamp, $nonce, ROBOT_TEST_PATH, '{}'),
+    ])->assertStatus($status);
+})->with([
+    '31 bytes' => [31, 401],
+    '32 bytes' => [32, 200],
+]);
+
+it('warns about a short secret by key id only', function () {
+    Log::spy();
+    $secret = str_repeat('s', 31);
+    config(['sap.robot.keys' => "r2027b:{$secret}"]);
+    $timestamp = time();
+    $nonce = bin2hex(random_bytes(16));
+
+    RobotClient::post($this, ROBOT_TEST_PATH, [], timestamp: $timestamp, nonce: $nonce, headers: [
+        'X-Robot-Key' => 'r2027b',
+        'X-Robot-Signature' => RobotClient::sign($secret, $timestamp, $nonce, ROBOT_TEST_PATH, '{}'),
+    ]);
+
+    Log::shouldHaveReceived('warning')->twice();
+    Log::shouldHaveReceived('warning', ['sap.robot.short_secret', ['key' => 'r2027b']])->once();
+    Log::shouldHaveReceived('warning', ['sap.robot.signature_rejected', ['reason' => 'unknown_key', 'key' => 'r2027b', 'ip' => '127.0.0.1']])->once();
 });
 
 it('stores a nonce only after the signature checks out', function () {
@@ -126,6 +158,26 @@ it('logs why a signature failed with the key and the IP, never the secret', func
             && $context === ['reason' => 'signature_mismatch', 'key' => RobotClient::KEY, 'ip' => '127.0.0.1']
             && ! str_contains((string) json_encode($context), RobotClient::SECRET);
     });
+});
+
+it('answers 400 to a query string before the signature, without burning the nonce', function () {
+    $nonce = bin2hex(random_bytes(16));
+
+    // The signature covers the path and the body only, so a query string
+    // would slip unsigned values into the input.
+    RobotClient::post($this, ROBOT_TEST_PATH, [], nonce: $nonce, query: 'conjunto=MAESTROS')
+        ->assertStatus(400)
+        ->assertExactJson(['message' => 'Las rutas del robot no llevan query string.']);
+
+    RobotClient::post($this, ROBOT_TEST_PATH, [], nonce: $nonce)->assertOk()->assertJsonPath('input', []);
+});
+
+it('logs a query string with its reason, the key and the IP', function () {
+    Log::spy();
+
+    RobotClient::post($this, ROBOT_TEST_PATH, [], query: 'max=500');
+
+    Log::shouldHaveReceived('warning')->once()->with('sap.robot.signature_rejected', ['reason' => 'query_string', 'key' => RobotClient::KEY, 'ip' => '127.0.0.1']);
 });
 
 it('answers 413 to a body over 10 MB before looking at the signature', function () {

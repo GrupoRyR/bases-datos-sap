@@ -31,7 +31,8 @@ final class UpdateRequest extends Model
 {
     protected $table = 'update_requests';
 
-    protected $guarded = [];
+    /** What placing a request sets; taking and settling it go through forceFill or a query update. */
+    protected $fillable = ['empresa', 'conjunto', 'parte', 'estado', 'correr_desde'];
 
     protected function casts(): array
     {

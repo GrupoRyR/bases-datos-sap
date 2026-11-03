@@ -58,6 +58,8 @@ La API rechaza, antes de descomprimir o leer el JSON:
 
 Todas las fallas responden 401 `{"message": "Firma inválida."}`, el mismo texto, y quedan en el log con el motivo, el id de la llave y la IP; nunca con el secreto. Si el robot recibe 401 no reintenta la misma petición: firma una nueva con otro nonce y otra hora.
 
+Una petición con query string responde 400 antes de revisar la firma (§2) y no gasta el nonce.
+
 Llaves: `ROBOT_HMAC_KEYS="id:secreto,id2:secreto2"` en el `.env` del servidor y la del robot en el suyo. Secretos de al menos 32 bytes al azar. Para rotar: se agrega la nueva junto a la vieja, el robot pasa a la nueva y luego se quita la vieja.
 
 Vector de prueba (las dos sesiones lo usan en sus pruebas): secreto `robot-secreto-de-prueba`, timestamp `1792152000`, nonce `9f86d081884c7d659a2feaa0c55ad015`, ruta `/api/robot/v1/corridas` y cuerpo `{"conjunto":"CARTERA"}` (sin espacios, sin gzip). El SHA-256 del cuerpo es `c04ff2072e7cfb7c308adf681b5c060ec271b48124895c3310a9a49e912091b9` y la firma `sha256=29d3895ed1dec41dc0c471b2a3e0b148e975b479698a86a13833814b661e0dd2`.

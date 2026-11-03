@@ -112,7 +112,7 @@ it('shows a request only to the apps that joined it', function () {
 });
 
 it('tells when each part of a dataset was last applied', function () {
-    $closed = fn (array $parts, string $appliedAt, Company $company = Company::Sgx) => Run::create([
+    $closed = fn (array $parts, string $appliedAt, Company $company = Company::Sgx) => Run::forceCreate([
         'conjunto' => Dataset::Maestros, 'empresa' => $company, 'tipo' => 'solicitud', 'partes' => $parts,
         'solicitudes' => [], 'extraida_en' => $appliedAt, 'estado' => 'cerrada', 'abierta_hasta' => $appliedAt,
         'robot_key' => 'r2026a', 'aplicada_en' => $appliedAt,
@@ -176,4 +176,62 @@ it('limits each key on its own, so apps on one server do not share the limit', f
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertOk();
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertStatus(429);
     $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($other))->assertOk();
+});
+
+it('answers 429 to bad keys from an IP over the failed-key limit', function () {
+    config(['sap.apps.failed_auth_per_minute' => 3]);
+
+    // Random keys get a fresh "sap-apps" bucket each, so only the IP can stop them.
+    foreach (range(1, 3) as $attempt) {
+        $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer("bsap_falsa_{$attempt}"))->assertUnauthorized();
+    }
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa_4'))
+        ->assertStatus(429)
+        ->assertHeader('Retry-After')
+        ->assertExactJson(['message' => 'Demasiados intentos con una llave inválida.']);
+});
+
+it('lets a good key through from an IP over the failed-key limit', function () {
+    config(['sap.apps.failed_auth_per_minute' => 1]);
+
+    // The apps on one server share its IP: one with a revoked key must not lock out the rest.
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertStatus(429);
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertOk();
+});
+
+it('counts every kind of failed key against the IP', function () {
+    config(['sap.apps.failed_auth_per_minute' => 3]);
+    $revoked = app(ClientAppKeys::class)->issue('Toma de pedidos');
+    app(ClientAppKeys::class)->revoke($revoked->id);
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA')->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($revoked->key))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertStatus(429);
+});
+
+it('keeps the failed-key limit to the IP that failed', function () {
+    config(['sap.apps.failed_auth_per_minute' => 1]);
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertStatus(429);
+
+    $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.2'])
+        ->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))
+        ->assertOk();
+});
+
+it('does not count good keys against the failed-key limit', function () {
+    config(['sap.apps.failed_auth_per_minute' => 2]);
+
+    foreach (range(1, 5) as $request) {
+        $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer($this->key))->assertOk();
+    }
+
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertUnauthorized();
+    $this->getJson('/api/v1/estado?empresa=SGX&conjunto=CARTERA', bearer('bsap_falsa'))->assertStatus(429);
 });
