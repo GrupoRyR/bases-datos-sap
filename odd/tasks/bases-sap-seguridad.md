@@ -95,6 +95,11 @@ Branch `fix/robot-guards` from `main` at `d0766af`, route: delegated writer. Rob
 - S-20, `51526a3 docs(robot): document the default CSV folder`:
   - `LEEME.md` Configuración item 6 says `BASES_SAP_CSV_DIR` falls back to the TI PC folder and must be set explicitly, outside the repo, on any other PC. There is a one-line comment on `CSV_DIR_POR_DEFECTO`.
   - No behavior change, so there is no RED. Full suite: 825 passed.
+- `code-review` (high), 3 findings, `test(robot): catch schema-qualified tables in the sensitive-column guard`:
+  - Fixed: `_tablas_leidas` took the schema of `FROM "SEGUREX"."OHEM"` as the table, so the guard would not see it. RED: 1 failed. GREEN: full suite 826 passed.
+  - Skipped:
+    - camelCase `KEY`/`PIN` names such as `U_UserPin` are not skipped. Catching them would also skip innocent names.
+    - the temp purge walks the CSV tree on every run with work. That costs little and the robot holds a single lock.
 
 ## Next step
 

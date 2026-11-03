@@ -318,10 +318,13 @@ PROHIBIDAS_POR_TABLA: dict[str, re.Pattern[str]] = {
 
 
 def _tablas_leidas(sql: str) -> set[str]:
-    """Tablas de los FROM y JOIN (sin comentarios), en mayúsculas."""
+    """Tablas de los FROM y JOIN (sin comentarios), en mayúsculas; con el esquema
+    delante ("SEGUREX"."OHEM") cuenta la tabla."""
     return {
         t.upper()
-        for t in re.findall(r'\b(?:FROM|JOIN)\s+"?([\w@]+)"?', _sin_comentarios(sql), re.IGNORECASE)
+        for t in re.findall(
+            r'\b(?:FROM|JOIN)\s+(?:"?[\w@]+"?\.)?"?([\w@]+)"?', _sin_comentarios(sql), re.IGNORECASE
+        )
     }
 
 
@@ -348,6 +351,8 @@ def test_ninguna_consulta_trae_columnas_sensibles_de_empleados_o_usuarios(ruta: 
     ('SELECT T0."salary"\nFROM "OCRD" T0', []),
     ('SELECT T0."salaryHistory", T0."birthDateText"\nFROM "OHEM" T0', []),
     ('-- nunca T0."govID" ni PASSWORD\nSELECT T0."empID"\nFROM "OHEM" T0', []),
+    # Con el esquema delante también cuenta la tabla, no el esquema.
+    ('SELECT T0."govID"\nFROM "SEGUREX"."OHEM" T0', ["govID"]),
 ])
 def test_columnas_sensibles_detecta_solo_las_prohibidas(sql: str, esperadas: list[str]):
     assert columnas_sensibles(sql) == esperadas
