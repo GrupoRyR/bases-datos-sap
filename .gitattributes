@@ -10,6 +10,9 @@
 *.md diff=markdown
 *.php diff=php
 
+# Compiled assets are committed for cPanel (no Node on the server); collapse them in PR diffs.
+public/build/** linguist-generated=true
+
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore

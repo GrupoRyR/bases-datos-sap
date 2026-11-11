@@ -1,7 +1,11 @@
-@import 'tailwindcss';
+/*
+ * Scan only the app's own Blade views. Automatic detection would read every file git does not
+ * ignore (docs, comments and public/build itself), and vendor/ is not installed in the CI assets
+ * job, so the committed public/build must not depend on either. The app has no pagination; if
+ * it gets one, publish the pagination views into resources/views/vendor.
+ */
+@import 'tailwindcss' source(none);
 
-@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
-@source '../../storage/framework/views/*.php';
 @source '../views/**/*.blade.php';
 @source '../../app/Modules/**/resources/views/**/*.blade.php';
 
