@@ -200,6 +200,7 @@ En tu equipo las pruebas corren en SQLite en memoria (una base por conexión); C
 | Lint | PHP 8.3, `composer lint`. |
 | Tests | PHP 8.3 con MySQL 8; crea las cuatro bases de prueba y corre `composer test`. |
 | Assets | Node 22, `npm ci` y `npm run build`, y falla si `public/build` no coincide con lo commiteado: después de tocar `resources/`, corre `npm run build` y commitea `public/build`. Tailwind solo lee las vistas Blade de la app (`source(none)` en `resources/css/app.css`), así que ni los docs, ni los comentarios, ni `vendor/` cambian el build. |
+| Robot | Python 3.14, `pip install -r requirements-dev.txt` y `pytest` en `robot/`. Las pruebas usan fakes: nada de SAP, VPN ni red. |
 
 ## 8. Protecciones locales de `main`
 
