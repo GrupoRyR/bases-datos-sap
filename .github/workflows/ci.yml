@@ -99,8 +99,10 @@ jobs:
       - name: Test
         run: composer test
 
+  # The cPanel server has no Node, so public/build is compiled locally and committed.
+  # This job rebuilds it and fails when the committed copy does not match resources/.
   assets:
-    name: Assets build (never committed)
+    name: Assets build matches the commit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -116,6 +118,20 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # git diff catches changed or deleted files; ls-files catches new ones (a new hash name).
+      - name: Compiled assets match the commit
+        run: |
+          if ! git diff --exit-code --stat -- public/build; then
+            echo "::error::public/build is out of date. Run npm run build and commit public/build."
+            exit 1
+          fi
+          untracked="$(git ls-files --others --exclude-standard -- public/build)"
+          if [ -n "$untracked" ]; then
+            echo "$untracked"
+            echo "::error::public/build has files that are not committed. Run npm run build and commit public/build."
+            exit 1
+          fi
 
   # The robot runs on the TI PC; CI only runs its tests, which use fakes (no SAP, VPN or network).
   robot:

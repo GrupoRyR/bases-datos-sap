@@ -193,13 +193,14 @@ En tu equipo las pruebas corren en SQLite en memoria (una base por conexión); C
 
 ## 7. CI
 
-`.github/workflows/ci.yml` corre en cada PR a `main` y en cada push a `main`. Un PR encadenado corre cuando lo cambias a `main` y lo sincronizas. Ningún PR se fusiona en rojo.
+`.github/workflows/ci.yml` corre en cada PR a `main` que cambie algo más que documentación. Un PR encadenado corre cuando lo cambias a `main` y lo sincronizas. Ningún PR se fusiona en rojo.
 
 | Job | Qué hace |
 |---|---|
 | Lint | PHP 8.3, `composer lint`. |
 | Tests | PHP 8.3 con MySQL 8; crea las cuatro bases de prueba y corre `composer test`. |
-| Assets | Node 22, `npm ci` y `npm run build`. Solo comprueba que compila. |
+| Assets | Node 22, `npm ci` y `npm run build`, y falla si `public/build` no coincide con lo commiteado: después de tocar `resources/`, corre `npm run build` y commitea `public/build`. Tailwind solo lee las vistas Blade de la app (`source(none)` en `resources/css/app.css`), así que ni los docs, ni los comentarios, ni `vendor/` cambian el build. |
+| Robot | Python 3.14, `pip install -r requirements-dev.txt` y `pytest` en `robot/`. Las pruebas usan fakes: nada de SAP, VPN ni red. |
 
 ## 8. Protecciones locales de `main`
 
@@ -256,3 +257,14 @@ Textos en español, tuteando y en tipo oración; zonas táctiles de 44 px; foco 
 La Content-Security-Policy sale de la app: `App\Modules\Core\Http\Middleware\ContentSecurityPolicy`, middleware global que `CoreServiceProvider` agrega, así que también la llevan las redirecciones, los errores y la API. Usa un nonce nuevo en cada petición y no permite `'unsafe-eval'`. Todo `<script>` en línea lleva `nonce="{{ Vite::cspNonce() }}"`; `tests/Modules/Core/Feature/Security/ContentSecurityPolicyTest.php` falla si una vista trae uno sin él. Con el servidor de Vite corriendo (`npm run dev`) no hay política; con `npm run build`, la local es igual a la de producción. Lo demás está en `public/.htaccess`: la redirección a https, HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy` y `Permissions-Policy`. `php artisan serve` ignora ese archivo, así que local sigue en http.
 
 **Log.** Un error de base de datos queda en el log sin valores: `bootstrap/app.php` registra `database.query_failed` con la conexión, el SQLSTATE, el código del motor y el SQL con `?`, nunca el mensaje ni los datos. Por defecto el log rota cada día, guarda 14 días (`LOG_DAILY_DAYS`) y solo anota desde `warning`.
+
+## 12. Despliegue
+
+La app vive en cPanel de GoDaddy y se publica con `deploy/deploy.sh`, que corre **en el servidor**: `cd ~/<carpeta-app> && bash deploy/deploy.sh`. Pone el sitio en mantenimiento, hace `git pull --ff-only`, `composer install --no-dev --optimize-autoloader`, `migrate --force` y `optimize`, y un `trap` lo vuelve a subir aunque un paso falle. En el servidor no se edita código: todo entra por Git.
+
+- **Document Root:** en cPanel › Domains apunta a `<carpeta-app>/public`, relativo al home y nunca a la raíz del proyecto.
+- **`.env`:** solo existe en el servidor, con `chmod 600`. Nunca se sube ni se copia al chat.
+- **Cron:** `schedule:run` cada minuto (`* * * * * cd ~/<carpeta-app> && php artisan schedule:run >> /dev/null 2>&1`). Corre `sap:vencer` y la limpieza de nonces. Usa el mismo binario de PHP que el despliegue (si `deploy.sh` corre con `PHP=/ruta/php`, el cron también).
+- **Migraciones:** un solo `migrate` llena las cuatro bases porque cada migración declara su conexión (§4). Las bases se crean antes en cPanel.
+- **Usuario MySQL de las migraciones:** crea las vistas `v_*`, así que queda como su `DEFINER`. Nunca se borra: si se borra, las vistas dejan de funcionar para las apps.
+- **Assets:** el servidor no tiene Node. `public/build` se compila en tu equipo y se sube al repo (§7).

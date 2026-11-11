@@ -24,8 +24,10 @@ npm install
 composer format   # da formato al código con Pint
 composer lint     # Pint en modo revisión y Larastan
 composer test     # corre las pruebas de Pest
-npm run build     # compila los assets (public/build nunca se sube al repo)
+npm run build     # compila los assets en public/build
 ```
+
+El servidor de cPanel no tiene Node, así que `public/build` vive en el repo: después de tocar `resources/`, corre `npm run build` y commitea `public/build`. CI falla si no coincide. El despliegue está en [docs/arquitectura.md](docs/arquitectura.md), §12.
 
 ## Protección de main
 
