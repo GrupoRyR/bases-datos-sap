@@ -294,7 +294,7 @@ it('counts the lines of the company inside the window in the nightly run', funct
 
     RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2], 'conteo_sap' => ['ventas' => 2]])
         ->assertOk()
-        ->assertJsonPath('conteo.ventas', ['sap' => 2, 'recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => true]);
+        ->assertJsonPath('conteo.ventas', ['sap' => 2, 'recibidas' => 2, 'activas_recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => true]);
 
     $count = DB::table('daily_counts')->sole();
 

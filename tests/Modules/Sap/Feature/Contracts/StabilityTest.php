@@ -167,3 +167,10 @@ it('caps the streak at the target, also when today is still in progress', functi
     // Today is not stable yet, but the 14 days before it are.
     expect(app(Stability::class)->current()->stableDays)->toBe(Stability::TARGET_DAYS);
 });
+
+it('still reads the counts saved before activas_recibidas existed', function () {
+    stabilityStableDays('2026-10-26', 3);
+
+    expect(DB::table('daily_counts')->whereNotNull('activas_recibidas')->count())->toBe(0)
+        ->and(app(Stability::class)->current()->stableDays)->toBe(3);
+});

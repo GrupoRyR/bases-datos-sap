@@ -21,20 +21,23 @@ beforeEach(function () {
 
 /**
  * Sends and closes a full MAESTROS run of SGX with one row per part (two
- * customers), with the given SAP counts. Returns the close response JSON.
+ * customers unless $customers says otherwise: one list of overrides per
+ * customer), with the given SAP counts. Returns the close response JSON.
  *
  * @param  array<string, int>  $sap
+ * @param  list<array<string, mixed>>|null  $customers
  * @return array<string, mixed>
  */
-function closeFullMaestros(TestCase $test, array $sap = []): array
+function closeFullMaestros(TestCase $test, array $sap = [], ?array $customers = null): array
 {
+    $customers ??= [['codigo' => 'C1'], ['codigo' => 'C2']];
     $parts = array_map(fn (Part $part): string => $part->value, Part::forDataset(Dataset::Maestros));
     $run = RobotClient::openRun($test, ['tipo' => 'completa', 'partes' => array_fill_keys($parts, 'todo')]);
     $filas = [];
 
     foreach (Part::forDataset(Dataset::Maestros) as $number => $part) {
         $rows = $part === Part::Customers
-            ? [RobotClient::row($part, ['codigo' => 'C1']), RobotClient::row($part, ['codigo' => 'C2'])]
+            ? array_map(fn (array $overrides): array => RobotClient::row($part, $overrides), $customers)
             : [RobotClient::row($part)];
         RobotClient::post($test, "/api/robot/v1/corridas/{$run}/lotes", RobotClient::batch($number + 1, $part, $rows))->assertCreated();
         $filas[$part->value] = count($rows);
@@ -48,7 +51,7 @@ function closeFullMaestros(TestCase $test, array $sap = []): array
 it('compares SAP, received and active MySQL rows per part and answers it', function () {
     $response = closeFullMaestros($this);
 
-    expect($response['conteo']['clientes'])->toBe(['sap' => 2, 'recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => true])
+    expect($response['conteo']['clientes'])->toBe(['sap' => 2, 'recibidas' => 2, 'activas_recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => true])
         ->and($response['conteo'])->toHaveCount(12)
         ->and(collect($response['conteo'])->every(fn (array $count): bool => $count['cuadra']))->toBeTrue();
 });
@@ -58,7 +61,7 @@ it('records a mismatch without failing the run', function () {
     $response = closeFullMaestros($this, ['clientes' => 3]);
 
     expect($response['estado'])->toBe('cerrada')
-        ->and($response['conteo']['clientes'])->toBe(['sap' => 3, 'recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => false]);
+        ->and($response['conteo']['clientes'])->toBe(['sap' => 3, 'recibidas' => 2, 'activas_recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => false]);
 });
 
 it('counts the active rows in MySQL, so a stale active row breaks the match', function () {
@@ -70,6 +73,39 @@ it('counts the active rows in MySQL, so a stale active row breaks the match', fu
     expect(closeFullMaestros($this)['conteo']['clientes']['activas_mysql'])->toBe(2);
 });
 
+it('matches when SAP sends inactive rows: only the received active rows are compared with MySQL', function () {
+    // SAP sends every row, inactive ones too; MySQL keeps them but they are not active there.
+    $response = closeFullMaestros($this, customers: [['codigo' => 'C1'], ['codigo' => 'C2', 'activo' => false], ['codigo' => 'C3', 'activo' => false]]);
+
+    expect($response['conteo']['clientes'])->toBe(['sap' => 3, 'recibidas' => 3, 'activas_recibidas' => 1, 'activas_mysql' => 1, 'cuadra' => true])
+        ->and(collect($response['conteo'])->every(fn (array $count): bool => $count['cuadra']))->toBeTrue()
+        ->and((bool) DB::table('daily_counts')->where('parte', 'clientes')->value('cuadra'))->toBeTrue()
+        ->and((int) DB::table('daily_counts')->where('parte', 'clientes')->value('activas_recibidas'))->toBe(1);
+});
+
+it('does not match when MySQL holds an active row that the run did not send', function () {
+    // The applier inactivates what a full run did not write, except the rows stamped with the run
+    // itself. One of those, active and absent from the batches, stands for any divergence the
+    // count exists to catch: the first run of a fresh database has id 1.
+    DB::connection('maestros')->table('clientes')->insert([
+        ['empresa' => 'SGX', 'codigo' => 'C9', 'nombre' => 'Sobrante', 'activo' => true, 'sincronizado_en' => '2026-10-27 02:30:00', 'corrida_id' => 1],
+    ]);
+
+    $response = closeFullMaestros($this);
+
+    expect(Run::sole()->id)->toBe(1)
+        ->and($response['conteo']['clientes'])->toBe(['sap' => 2, 'recibidas' => 2, 'activas_recibidas' => 2, 'activas_mysql' => 3, 'cuadra' => false])
+        ->and($response['conteo']['marcas']['cuadra'])->toBeTrue()
+        ->and((bool) DB::table('daily_counts')->where('parte', 'clientes')->value('cuadra'))->toBeFalse();
+});
+
+it('counts every received row as active in a part without an activo column', function () {
+    $response = closeFullMaestros($this);
+
+    expect(isset(Part::Addresses->columns()['activo']))->toBeFalse()
+        ->and($response['conteo']['direcciones']['activas_recibidas'])->toBe($response['conteo']['direcciones']['recibidas']);
+});
+
 it('keeps the result of the day for the panel, one row per company and part', function () {
     closeFullMaestros($this, ['marcas' => 5]);
 
@@ -79,7 +115,7 @@ it('keeps the result of the day for the panel, one row per company and part', fu
         ->and($brands->fecha)->toStartWith('2026-10-27')
         ->and($brands->empresa)->toBe('SGX')
         ->and($brands->conjunto)->toBe('MAESTROS')
-        ->and([(int) $brands->sap, (int) $brands->recibidas, (int) $brands->activas_mysql, (bool) $brands->cuadra])->toBe([5, 1, 1, false])
+        ->and([(int) $brands->sap, (int) $brands->recibidas, (int) $brands->activas_recibidas, (int) $brands->activas_mysql, (bool) $brands->cuadra])->toBe([5, 1, 1, 1, false])
         ->and((int) $brands->run_id)->toBe(Run::sole()->id);
 });
 
@@ -99,7 +135,7 @@ it('counts CARTERA lines of the company after replacing them', function () {
 
     RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['cartera' => 2], 'conteo_sap' => ['cartera' => 2]])
         ->assertOk()
-        ->assertJsonPath('conteo.cartera', ['sap' => 2, 'recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => true]);
+        ->assertJsonPath('conteo.cartera', ['sap' => 2, 'recibidas' => 2, 'activas_recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => true]);
 });
 
 it('neither answers nor records a count for a request run', function () {

@@ -136,7 +136,8 @@ Un 422 no cierra la corrida: el robot corrige o la marca fallida (§4.4). Ante u
 ```
 
 - `batches` y `filas`: lo que el robot envió. Si la API no tiene todos los lotes del 1 al `batches` o las filas no cuadran, responde 409 con `{"faltan": [4, 5]}` y la corrida sigue abierta para que el robot los reenvíe.
-- `conteo_sap`: **obligatorio en una corrida `completa`** y prohibido en las demás. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y lo compara con las filas recibidas y con las filas activas en MySQL después de aplicar; con eso arma el conteo diario del plan §6.
+- `conteo_sap`: **obligatorio en una corrida `completa`** y prohibido en las demás. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y arma con él el conteo diario del plan §6. Por cada parte calcula cuatro números: `sap` (el `conteo_sap` que envió el robot), `recibidas` (todas las filas que llegaron en los lotes), `activas_recibidas` (las recibidas con `activo = true`; en una parte sin columna `activo`, como `direcciones`, `cartera` o `ventas`, todas las recibidas cuentan como activas) y `activas_mysql` (las filas de la empresa en MySQL después de aplicar: las de `activo = true` en MAESTROS, todas las líneas en CARTERA y, en VENTAS, las de la ventana, §10.2). SAP envía también las filas inactivas, que quedan en MySQL con `activo = false`: por eso `activas_mysql` se compara con `activas_recibidas` y no con `recibidas`.
+- `cuadra` es verdadero cuando `sap == recibidas` **y** `activas_mysql == activas_recibidas`. En CARTERA y VENTAS `activas_recibidas == recibidas`, así que la regla no cambia.
 - Al cerrar, la API aplica en una transacción: inserta o actualiza por llave, pone `sincronizado_en` y, en las partes `todo`, inactiva lo que no llegó. En `CARTERA` reemplaza la cartera actual de la empresa y, en la corrida `completa`, guarda además la foto del día con `fecha_corte` (§6). En `VENTAS` reemplaza solo la ventana de la empresa (§10.2).
 - Una parte `todo` con 0 filas no se aplica y la corrida falla (422): una lectura vacía de SAP nunca vacía una tabla.
 
@@ -147,7 +148,7 @@ Respuesta 200:
   "run_id": 42,
   "estado": "cerrada",
   "aplicada_en": "2026-10-23T10:43:10-05:00",
-  "conteo": {"clientes": {"sap": 6120, "recibidas": 6120, "activas_mysql": 6120, "cuadra": true}}
+  "conteo": {"clientes": {"sap": 6120, "recibidas": 6120, "activas_recibidas": 6098, "activas_mysql": 6098, "cuadra": true}}
 }
 ```
 
