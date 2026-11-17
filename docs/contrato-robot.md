@@ -110,7 +110,7 @@ Una corrida abierta que pasa **30 minutos sin recibir lotes** queda `vencida`, s
 ```
 
 - `batch`: entero desde 1, consecutivo en la corrida (no por parte). Hasta **1.000 filas** por lote y una sola parte.
-- `columns`: exactamente las columnas de la parte (§5 o §6), en cualquier orden y sin repetir. Cada fila de `rows` es una lista con un valor por columna, en ese orden.
+- `columns`: exactamente las columnas de la parte (§5, §6 o §10), en cualquier orden y sin repetir. Cada fila de `rows` es una lista con un valor por columna, en ese orden. **Única excepción:** un lote de `VENTAS` puede omitir `ganancia_bruta`; la API acepta ambos encabezados, con y sin esa columna, y guarda `null` cuando falta. Cualquier otra columna que falte o sobre sigue dando 422. Existe porque el robot del PC de TI se actualiza después del servidor y la corrida de las 02:00 no debe fallar entre los dos.
 - Valores: enteros como número JSON; montos como texto decimal con punto, hasta 2 decimales y sin separador de miles (`"1234567.89"`), con `-` si son negativos; cantidades y tasas (solo en `VENTAS`, §10) igual que los montos pero con hasta 6 decimales (`"2.500000"`); booleanos como `true`/`false`; fechas `"AAAA-MM-DD"`; horas ISO 8601 con zona; texto hasta 4.000 caracteres, recortado; `null` si falta. Las columnas obligatorias no pueden llegar nulas ni vacías.
 - Una llave (§5 y §6) no puede repetirse en la corrida, ni dentro del lote ni entre lotes.
 
@@ -309,17 +309,18 @@ El botón del panel crea solicitudes por dentro (contratos de `Sap`), con las mi
 
 Una sola parte, `ventas`, siempre en modo `todo`. Una fila por línea de factura de clientes (`OINV`/`INV1`, incluidas las notas débito) o de nota crédito de clientes (`ORIN`/`RIN1`). Origen: la consulta `etl/queries/ventas.sql` del gestor de cartera (main `9e2f877`), copiada tal cual. Las columnas son las de su `etl/esquema.py` (lote `ventas`), con los mismos nombres y en este orden:
 
-**`tipo_objeto`**, **`doc_entry`**, **`numero_documento`**, **`linea`**, **`clase_documento`**, **`estado_documento`**, **`fecha_documento`**, **`fecha_contabilizacion`**, **`slp_code`**, `vendedor`, `canal`, **`codigo_cliente`**, `cliente`, `nit`, `ciudad`, `pedido`, `id_pedido_app`, `oc_cliente`, `ciudad_envio`, `direccion_envio`, `marca`, `familia`, `codigo_articulo`, `descripcion`, **`cantidad`**, `costo_unitario`, `costo_total`, `precio_lista`, `precio_unitario`, **`total`**, `iva`, `moneda`, `trm`, `comentarios`.
+**`tipo_objeto`**, **`doc_entry`**, **`numero_documento`**, **`linea`**, **`clase_documento`**, **`estado_documento`**, **`fecha_documento`**, **`fecha_contabilizacion`**, **`slp_code`**, `vendedor`, `canal`, **`codigo_cliente`**, `cliente`, `nit`, `ciudad`, `pedido`, `id_pedido_app`, `oc_cliente`, `ciudad_envio`, `direccion_envio`, `marca`, `familia`, `codigo_articulo`, `descripcion`, **`cantidad`**, `costo_unitario`, `costo_total`, `precio_lista`, `precio_unitario`, **`total`**, `iva`, `ganancia_bruta`, `moneda`, `trm`, `comentarios`.
 
 | Tipo | Columnas |
 |---|---|
 | Entero | `tipo_objeto` (13 factura, 14 nota crédito), `doc_entry`, `numero_documento`, `linea`, `slp_code` (`-1` si no tiene) |
 | Fecha | `fecha_documento` (`TaxDate`, solo referencia), `fecha_contabilizacion` (`DocDate`, la fecha de la factura y la que define el mes de la venta) |
 | Cantidad o tasa, hasta 6 decimales | `cantidad`, `trm` |
-| Monto | `costo_unitario`, `costo_total`, `precio_lista`, `precio_unitario`, `total`, `iva` |
+| Monto | `costo_unitario`, `costo_total`, `precio_lista`, `precio_unitario`, `total`, `iva`, `ganancia_bruta` |
 | Texto | Las demás. `clase_documento`: `factura`, `nota_debito` o `nota_credito`. `estado_documento`: `anulado`, `anulacion`, `cerrado` o `abierto` |
 
-- **Signo.** Las notas crédito llegan con `cantidad`, `costo_total`, `total` e `iva` negativos: la suma de `total` es la venta neta. Los precios y costos unitarios van sin signo.
+- **Signo.** Las notas crédito llegan con `cantidad`, `costo_total`, `total`, `iva` y `ganancia_bruta` negativos: la suma de `total` es la venta neta. Los precios y costos unitarios van sin signo.
+- **`ganancia_bruta`** (`GrssProfit` de `INV1`/`RIN1`) es opcional en el encabezado del lote (§4.2): hasta que el robot la envíe, la API la guarda `null`. El margen es `SUM(ganancia_bruta) / SUM(total)`; `costo_total` no sirve para márgenes (plan §4).
 - **Llave.** `tipo_objeto` + `doc_entry` + `linea`, única por empresa. No puede repetirse en la corrida (§4.2).
 - **`id_pedido_app`** (`OINV.U_SGX_IdPedidoApp`) solo existe en `SGX`. Para `SDC` el robot cambia la expresión marcada `-- @id_pedido_app` por `CAST(NULL AS NVARCHAR(254))`, así que en Derivados siempre llega `null`. Las notas crédito también lo traen `null`.
 - Las apps leen la vista `v_ventas`, en `ventas_sap`.

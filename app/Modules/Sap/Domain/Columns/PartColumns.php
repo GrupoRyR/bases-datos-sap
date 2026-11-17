@@ -204,7 +204,8 @@ final class PartColumns
      * The columns of etl/esquema.py of the gestor de cartera (batch
      * "ventas"), with the same names and order: one row per invoice or
      * credit note line (contract section 10). Credit notes bring negative
-     * quantity, cost, total and VAT; unit prices and costs come unsigned.
+     * quantity, cost, total, VAT and gross profit; unit prices and costs come
+     * unsigned.
      *
      * @return list<Column>
      */
@@ -242,6 +243,8 @@ final class PartColumns
             Column::decimal('precio_unitario'),
             Column::decimal('total', required: true),
             Column::decimal('iva'),
+            // INV1/RIN1.GrssProfit. A header may leave it out until the robot sends it (section 4.2).
+            Column::decimal('ganancia_bruta', omittable: true),
             Column::text('moneda', 10),
             Column::quantity('trm'),
             Column::text('comentarios'),

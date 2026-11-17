@@ -139,6 +139,30 @@ it('checks quantities and rates as decimal text with up to 6 decimals', function
     'over 13 digits' => ['12345678901234'],
 ]);
 
+it('lets a VENTAS header leave out ganancia_bruta and fills it with null', function () {
+    $body = RobotClient::batch(1, Part::Sales, [RobotClient::row(Part::Sales)]);
+    $position = array_search('ganancia_bruta', $body['columns'], true);
+    unset($body['columns'][$position], $body['rows'][0][$position]);
+
+    $result = BatchRows::check(Part::Sales, array_values($body['columns']), [array_values($body['rows'][0])]);
+    $row = array_combine(array_keys(Part::Sales->columns()), $result['rows'][0]);
+
+    expect($result['errors'])->toBe([])
+        ->and(array_keys($row))->toContain('ganancia_bruta')
+        ->and($row['ganancia_bruta'])->toBeNull()
+        ->and($row['total'])->toBe('1000.50');
+});
+
+it('only lets VENTAS leave out ganancia_bruta', function () {
+    $omittable = [];
+
+    foreach (Part::cases() as $part) {
+        $omittable[$part->value] = array_keys(array_filter($part->columns(), fn ($column): bool => $column->omittable));
+    }
+
+    expect(array_filter($omittable))->toBe(['ventas' => ['ganancia_bruta']]);
+});
+
 it('keeps amounts of VENTAS to 2 decimals', function () {
     expect(checkOneSale(['total' => '10.505'])['errors'])
         ->toBe(['rows.0.total' => 'Debe ser un monto como texto, con punto y hasta 2 decimales.']);

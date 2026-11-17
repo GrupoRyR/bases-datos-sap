@@ -94,7 +94,7 @@ it('lists exactly the columns of the contract', function (Part $part, array $col
         'fecha_documento', 'fecha_contabilizacion', 'slp_code', 'vendedor', 'canal', 'codigo_cliente', 'cliente',
         'nit', 'ciudad', 'pedido', 'id_pedido_app', 'oc_cliente', 'ciudad_envio', 'direccion_envio', 'marca',
         'familia', 'codigo_articulo', 'descripcion', 'cantidad', 'costo_unitario', 'costo_total', 'precio_lista',
-        'precio_unitario', 'total', 'iva', 'moneda', 'trm', 'comentarios',
+        'precio_unitario', 'total', 'iva', 'ganancia_bruta', 'moneda', 'trm', 'comentarios',
     ]],
 ]);
 
@@ -144,7 +144,7 @@ it('types the VENTAS columns as contract section 10 says', function () {
     expect($of(ColumnType::Integer))->toBe(['tipo_objeto', 'doc_entry', 'numero_documento', 'linea', 'slp_code'])
         ->and($of(ColumnType::Date))->toBe(['fecha_documento', 'fecha_contabilizacion'])
         ->and($of(ColumnType::Quantity))->toBe(['cantidad', 'trm'])
-        ->and($of(ColumnType::Decimal))->toBe(['costo_unitario', 'costo_total', 'precio_lista', 'precio_unitario', 'total', 'iva'])
+        ->and($of(ColumnType::Decimal))->toBe(['costo_unitario', 'costo_total', 'precio_lista', 'precio_unitario', 'total', 'iva', 'ganancia_bruta'])
         ->and($of(ColumnType::Text))->toHaveCount(19);
 });
 

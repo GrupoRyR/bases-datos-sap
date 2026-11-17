@@ -10,8 +10,10 @@ use App\Modules\Sap\Domain\Values\SapTime;
 /**
  * Checks and normalizes the rows of a batch (docs/contrato-robot.md,
  * section 4.2). Columns may come in any order but must be exactly the
- * part's, without repeats; rows come back as lists in the part's column
- * order, with text trimmed, times in the app timezone and amounts as text.
+ * part's, without repeats, except an omittable column (ganancia_bruta of
+ * VENTAS), which the header may leave out; rows come back as lists in the
+ * part's column order, with text trimmed, times in the app timezone and
+ * amounts as text, and null where the header left a column out.
  */
 final class BatchRows
 {
@@ -51,7 +53,8 @@ final class BatchRows
                 $values = [];
 
                 foreach ($expected as $name => $column) {
-                    [$value, $error] = self::value($column, $row[$positions[$name]], isset($keys[$name]));
+                    // A column the header left out (omittable) reads as null.
+                    [$value, $error] = self::value($column, isset($positions[$name]) ? $row[$positions[$name]] : null, isset($keys[$name]));
                     $values[] = $value;
 
                     if ($error !== null) {
@@ -93,7 +96,8 @@ final class BatchRows
         }
 
         $repeated = array_keys(array_filter(array_count_values($columns), fn (int $count): bool => $count > 1));
-        $missing = array_diff(array_keys($expected), $columns);
+        $required = array_keys(array_filter($expected, fn (Column $column): bool => ! $column->omittable));
+        $missing = array_diff($required, $columns);
         $unknown = array_diff($columns, array_keys($expected));
 
         $problems = array_filter([
