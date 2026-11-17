@@ -10,6 +10,7 @@ ORDER BY dentro de una subconsulta, así que el orden del archivo se conserva.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -19,15 +20,47 @@ from esquema import PRECIOS, Parte
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
 
-# VENTAS (contrato §10): el id del pedido de la app (OINV.U_SGX_IdPedidoApp) solo existe
-# en Segurex. La consulta del gestor lleva la expresión de Segurex con el marcador
-# `-- @id_pedido_app` al final de la línea; en las demás empresas el robot la cambia por
-# un NULL del mismo tipo. La expresión regular es la del gestor (etl/config.py, 9e2f877).
+# Campos de usuario que solo existen en Segurex: el id del pedido de la app
+# (U_SGX_IdPedidoApp) en VENTAS (contrato §10) y PEDIDOS (§11.3), y la familia del
+# artículo (OITM.U_GSP_FAMILIA) en PEDIDOS. Cada consulta lleva la expresión de Segurex
+# con su marcador al final de la línea (`-- @id_pedido_app`, `-- @familia`); en las demás
+# empresas el robot la cambia por un NULL del mismo tipo. La expresión regular de VENTAS
+# es la del gestor (etl/config.py, 9e2f877).
 MARCADOR_ID_PEDIDO_APP = "@id_pedido_app"
-EMPRESAS_CON_ID_PEDIDO_APP = ("SGX",)
+EMPRESAS_CON_CAMPOS_SGX = ("SGX",)
 ID_PEDIDO_APP_NULO = "CAST(NULL AS NVARCHAR(254))"
 _RE_ID_PEDIDO_APP = re.compile(
     r'CAST\([^\n]*?\)(?=[ \t]+AS[ \t]+"IdPedidoApp"[ \t]*--[ \t]*@id_pedido_app)'
+)
+
+
+@dataclass(frozen=True)
+class CampoMarcado:
+    """Expresión `CAST(...) AS "<alias>"` de un campo que solo existe en Segurex, con su
+    marcador al final de la línea; en las demás empresas se cambia por `nulo`."""
+
+    marcador: str
+    alias: str
+    nulo: str
+    patron: re.Pattern[str]
+
+
+def _campo_de_pedidos(marcador: str, alias: str, nulo: str) -> CampoMarcado:
+    # En PEDIDOS los campos no van al final del SELECT: el alias lleva su coma.
+    patron = re.compile(
+        r'CAST\([^\n]*?\)(?=[ \t]+AS[ \t]+"' + re.escape(alias)
+        + r'",[ \t]*--[ \t]*' + re.escape(marcador) + r")"
+    )
+    return CampoMarcado(marcador, alias, nulo, patron)
+
+
+ID_PEDIDO_APP_VENTAS = CampoMarcado(
+    MARCADOR_ID_PEDIDO_APP, "IdPedidoApp", ID_PEDIDO_APP_NULO, _RE_ID_PEDIDO_APP
+)
+# PEDIDOS (contrato §11.3): ORDR.U_SGX_IdPedidoApp y OITM.U_GSP_FAMILIA, solo en Segurex.
+CAMPOS_SGX_PEDIDOS = (
+    _campo_de_pedidos(MARCADOR_ID_PEDIDO_APP, "id_pedido_app", ID_PEDIDO_APP_NULO),
+    _campo_de_pedidos("@familia", "familia", "CAST(NULL AS NVARCHAR(100))"),
 )
 
 # Primer día de la ventana de VENTAS (contrato §10.1): la misma expresión de la consulta,
@@ -108,15 +141,38 @@ def sql_id_pedido_app(sql: str, empresa: str) -> str:
     Si el marcador falta, se repite o la expresión no se reconoce, falla en vez de
     correr: sin él, Derivados pediría una columna que no tiene.
     """
-    marcadores = sql.count(MARCADOR_ID_PEDIDO_APP)
-    cambiada, expresiones = _RE_ID_PEDIDO_APP.subn(ID_PEDIDO_APP_NULO, sql)
-    if marcadores != 1 or expresiones != 1:
-        raise config.ConfigError(
-            f"La consulta de ventas debe tener exactamente una expresión "
-            f'CAST(...) AS "IdPedidoApp" marcada con \'-- {MARCADOR_ID_PEDIDO_APP}\' en la misma '
-            f"línea (marcadores: {marcadores}, expresiones: {expresiones}); no se corre."
-        )
-    return sql if empresa in EMPRESAS_CON_ID_PEDIDO_APP else cambiada
+    return _sin_campos_sgx(sql, empresa, (ID_PEDIDO_APP_VENTAS,), "ventas")
+
+
+def sql_pedidos(sql: str, empresa: str) -> str:
+    """La consulta de pedidos para una empresa: tal cual en Segurex; en las demás, con
+    las expresiones marcadas `-- @id_pedido_app` y `-- @familia` cambiadas por un NULL
+    (contrato §11.3). Falla igual que sql_id_pedido_app si una marca no se reconoce."""
+    return _sin_campos_sgx(sql, empresa, CAMPOS_SGX_PEDIDOS, "pedidos")
+
+
+def sql_de_empresa(parte: Parte, sql: str, empresa: str) -> str:
+    """El texto de la consulta de una parte para una empresa, sin filtros: en VENTAS y
+    PEDIDOS, los campos que solo tiene Segurex cambian por NULL en las demás empresas."""
+    if parte.conjunto == "VENTAS":
+        return sql_id_pedido_app(sql, empresa)
+    if parte.conjunto == "PEDIDOS":
+        return sql_pedidos(sql, empresa)
+    return sql
+
+
+def _sin_campos_sgx(sql: str, empresa: str, campos: tuple[CampoMarcado, ...], que: str) -> str:
+    cambiada = sql
+    for campo in campos:
+        marcadores = sql.count(campo.marcador)
+        cambiada, expresiones = campo.patron.subn(campo.nulo, cambiada)
+        if marcadores != 1 or expresiones != 1:
+            raise config.ConfigError(
+                f"La consulta de {que} debe tener exactamente una expresión "
+                f'CAST(...) AS "{campo.alias}" marcada con \'-- {campo.marcador}\' en la misma '
+                f"línea (marcadores: {marcadores}, expresiones: {expresiones}); no se corre."
+            )
+    return sql if empresa in EMPRESAS_CON_CAMPOS_SGX else cambiada
 
 
 def leer_parte(parte: Parte, empresa: EmpresaHana) -> str:
@@ -127,11 +183,10 @@ def leer_parte(parte: Parte, empresa: EmpresaHana) -> str:
     queda con la pública, por número (HANA_<EMPRESA>_LISTA_PRECIOS); `cartera` trae
     todas las cuentas y se queda con las de la empresa (HANA_<EMPRESA>_CUENTAS_CARTERA).
     `ventas` es la consulta del gestor: en Derivados cambia la expresión marcada del id
-    del pedido de la app por un NULL (sql_id_pedido_app).
+    del pedido de la app por un NULL (sql_id_pedido_app); `pedidos` cambia ahí el id del
+    pedido de la app y la familia (sql_pedidos).
     """
-    sql = leer(parte.consulta, empresa.esquema)
-    if parte.conjunto == "VENTAS":
-        return sql_id_pedido_app(sql, empresa.codigo)
+    sql = sql_de_empresa(parte, leer(parte.consulta, empresa.esquema), empresa.codigo)
     if parte.nombre == PRECIOS:
         if empresa.lista_precios is None:
             raise empresa.error_sin_precios()

@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -274,6 +274,7 @@ def test_ventas_filtra_la_ventana_con_la_expresion_que_usa_el_robot():
     "maestros/clientes.sql",
     "maestros/proveedores.sql",
     "cartera/cartera.sql",
+    "pedidos/pedidos.sql",
     "diagnostico/listas_precios.sql",
 ])
 def test_lo_no_confirmado_esta_marcado(archivo: str):
@@ -285,6 +286,159 @@ def test_catalogo_y_diagnostico_existen():
                     "catalogo/tablas_usuario.sql", "catalogo/columnas.sql",
                     "diagnostico/listas_precios.sql"):
         assert (QUERIES / archivo).is_file(), archivo
+
+
+# --- Pedidos: líneas abiertas de pedidos de clientes (contrato §11) --------------------
+
+PEDIDOS = QUERIES / "pedidos" / "pedidos.sql"
+TABLAS_PROHIBIDAS_EN_PEDIDOS = ("CRD1", "OITW", "ITM1", "OPLN", "RDR12")
+
+
+def test_pedidos_filtra_las_lineas_abiertas_y_solo_une_las_tablas_permitidas():
+    codigo = _sin_comentarios(_texto(PEDIDOS))
+    for condicion in ('T0."DocStatus" = \'O\'', 'T0."CANCELED" = \'N\'',
+                      'T1."LineStatus" = \'O\'', 'T1."OpenCreQty" > 0'):
+        assert condicion in codigo, condicion
+    assert re.search(
+        r'FROM\s+"ORDR"\s+T0\s+INNER\s+JOIN\s+"RDR1"\s+T1\s+ON\s+T1\."DocEntry"\s*=\s*T0\."DocEntry"', codigo
+    )
+    unidas = re.findall(r'\bLEFT\s+JOIN\s+"(\w+)"', codigo)
+    assert sorted(unidas) == ["OCRD", "OCRG", "OITB", "OITM", "OMRC", "OSLP"]
+    assert len(re.findall(r"\bJOIN\b", codigo)) == 7  # RDR1 y las seis de arriba
+    for tabla in TABLAS_PROHIBIDAS_EN_PEDIDOS:
+        assert not re.search(rf"\b{tabla}\b", codigo), tabla
+    # OpenInvQty va en unidades de inventario: nunca sirve para valorar (§11.2).
+    assert "OpenInvQty" not in codigo
+
+
+def test_pedidos_marca_una_vez_el_id_de_la_app_y_la_familia():
+    sql = _texto(PEDIDOS)
+    assert sql.count("@id_pedido_app") == 1 and sql.count("@familia") == 1
+    assert re.search(r'CAST\(T0\."U_SGX_IdPedidoApp" AS NVARCHAR\(254\)\)\s+AS "id_pedido_app",'
+                     r'[ \t]*--[ \t]*@id_pedido_app\n', sql)
+    assert re.search(r'CAST\(T4\."U_GSP_FAMILIA" AS NVARCHAR\(100\)\)\s+AS "familia",'
+                     r'[ \t]*--[ \t]*@familia\n', sql)
+
+
+def test_pedidos_deja_marcado_lo_que_se_valida_con_sap():
+    # Contrato §11.5: cada punto lleva su VALIDAR CON DATOS REALES en un comentario.
+    sql = _texto(PEDIDOS)
+    assert sql.count(VALIDAR) >= 4
+    comentarios = " ".join(re.findall(r"--([^\n]*)", sql))
+    for dato in ("U_SGX_IdPedidoApp", "U_GSP_FAMILIA", "GrssProfit", "unitMsr"):
+        assert dato in comentarios, dato
+
+
+def _sqlite_con_pedidos(hoy: date) -> sqlite3.Connection:
+    """ORDR/RDR1 y sus tablas de nombres en SQLite, con DAYS_BETWEEN de HANA como función.
+
+    `hoy` debe ser el CURRENT_DATE de SQLite (fecha UTC): los días se arman contra él.
+    """
+    def dia(dias_atras: int) -> str:
+        return (hoy - timedelta(days=dias_atras)).isoformat()
+
+    con = sqlite3.connect(":memory:")
+    con.create_function(
+        "DAYS_BETWEEN", 2, lambda a, b: (date.fromisoformat(b) - date.fromisoformat(a)).days
+    )
+    con.executescript("""
+        CREATE TABLE "ORDR" ("DocEntry" INT, "DocNum" INT, "DocDate" TEXT, "DocDueDate" TEXT,
+            "DocStatus" TEXT, "CANCELED" TEXT, "SlpCode" INT, "CardCode" TEXT, "CardName" TEXT,
+            "U_SGX_IdPedidoApp" TEXT, "NumAtCard" TEXT, "Address2" TEXT, "Comments" TEXT,
+            "DiscPrcnt" REAL, "DocCur" TEXT, "DocRate" REAL);
+        CREATE TABLE "RDR1" ("DocEntry" INT, "LineNum" INT, "LineStatus" TEXT, "ShipDate" TEXT,
+            "ItemCode" TEXT, "Dscription" TEXT, "WhsCode" TEXT, "unitMsr" TEXT, "Quantity" REAL,
+            "OpenCreQty" REAL, "OpenQty" REAL, "OpenInvQty" REAL, "PriceBefDi" REAL, "Price" REAL,
+            "LineTotal" REAL, "GrssProfit" REAL, "TaxOnly" TEXT);
+        CREATE TABLE "OCRD" ("CardCode" TEXT, "LicTradNum" TEXT, "City" TEXT, "GroupCode" INT);
+        CREATE TABLE "OCRG" ("GroupCode" INT, "GroupName" TEXT);
+        CREATE TABLE "OSLP" ("SlpCode" INT, "SlpName" TEXT);
+        CREATE TABLE "OITM" ("ItemCode" TEXT, "ItmsGrpCod" INT, "FirmCode" INT, "U_GSP_FAMILIA" TEXT);
+        CREATE TABLE "OITB" ("ItmsGrpCod" INT, "ItmsGrpNam" TEXT);
+        CREATE TABLE "OMRC" ("FirmCode" INT, "FirmName" TEXT);
+        INSERT INTO "OCRG" VALUES (1, 'Distribuidores');
+        INSERT INTO "OSLP" VALUES (7, 'Ana');
+        INSERT INTO "OCRD" VALUES ('C1', '900', 'Bogotá', 1);
+        INSERT INTO "OITM" VALUES ('A1', 10, 3, 'GUANTES');
+        INSERT INTO "OITB" VALUES (10, 'Proteccion manos');
+        INSERT INTO "OMRC" VALUES (3, 'Marca uno');
+    """)
+    # (DocEntry, días desde el pedido, días desde el compromiso, estado, anulado, descuento %)
+    pedidos = [
+        (1, 30, -5, "O", "N", 10.0),   # Hasta 30 dias, aún no vence
+        (2, 31, 1, "O", "N", None),    # De 31 a 60 dias, descuento NULL
+        (3, 61, 20, "O", "N", 0.0),    # De 61 a 90 dias
+        (4, 91, 60, "O", "N", 0.0),    # Mas de 90 dias, sin vendedor
+        (5, 5, 0, "C", "N", 0.0),      # cerrado: no sale
+        (6, 5, 0, "O", "Y", 0.0),      # anulado: no sale
+    ]
+    for entry, dias, atraso, estado, anulado, descuento in pedidos:
+        con.execute(
+            'INSERT INTO "ORDR" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (entry, 3800 + entry, dia(dias), dia(atraso), estado, anulado, None if entry == 4 else 7,
+             "C1", "Cliente uno", f"APP-{entry}", f"OC{entry}", "Calle 1", None, descuento, "COP", 1.0),
+        )
+    # (DocEntry, LineNum, estado, cantidad, abierta, total de la línea, ganancia, solo impuesto)
+    lineas = [
+        (1, 0, "O", 400, 100, 1000.0, 300.0, "N"),   # una cuarta parte abierta, 10 % de descuento
+        (1, 1, "C", 10, 0, 50.0, 5.0, "N"),          # línea cerrada: no sale
+        (1, 2, "O", 10, 0, 50.0, 5.0, "N"),          # abierta sin cantidad pendiente: no sale
+        (2, 0, "O", 3, 3, 90.0, 30.0, "N"),
+        (3, 0, "O", 2, 1, 80.0, 20.0, "Y"),          # solo impuesto: total y ganancia en 0
+        (4, 0, "O", 0, 1, 80.0, 20.0, "N"),          # cantidad 0: total y ganancia en 0
+        (5, 0, "O", 1, 1, 10.0, 1.0, "N"),
+        (6, 0, "O", 1, 1, 10.0, 1.0, "N"),
+    ]
+    for entry, numero, estado, cantidad, abierta, total, ganancia, solo_impuesto in lineas:
+        con.execute(
+            'INSERT INTO "RDR1" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (entry, numero, estado, dia(0), "A1", "Guante", "PT", "Caja", cantidad, abierta,
+             abierta, abierta * 25, 12.5, 10.0, total, ganancia, solo_impuesto),
+        )
+    return con
+
+
+def _pedidos_en_sqlite(sql: str) -> list[dict]:
+    con = sqlite3.connect(":memory:")
+    hoy = date.fromisoformat(con.execute("SELECT CURRENT_DATE").fetchone()[0])
+    con = _sqlite_con_pedidos(hoy)
+    cursor = con.execute(sql)
+    nombres = [d[0] for d in cursor.description]
+    return [dict(zip(nombres, fila)) for fila in cursor.fetchall()]
+
+
+def test_pedidos_trae_solo_las_lineas_abiertas_con_cantidad_pendiente():
+    sql = _texto(PEDIDOS).rstrip()
+    filas = _pedidos_en_sqlite(sql)
+    assert [(f["doc_entry"], f["linea"]) for f in filas] == [(1, 0), (2, 0), (3, 0), (4, 0)]
+    # conteo_sap: el COUNT(*) de la misma consulta (contrato §11.4).
+    [conteo] = _pedidos_en_sqlite(consultas.sql_contar(sql))
+    assert list(conteo.values()) == [len(filas)]
+
+
+def test_pedidos_calcula_dias_rango_atraso_y_valores_pendientes():
+    filas = {f["doc_entry"]: f for f in _pedidos_en_sqlite(_texto(PEDIDOS))}
+    assert [(filas[n]["dias"], filas[n]["rango"], filas[n]["dias_atraso"]) for n in (1, 2, 3, 4)] == [
+        (30, "Hasta 30 dias", -5), (31, "De 31 a 60 dias", 1),
+        (61, "De 61 a 90 dias", 20), (91, "Mas de 90 dias", 60),
+    ]
+    uno = filas[1]
+    # 1.000 * 100 / 400 * (1 - 10 / 100) = 225; ganancia 300 * 100 / 400 = 75.
+    assert (uno["total_pendiente"], uno["ganancia_bruta_pendiente"]) == (225.0, 75.0)
+    assert (uno["cantidad_pedida"], uno["cantidad_pendiente"]) == (400, 100)
+    assert (uno["slp_code"], uno["vendedor"], uno["canal"]) == (7, "Ana", "Distribuidores")
+    assert (uno["linea_articulo"], uno["familia"], uno["marca"]) == ("Proteccion manos", "GUANTES", "Marca uno")
+    assert (uno["id_pedido_app"], uno["numero_pedido"], uno["descuento_documento"]) == ("APP-1", 3801, 10.0)
+    assert filas[2]["total_pendiente"] == 90.0  # descuento NULL = sin descuento
+    for n in (3, 4):  # solo impuesto y cantidad 0
+        assert (filas[n]["total_pendiente"], filas[n]["ganancia_bruta_pendiente"]) == (0, 0)
+    assert (filas[4]["slp_code"], filas[4]["vendedor"]) == (-1, None)
+
+
+def test_pedidos_de_derivados_corre_sin_los_campos_de_segurex():
+    filas = _pedidos_en_sqlite(consultas.sql_pedidos(_texto(PEDIDOS), "SDC"))
+    assert len(filas) == 4
+    assert {(f["id_pedido_app"], f["familia"]) for f in filas} == {(None, None)}
 
 
 # --- Archivo (plan §5) --------------------------------------------------------------
