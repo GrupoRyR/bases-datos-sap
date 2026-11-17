@@ -26,9 +26,10 @@ beforeEach(function () {
  *
  * @param  array<string, int>  $sap
  * @param  list<array<string, mixed>>|null  $customers
+ * @param  Closure(int): void|null  $beforeClose  Called with the run id once its batches are in, before it closes.
  * @return array<string, mixed>
  */
-function closeFullMaestros(TestCase $test, array $sap = [], ?array $customers = null): array
+function closeFullMaestros(TestCase $test, array $sap = [], ?array $customers = null, ?Closure $beforeClose = null): array
 {
     $customers ??= [['codigo' => 'C1'], ['codigo' => 'C2']];
     $parts = array_map(fn (Part $part): string => $part->value, Part::forDataset(Dataset::Maestros));
@@ -41,6 +42,10 @@ function closeFullMaestros(TestCase $test, array $sap = [], ?array $customers = 
             : [RobotClient::row($part)];
         RobotClient::post($test, "/api/robot/v1/corridas/{$run}/lotes", RobotClient::batch($number + 1, $part, $rows))->assertCreated();
         $filas[$part->value] = count($rows);
+    }
+
+    if ($beforeClose !== null) {
+        $beforeClose($run);
     }
 
     return RobotClient::post($test, "/api/robot/v1/corridas/{$run}/cerrar", [
@@ -86,15 +91,12 @@ it('matches when SAP sends inactive rows: only the received active rows are comp
 it('does not match when MySQL holds an active row that the run did not send', function () {
     // The applier inactivates what a full run did not write, except the rows stamped with the run
     // itself. One of those, active and absent from the batches, stands for any divergence the
-    // count exists to catch: the first run of a fresh database has id 1.
-    DB::connection('maestros')->table('clientes')->insert([
-        ['empresa' => 'SGX', 'codigo' => 'C9', 'nombre' => 'Sobrante', 'activo' => true, 'sincronizado_en' => '2026-10-27 02:30:00', 'corrida_id' => 1],
-    ]);
+    // count exists to catch.
+    $response = closeFullMaestros($this, beforeClose: fn (int $run) => DB::connection('maestros')->table('clientes')->insert([
+        ['empresa' => 'SGX', 'codigo' => 'C9', 'nombre' => 'Sobrante', 'activo' => true, 'sincronizado_en' => '2026-10-27 02:30:00', 'corrida_id' => $run],
+    ]));
 
-    $response = closeFullMaestros($this);
-
-    expect(Run::sole()->id)->toBe(1)
-        ->and($response['conteo']['clientes'])->toBe(['sap' => 2, 'recibidas' => 2, 'activas_recibidas' => 2, 'activas_mysql' => 3, 'cuadra' => false])
+    expect($response['conteo']['clientes'])->toBe(['sap' => 2, 'recibidas' => 2, 'activas_recibidas' => 2, 'activas_mysql' => 3, 'cuadra' => false])
         ->and($response['conteo']['marcas']['cuadra'])->toBeTrue()
         ->and((bool) DB::table('daily_counts')->where('parte', 'clientes')->value('cuadra'))->toBeFalse();
 });
