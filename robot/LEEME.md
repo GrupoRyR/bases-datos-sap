@@ -206,6 +206,16 @@ Cómo se comporta:
 - Se envía con la VPN abajo, igual que la API: el túnel completo corta el internet.
 - El correo no se guarda en «Enviados» del buzón compartido.
 
+### Probar las alertas
+
+Después de llenar las variables, desde `robot\etl` (sin SAP, sin VPN y sin la API):
+
+```powershell
+..\.venv\Scripts\python.exe run_robot.py --probar-alerta
+```
+
+Manda un correo de prueba («[Bases SAP] Prueba de alertas») por el canal que corresponda. Termina con código 0 si salió y 1 si no (alertas desactivadas, configuración a medias o error de Graph); el motivo queda en el log. No toma el candado del robot ni guarda estado, así que se puede correr en cualquier momento.
+
 ## Pruebas
 
 Las pruebas usan simulaciones: no se conectan a SAP, a la VPN, a la app ni al correo, y nunca registran tareas.

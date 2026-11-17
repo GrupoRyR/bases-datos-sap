@@ -25,6 +25,7 @@ Uso:
     python run_robot.py --catalogo                 # solo el catálogo
     python run_robot.py --diagnostico              # cifras de MAESTROS, CARTERA y VENTAS, sin enviar
     python run_robot.py --completa --forzar        # no espera la franja bloqueada
+    python run_robot.py --probar-alerta            # correo de prueba de las alertas; no toca SAP, la VPN ni la API
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
@@ -35,7 +36,7 @@ salvo con --forzar.
 
 Salida: 0 todo bien, 1 algún fallo (se avisa por correo, salvo en el
 diagnóstico, que lo corre el usuario), 2 configuración incompleta, 130
-cancelado con Ctrl+C.
+cancelado con Ctrl+C. --probar-alerta sale con 0 si el correo de prueba salió y 1 si no.
 """
 from __future__ import annotations
 
@@ -277,6 +278,9 @@ def _parser() -> argparse.ArgumentParser:
                       help="Catálogo de tablas y columnas de cada empresa (carpeta _CATALOGO).")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA y VENTAS con sus conteos a _DIAGNOSTICO; no envía nada.")
+    modo.add_argument("--probar-alerta", action="store_true",
+                      help="Envía un correo de prueba por el canal de alertas configurado (Graph o SMTP); "
+                           "no toca SAP, la VPN ni la API. Sale con 0 si salió y con 1 si no.")
     parser.add_argument("--empresa", action="append", choices=EMPRESAS,
                         help="Empresa a procesar (se puede repetir). Por defecto, todas.")
     parser.add_argument("--sin-vpn", action="store_true",
@@ -285,6 +289,18 @@ def _parser() -> argparse.ArgumentParser:
                         help="Correr la completa o el archivo aunque sea dentro de una franja "
                              "bloqueada de los otros robots.")
     return parser
+
+
+def _probar_alerta() -> int:
+    """Correo de prueba: sin VPN, SAP, API, candado ni estado. 0 si salió, 1 si no."""
+    registro.configurar()
+    log.info("Prueba de alertas por correo.")
+    cfg = cargar_config()
+    registro.registrar_secretos(cfg)
+    if notificar.probar_alerta(cfg.alertas):
+        return 0
+    log.error("La prueba de alertas falló: el motivo está en las líneas anteriores.")
+    return 1
 
 
 def main(
@@ -297,6 +313,8 @@ def main(
     dormir: Callable[[float], None] = time.sleep,
 ) -> int:
     args = _parser().parse_args(argv)
+    if args.probar_alerta:
+        return _probar_alerta()
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
     if args.completa:
         modo = "completa"
