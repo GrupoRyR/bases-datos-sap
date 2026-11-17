@@ -294,6 +294,15 @@ PEDIDOS = QUERIES / "pedidos" / "pedidos.sql"
 TABLAS_PROHIBIDAS_EN_PEDIDOS = ("CRD1", "OITW", "ITM1", "OPLN", "RDR12")
 
 
+def test_pedidos_es_una_sola_consulta_con_los_alias_del_contrato(monkeypatch):
+    monkeypatch.setattr(config, "QUERIES_DIR", QUERIES)
+    assert sorted(p.name for p in (QUERIES / "pedidos").iterdir()) == ["pedidos.sql"]
+    for esquema in ESQUEMAS:
+        assert consultas.ruta_consulta(PARTES["pedidos"].consulta, esquema) == PEDIDOS
+    # El orden del SELECT es el del contrato §11.3 (el CSV y el lote salen en ese orden).
+    assert _alias(_texto(PEDIDOS)) == PARTES["pedidos"].nombres
+
+
 def test_pedidos_filtra_las_lineas_abiertas_y_solo_une_las_tablas_permitidas():
     codigo = _sin_comentarios(_texto(PEDIDOS))
     for condicion in ('T0."DocStatus" = \'O\'', 'T0."CANCELED" = \'N\'',

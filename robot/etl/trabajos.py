@@ -173,7 +173,7 @@ def trabajos_completos(
     solicitudes_tomadas: list[dict[str, Any]],
     sin_precios: Collection[str] = (),
 ) -> list[Trabajo]:
-    """Corrida nocturna: por empresa, MAESTROS, CARTERA y VENTAS, todo en modo `todo`.
+    """Corrida nocturna: por empresa, MAESTROS, CARTERA, VENTAS y PEDIDOS, todo en modo `todo`.
 
     Las solicitudes tomadas de la misma empresa y conjunto van en la corrida
     completa (§7.3); las de otras empresas quedan como trabajos de solicitud.
@@ -187,7 +187,7 @@ def trabajos_completos(
 
     trabajos: list[Trabajo] = []
     for empresa in empresas:
-        for conjunto in esquema.PARTES_POR_CONJUNTO:  # MAESTROS, CARTERA y VENTAS
+        for conjunto in esquema.PARTES_POR_CONJUNTO:  # MAESTROS, CARTERA, VENTAS y PEDIDOS
             de_solicitud = por_grupo.pop((empresa, conjunto), None)
             trabajos.append(Trabajo(
                 empresa=empresa,

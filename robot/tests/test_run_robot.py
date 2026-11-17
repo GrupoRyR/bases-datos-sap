@@ -33,16 +33,16 @@ def _corridas(e):
     return [(c.conjunto, c.empresa, c.tipo, c.estado) for c in e.servidor.corridas.values()]
 
 
-SEIS_CERRADAS = [
+OCHO_CERRADAS = [
     (conjunto, empresa, "completa", "cerrada")
-    for empresa in ("SGX", "SDC") for conjunto in ("MAESTROS", "CARTERA", "VENTAS")
+    for empresa in ("SGX", "SDC") for conjunto in ("MAESTROS", "CARTERA", "VENTAS", "PEDIDOS")
 ]
 
 
 def test_completa_de_las_dos_empresas(entorno, correos):
     e = entorno
     assert _main(e, "--completa") == 0
-    assert _corridas(e) == SEIS_CERRADAS
+    assert _corridas(e) == OCHO_CERRADAS
     revisar_fases(e.linea)
     # Las solicitudes se toman con la VPN ya abajo y antes de abrir las corridas
     # (vencen 30 minutos después de tomarlas, contrato §7.3).
@@ -56,7 +56,7 @@ def test_completa_de_las_dos_empresas(entorno, correos):
     assert estado["fallos"] == []
     assert (e.csv_dir / "CARTERA" / "SDC" / "historico" / "2026-10-25.csv").is_file()
     assert "CSGX001" not in json.dumps(estado)
-    assert estado["trabajos"] == [f"{c} {emp}" for c, emp, _, _ in SEIS_CERRADAS]
+    assert estado["trabajos"] == [f"{c} {emp}" for c, emp, _, _ in OCHO_CERRADAS]
 
 
 def test_completa_trae_ventas_de_las_dos_empresas_con_su_conteo_y_ventana(entorno, correos):
@@ -78,12 +78,32 @@ def test_completa_trae_ventas_de_las_dos_empresas_con_su_conteo_y_ventana(entorn
         assert len({x.conexion for x in pasos}) == 1
 
 
+def test_completa_trae_pedidos_de_las_dos_empresas_con_su_conteo(entorno, correos):
+    e = entorno
+    assert _main(e, "--completa") == 0
+    pedidos = [c for c in e.servidor.corridas.values() if c.conjunto == "PEDIDOS"]
+    assert [(c.empresa, c.tipo, c.estado) for c in pedidos] == [
+        ("SGX", "completa", "cerrada"), ("SDC", "completa", "cerrada"),
+    ]
+    for corrida in pedidos:
+        assert corrida.partes == {"pedidos": "todo"}
+        assert corrida.conteo_sap == {"pedidos": 2} == corrida.total_filas()
+        assert (corrida.ventana_desde, corrida.fecha_corte) == (None, None)
+    for empresa in ("SGX", "SDC"):
+        assert (e.csv_dir / "PEDIDOS" / empresa / "2026-10-26_0200.csv").is_file()
+        # El conteo es el COUNT(*) de la misma consulta, en la misma conexión (contrato §11.4).
+        pasos = e.hana.de(empresa, parte="pedidos")
+        assert [x.tipo for x in pasos] == ["todo", "contar"]
+        assert len({x.conexion for x in pasos}) == 1
+        assert pasos[0].sql in pasos[1].sql
+
+
 def test_completa_sin_lista_de_precios_en_derivados_no_falla_y_no_pide_precios(entorno, correos, monkeypatch):
     e = entorno
     monkeypatch.delenv("HANA_SDC_LISTA_PRECIOS")  # Derivados todavía no tiene lista pública
     assert _main(e, "--completa") == 0
-    assert _corridas(e) == SEIS_CERRADAS
-    sgx, _, _, sdc, _, _ = e.servidor.corridas.values()
+    assert _corridas(e) == OCHO_CERRADAS
+    sgx, _, _, _, sdc, _, _, _ = e.servidor.corridas.values()
     assert "precios" in sgx.partes and "precios" not in sdc.partes
     assert not e.hana.de("SDC", parte="precios")
     assert correos == []
@@ -102,9 +122,11 @@ def test_completa_falla_al_instante_la_solicitud_de_solo_precios_de_derivados(en
         ("MAESTROS", "SGX", "completa", "cerrada", []),
         ("CARTERA", "SGX", "completa", "cerrada", []),
         ("VENTAS", "SGX", "completa", "cerrada", []),
+        ("PEDIDOS", "SGX", "completa", "cerrada", []),
         ("MAESTROS", "SDC", "completa", "cerrada", [51]),
         ("CARTERA", "SDC", "completa", "cerrada", []),
         ("VENTAS", "SDC", "completa", "cerrada", []),
+        ("PEDIDOS", "SDC", "completa", "cerrada", []),
         ("MAESTROS", "SDC", "solicitud", "fallida", [50]),
     ]
     assert e.servidor.estado_solicitudes == {50: "fallida", 51: "terminada"}
@@ -116,7 +138,7 @@ def test_completa_falla_al_instante_la_solicitud_de_solo_precios_de_derivados(en
 
 def test_una_sola_empresa(entorno, correos):
     assert _main(entorno, "--completa", "--empresa", "SDC") == 0
-    assert _corridas(entorno) == SEIS_CERRADAS[3:]
+    assert _corridas(entorno) == OCHO_CERRADAS[4:]
 
 
 def test_completa_incluye_las_solicitudes_tomadas(entorno, correos):
@@ -127,10 +149,14 @@ def test_completa_incluye_las_solicitudes_tomadas(entorno, correos):
                                   "parte": None, "desde": {}})
     e.servidor.encolar_solicitud({"id": 120, "empresa": "SDC", "conjunto": "VENTAS",
                                   "parte": None, "desde": {}})
+    e.servidor.encolar_solicitud({"id": 121, "empresa": "SGX", "conjunto": "PEDIDOS",
+                                  "parte": None, "desde": {}})
     assert _main(e, "--completa") == 0
     corridas = list(e.servidor.corridas.values())
-    assert [c.solicitudes for c in corridas] == [[118], [], [], [], [119], [120]]
-    assert e.servidor.estado_solicitudes == {118: "terminada", 119: "terminada", 120: "terminada"}
+    assert [c.solicitudes for c in corridas] == [[118], [], [], [121], [], [119], [120], []]
+    assert e.servidor.estado_solicitudes == {
+        118: "terminada", 119: "terminada", 120: "terminada", 121: "terminada",
+    }
 
 
 def test_solicitudes_de_otra_empresa_quedan_tomadas(entorno, correos):
@@ -138,7 +164,7 @@ def test_solicitudes_de_otra_empresa_quedan_tomadas(entorno, correos):
     e.servidor.encolar_solicitud({"id": 7, "empresa": "SDC", "conjunto": "MAESTROS",
                                   "parte": "vendedores", "desde": {}})
     assert _main(e, "--completa", "--empresa", "SGX") == 0
-    assert _corridas(e) == SEIS_CERRADAS[:3]
+    assert _corridas(e) == OCHO_CERRADAS[:4]
     assert e.hana.de("SDC") == []
     # No se extrae: queda tomada y la API la vence.
     assert e.servidor.estado_solicitudes[7] == "tomada"
@@ -163,7 +189,7 @@ def test_solicitud_invalida_se_reporta_y_la_nocturna_sigue(entorno, correos):
     e.servidor.encolar_solicitud({"id": 31, "empresa": "SGX", "conjunto": "CARTERA",
                                   "parte": None, "desde": {}})
     assert _main(e, "--completa") == 1
-    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 6
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 8
     assert e.servidor.corridas[2].solicitudes == [31]
     assert [etapa for etapa, _ in correos[0]] == ["SOLICITUDES"]
     assert "30" in correos[0][0][1]
@@ -183,7 +209,7 @@ def test_si_tomar_falla_la_nocturna_sigue(entorno, correos):
     e = entorno
     e.servidor.programar_fallas("tomar", status=500, veces=4)
     assert _main(e, "--completa") == 0
-    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 6
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 8
 
 
 def test_falla_la_vpn(entorno, correos):
@@ -194,12 +220,13 @@ def test_falla_la_vpn(entorno, correos):
     assert e.hana.ejecutadas == []
     # VENTAS no se abre: sin HANA no hay ventana_desde (contrato §10.1). Igual va al correo.
     assert [c[:2] for c in _corridas(e)] == [
-        ("MAESTROS", "SGX"), ("CARTERA", "SGX"), ("MAESTROS", "SDC"), ("CARTERA", "SDC"),
+        ("MAESTROS", "SGX"), ("CARTERA", "SGX"), ("PEDIDOS", "SGX"),
+        ("MAESTROS", "SDC"), ("CARTERA", "SDC"), ("PEDIDOS", "SDC"),
     ]
-    assert [c[3] for c in _corridas(e)] == ["fallida"] * 4
+    assert [c[3] for c in _corridas(e)] == ["fallida"] * 6
     assert all("VPN" in c.error for c in e.servidor.corridas.values())
     assert len(correos) == 1
-    assert [etapa for etapa, _ in correos[0]] == ["VPN"] * 6
+    assert [etapa for etapa, _ in correos[0]] == ["VPN"] * 8
     assert _estado()["estado"] == "ERROR"
     revisar_fases(e.linea)
 
@@ -208,9 +235,11 @@ def test_falla_hana_de_una_empresa_y_la_otra_cierra(entorno, correos):
     e = entorno
     e.hana.empresas_que_fallan.add("SDC")
     assert _main(e, "--completa") == 1
-    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 3 + ["fallida"] * 2
-    assert [etapa for etapa, _ in correos[0]] == ["HANA"] * 3
-    assert [msg.split(":")[0] for _, msg in correos[0]] == ["MAESTROS SDC", "CARTERA SDC", "VENTAS SDC"]
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 4 + ["fallida"] * 3
+    assert [etapa for etapa, _ in correos[0]] == ["HANA"] * 4
+    assert [msg.split(":")[0] for _, msg in correos[0]] == [
+        "MAESTROS SDC", "CARTERA SDC", "VENTAS SDC", "PEDIDOS SDC",
+    ]
 
 
 def test_parte_vacia_falla_la_corrida_y_no_envia_nada(entorno, correos):
@@ -220,7 +249,7 @@ def test_parte_vacia_falla_la_corrida_y_no_envia_nada(entorno, correos):
     maestros_sgx = e.servidor.corridas[1]
     assert (maestros_sgx.estado, maestros_sgx.lotes) == ("fallida", {})
     assert "marcas" in maestros_sgx.error
-    assert [c[3] for c in _corridas(e)][1:] == ["cerrada"] * 5
+    assert [c[3] for c in _corridas(e)][1:] == ["cerrada"] * 7
 
 
 def test_error_de_configuracion_sale_con_2(tmp_path, correos, monkeypatch):
@@ -265,13 +294,15 @@ def test_retencion_borra_corridas_viejas(entorno, correos):
     vieja = e.csv_dir / "MAESTROS" / "SGX" / "clientes" / "2026-07-01_0200.csv"
     vieja_ventas = e.csv_dir / "VENTAS" / "SDC" / "2026-07-27_0200.csv"
     ventas_90_dias = e.csv_dir / "VENTAS" / "SDC" / "2026-07-28_0200.csv"
+    vieja_pedidos = e.csv_dir / "PEDIDOS" / "SGX" / "2026-07-27_0200.csv"
+    pedidos_90_dias = e.csv_dir / "PEDIDOS" / "SGX" / "2026-07-28_0200.csv"
     foto = e.csv_dir / "CARTERA" / "SGX" / "historico" / "2025-07-01.csv"
-    for ruta in (vieja, vieja_ventas, ventas_90_dias, foto):
+    for ruta in (vieja, vieja_ventas, ventas_90_dias, vieja_pedidos, pedidos_90_dias, foto):
         ruta.parent.mkdir(parents=True, exist_ok=True)
         ruta.write_text("x", encoding="utf-8")
     assert _main(e, "--completa") == 0
-    assert not vieja.exists() and not vieja_ventas.exists()
-    assert foto.exists() and ventas_90_dias.exists()
+    assert not vieja.exists() and not vieja_ventas.exists() and not vieja_pedidos.exists()
+    assert foto.exists() and ventas_90_dias.exists() and pedidos_90_dias.exists()
 
 
 def test_retencion_borra_temporales_huerfanos_de_mas_de_un_dia(entorno, correos):
@@ -318,7 +349,7 @@ def test_sin_vpn_no_crea_la_vpn(entorno, correos):
 
     assert _main(e, "--completa", "--sin-vpn", fabrica_vpn=no_llamar) == 0
     assert not [ev for ev in e.linea if ev[0] == "vpn"]
-    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 6
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 8
 
 
 def test_error_de_hana_no_lleva_el_texto_del_driver(entorno, correos):
@@ -387,7 +418,7 @@ def test_completa_reporta_el_archivo_sin_frenar_maestros_ni_cartera(entorno, cor
     e = entorno
     e.hana.partes_que_fallan.add(("SGX", "archivo/AUDITORIA/USR5"))
     assert _main(e, "--completa") == 1
-    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 6
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 8
     assert correos == [[("ARCHIVO", "SGX AUDITORIA/USR5: Error ejecutando la consulta "
                                     "'SGX AUDITORIA/USR5'; revisa robot/logs/robot.log.")]]
     assert (e.csv_dir / "AUDITORIA" / "SDC" / "USR5" / "2026-10.csv").is_file()
@@ -519,7 +550,7 @@ def test_completa_espera_el_candado_y_corre(entorno, correos, candado_ajeno):
 
     assert _main(e, "--completa", dormir=dormir) == 0
     assert esperas == [10, 10]
-    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 6
+    assert [c[3] for c in _corridas(e)] == ["cerrada"] * 8
     assert not (config.STATE_DIR / CANDADO).exists()
 
 

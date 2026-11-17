@@ -39,7 +39,7 @@ def test_completa_de_las_dos_empresas(escenario):
     e = escenario
     resultados = _extraer(e, trabajos_completos(["SGX", "SDC"], HOY, []))
 
-    assert [r.error for r in resultados] == [None] * 6
+    assert [r.error for r in resultados] == [None] * 8
     assert e.vpn.conexiones == 1  # una sola sesión de VPN
     assert [ev for ev in e.linea if ev[:2] == ("hana", "conectar")] == [
         ("hana", "conectar", "SGX"), ("hana", "conectar", "SDC"),
@@ -58,6 +58,10 @@ def test_completa_de_las_dos_empresas(escenario):
     assert sgx_ventas.conteo_sap == {"ventas": 2}
     assert sgx_ventas.columnas["ventas"] == esquema.PARTES["ventas"].nombres
     assert sgx_ventas.ventana_desde == "2026-09-24"
+    sgx_pedidos = resultados[3]
+    assert sgx_pedidos.conteo_sap == {"pedidos": 2}
+    assert sgx_pedidos.columnas["pedidos"] == esquema.PARTES["pedidos"].nombres
+    assert sgx_pedidos.ventana_desde is None
     assert sgx_maestros.ventana_desde is None and sgx_cartera.ventana_desde is None
     # Solo consultas sin filtro y conteos, y cada conteo justo después de su parte.
     tipos = [(x.tipo, x.parte) for x in e.hana.de("SGX")]
@@ -144,7 +148,7 @@ def test_falla_la_vpn(escenario):
     vpn = VpnFalsa(e.linea, fallar=True)
     e.hana.vpn = vpn
     resultados = _extraer(e, trabajos_completos(["SGX", "SDC"], HOY, []), robot_vpn=vpn)
-    assert [r.etapa for r in resultados] == ["VPN"] * 6
+    assert [r.etapa for r in resultados] == ["VPN"] * 8
     assert all("VPN" in r.error for r in resultados)
     assert e.hana.ejecutadas == []
     assert e.linea[-1] == ("vpn", "abajo")
@@ -155,8 +159,8 @@ def test_falla_la_conexion_de_una_empresa(escenario):
     e.hana.empresas_que_fallan.add("SGX")
     resultados = _extraer(e, trabajos_completos(["SGX", "SDC"], HOY, []))
     assert [(r.trabajo.nombre, r.etapa) for r in resultados] == [
-        ("MAESTROS SGX", "HANA"), ("CARTERA SGX", "HANA"), ("VENTAS SGX", "HANA"),
-        ("MAESTROS SDC", None), ("CARTERA SDC", None), ("VENTAS SDC", None),
+        ("MAESTROS SGX", "HANA"), ("CARTERA SGX", "HANA"), ("VENTAS SGX", "HANA"), ("PEDIDOS SGX", "HANA"),
+        ("MAESTROS SDC", None), ("CARTERA SDC", None), ("VENTAS SDC", None), ("PEDIDOS SDC", None),
     ]
     assert "SGX" in resultados[0].error
     revisar_fases(e.linea)
@@ -216,7 +220,7 @@ def test_valor_invalido_falla_sin_mostrar_el_valor(escenario):
 def test_precios_trae_solo_la_lista_configurada_de_la_empresa(escenario):
     e = escenario
     e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=2)
-    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (0, 3)])
+    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (0, 4)])
 
     assert [r.error for r in resultados] == [None, None]
     sgx, sdc = resultados
@@ -231,7 +235,7 @@ def test_precios_trae_solo_la_lista_configurada_de_la_empresa(escenario):
 
 def test_cartera_pide_las_cuentas_de_cada_empresa_con_la_misma_consulta(escenario):
     e = escenario
-    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (1, 4)])
+    resultados = _extraer(e, [trabajos_completos(["SGX", "SDC"], HOY, [])[i] for i in (1, 5)])
 
     assert [r.error for r in resultados] == [None, None]
     [sgx] = e.hana.de("SGX", "todo", "cartera")
@@ -246,11 +250,12 @@ def test_empresa_sin_lista_de_precios_falla_su_trabajo_con_un_mensaje_claro(esce
     e.cfg.hana.empresas["SDC"] = replace(e.cfg.hana.empresas["SDC"], lista_precios=None)
     resultados = _extraer(e, trabajos_completos(["SDC"], HOY, []))
 
-    maestros, cartera, ventas = resultados
+    maestros, cartera, ventas, pedidos = resultados
     assert maestros.etapa == "CONFIGURACION"
     assert "HANA_SDC_LISTA_PRECIOS" in maestros.error
     assert cartera.error is None  # la cartera de la empresa no depende de los precios
     assert ventas.error is None  # las ventas tampoco
+    assert pedidos.error is None  # ni los pedidos
     assert not e.hana.de("SDC", parte="precios")
 
 
@@ -266,7 +271,7 @@ def test_sin_vpn_no_toca_la_vpn(escenario):
     e = escenario
     e.hana.vpn = None
     resultados = _extraer(e, trabajos_completos(["SGX"], HOY, []), sin_vpn=True)
-    assert [r.error for r in resultados] == [None, None, None]
+    assert [r.error for r in resultados] == [None] * 4
     assert e.vpn.conexiones == 0
     assert not [ev for ev in e.linea if ev[0] == "vpn"]
 
@@ -287,7 +292,7 @@ def test_gancho_extra_por_empresa_no_afecta_los_trabajos(escenario):
 
     resultados = _extraer(e, trabajos_completos(["SGX", "SDC"], HOY, []), extra=extra)
     assert llamadas == [("SGX", "SGX"), ("SDC", "SDC")]
-    assert [r.error for r in resultados] == [None] * 6
+    assert [r.error for r in resultados] == [None] * 8
 
 
 def test_trabajo_sin_socios_no_trae_hijas(escenario):

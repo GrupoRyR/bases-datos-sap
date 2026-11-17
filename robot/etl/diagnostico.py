@@ -1,6 +1,6 @@
 """Diagnóstico (--diagnostico): lo corre el usuario para ver cifras antes de cargar.
 
-Por empresa extrae cada parte de MAESTROS (completa), CARTERA y VENTAS con su
+Por empresa extrae cada parte de MAESTROS (completa), CARTERA, VENTAS y PEDIDOS con su
 COUNT(*), y la lista de listas de precios (OPLN). Nunca envía nada a la API:
 este módulo no importa el cliente de la API y no necesita su configuración.
 

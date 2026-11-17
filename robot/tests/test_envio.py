@@ -26,7 +26,7 @@ def _leer_csv(ruta: Path) -> list[list[str]]:
     return [linea.split(";") for linea in ruta.read_text(encoding="utf-8-sig").splitlines()]
 
 
-def test_completa_cierra_las_seis_corridas(escenario):
+def test_completa_cierra_las_ocho_corridas(escenario):
     e = escenario
     resultados = _resultados(e, trabajos_completos(["SGX", "SDC"], HOY, []))
     assert _enviar(e, resultados) == []
@@ -35,9 +35,9 @@ def test_completa_cierra_las_seis_corridas(escenario):
     corridas = list(e.servidor.corridas.values())
     assert [(c.conjunto, c.empresa, c.tipo, c.estado) for c in corridas] == [
         ("MAESTROS", "SGX", "completa", "cerrada"), ("CARTERA", "SGX", "completa", "cerrada"),
-        ("VENTAS", "SGX", "completa", "cerrada"),
+        ("VENTAS", "SGX", "completa", "cerrada"), ("PEDIDOS", "SGX", "completa", "cerrada"),
         ("MAESTROS", "SDC", "completa", "cerrada"), ("CARTERA", "SDC", "completa", "cerrada"),
-        ("VENTAS", "SDC", "completa", "cerrada"),
+        ("VENTAS", "SDC", "completa", "cerrada"), ("PEDIDOS", "SDC", "completa", "cerrada"),
     ]
     maestros = corridas[0]
     assert list(maestros.partes) == list(esquema.PARTES_POR_CONJUNTO["MAESTROS"])
@@ -63,6 +63,10 @@ def test_completa_cierra_las_seis_corridas(escenario):
     iniciar = [p.datos for p in e.servidor.peticiones_a("iniciar")]
     assert [d["ventana_desde"] for d in iniciar if "ventana_desde" in d] == ["2026-09-24", "2026-09-24"]
     assert [d["conjunto"] for d in iniciar if "ventana_desde" in d] == ["VENTAS", "VENTAS"]
+    # PEDIDOS: una parte en modo todo, sin fecha de corte ni ventana, con su conteo (§11.4).
+    pedidos = corridas[3]
+    assert (pedidos.partes, pedidos.fecha_corte, pedidos.ventana_desde) == ({"pedidos": "todo"}, None, None)
+    assert pedidos.conteo_sap == {"pedidos": 2} == pedidos.total_filas()
 
 
 def test_completa_escribe_los_csv_y_la_foto_de_cartera(escenario):
@@ -107,6 +111,51 @@ def test_ventas_escribe_un_csv_por_corrida_sin_carpeta_de_parte(escenario):
     primera = dict(zip(filas[0], filas[1]))
     assert (primera["cantidad"], primera["total"], primera["trm"]) == ("1.500000", "1000.50", "1.500000")
     assert primera["fecha_contabilizacion"] == "2026-10-01"
+
+
+def test_pedidos_escribe_un_csv_por_corrida_sin_carpeta_de_parte(escenario):
+    e = escenario
+    _enviar(e, _resultados(e, [trabajos_completos(["SGX"], HOY, [])[3]]))
+    raiz = e.csv_dir / "PEDIDOS" / "SGX"
+    assert sorted(p.name for p in raiz.iterdir()) == ["2026-10-26_0200.csv"]
+    filas = _leer_csv(raiz / "2026-10-26_0200.csv")
+    assert filas[0] == esquema.PARTES["pedidos"].nombres
+    assert len(filas) == 3
+    primera = dict(zip(filas[0], filas[1]))
+    assert (primera["cantidad_pendiente"], primera["total_pendiente"], primera["trm"]) == (
+        "1.500000", "1000.50", "1.500000")
+
+
+def test_pedidos_de_derivados_pide_la_consulta_sin_los_campos_de_segurex(escenario):
+    e = escenario
+    _enviar(e, _resultados(e, [t for t in trabajos_completos(["SGX", "SDC"], HOY, []) if t.conjunto == "PEDIDOS"]))
+    for empresa, con_campos in (("SGX", True), ("SDC", False)):
+        [consulta] = e.hana.de(empresa, "todo", "pedidos")
+        assert ('"U_SGX_IdPedidoApp"' in consulta.sql) == con_campos
+        assert ('"U_GSP_FAMILIA"' in consulta.sql) == con_campos
+
+
+def test_pedidos_con_cero_filas_no_se_envia_y_falla_la_corrida(escenario):
+    # Contrato §11.4: nunca vacía. Los pedidos anteriores se quedan en MySQL.
+    e = escenario
+    e.hana.datos["SDC"]["pedidos"] = []
+    fallos = _enviar(e, _resultados(e, [trabajos_completos(["SDC"], HOY, [])[3]]))
+    assert fallos == [("VALIDACION", "PEDIDOS SDC: La parte pedidos llegó con 0 filas de SAP; "
+                                     "no se envía para no vaciar la tabla.")]
+    [corrida] = e.servidor.corridas.values()
+    assert (corrida.conjunto, corrida.estado, corrida.lotes) == ("PEDIDOS", "fallida", {})
+
+
+def test_solicitud_de_pedidos_va_sin_conteo(escenario):
+    e = escenario
+    e.servidor.encolar_solicitud({"id": 18, "empresa": "SDC", "conjunto": "PEDIDOS", "parte": None, "desde": {}})
+    tomadas = e.cliente.tomar_solicitudes(20)
+    assert _enviar(e, _resultados(e, trabajos_de_solicitudes(tomadas, HOY))) == []
+    [corrida] = e.servidor.corridas.values()
+    assert (corrida.conjunto, corrida.tipo, corrida.partes, corrida.conteo_sap) == (
+        "PEDIDOS", "solicitud", {"pedidos": "todo"}, None)
+    assert (corrida.fecha_corte, corrida.ventana_desde) == (None, None)
+    assert e.servidor.estado_solicitudes[18] == "terminada"
 
 
 def test_solicitud_de_ventas_manda_la_ventana_sin_conteo(escenario):

@@ -72,6 +72,16 @@ COLUMNAS = {
         "descripcion", "cantidad", "costo_unitario", "costo_total", "precio_lista",
         "precio_unitario", "total", "iva", "ganancia_bruta", "moneda", "trm", "comentarios",
     ],
+    # Contrato §11.3, en ese orden.
+    "pedidos": [
+        "doc_entry", "numero_pedido", "linea", "fecha_pedido", "fecha_compromiso",
+        "fecha_entrega_linea", "dias", "rango", "dias_atraso", "slp_code", "vendedor", "canal",
+        "codigo_cliente", "cliente", "nit", "ciudad", "id_pedido_app", "oc_cliente",
+        "direccion_envio", "comentarios", "codigo_articulo", "descripcion", "linea_articulo",
+        "familia", "marca", "bodega", "unidad", "cantidad_pedida", "cantidad_pendiente",
+        "precio_lista", "precio_unitario", "descuento_documento", "total_pendiente",
+        "ganancia_bruta_pendiente", "moneda", "trm",
+    ],
 }
 REQUERIDAS = {
     "clientes": {"codigo", "nombre", "activo", "actualizado_en_sap"},
@@ -92,6 +102,11 @@ REQUERIDAS = {
         "estado_documento", "fecha_documento", "fecha_contabilizacion", "slp_code",
         "codigo_cliente", "cantidad", "total",
     },
+    "pedidos": {
+        "doc_entry", "numero_pedido", "linea", "fecha_pedido", "fecha_compromiso", "dias",
+        "rango", "dias_atraso", "slp_code", "codigo_cliente", "codigo_articulo",
+        "cantidad_pedida", "cantidad_pendiente", "total_pendiente",
+    },
 }
 LLAVES = {
     "clientes": ("codigo",),
@@ -108,15 +123,16 @@ LLAVES = {
     "municipios": ("codigo",),
     "cartera": (),
     "ventas": ("tipo_objeto", "doc_entry", "linea"),
+    "pedidos": ("doc_entry", "linea"),
 }
 MODOS = {
     "clientes": "cambios", "proveedores": "cambios", "articulos": "cambios",
     "direcciones": "socio", "contactos": "socio",
     "grupos_articulos": "todo", "marcas": "todo", "precios": "todo", "vendedores": "todo",
     "grupos_clientes": "todo", "condiciones_pago": "todo", "municipios": "todo",
-    "cartera": "todo", "ventas": "todo",
+    "cartera": "todo", "ventas": "todo", "pedidos": "todo",
 }
-CONJUNTOS = {"cartera": "CARTERA", "ventas": "VENTAS"}
+CONJUNTOS = {"cartera": "CARTERA", "ventas": "VENTAS", "pedidos": "PEDIDOS"}
 MAESTROS = [p for p in COLUMNAS if p not in CONJUNTOS]
 
 
@@ -124,6 +140,7 @@ def test_estan_todas_las_partes_del_contrato():
     assert list(PARTES) == list(COLUMNAS)
     assert esquema.PARTES_POR_CONJUNTO == {
         "MAESTROS": tuple(MAESTROS), "CARTERA": ("cartera",), "VENTAS": ("ventas",),
+        "PEDIDOS": ("pedidos",),
     }
     assert esquema.SOCIOS == ("clientes", "proveedores")
     assert esquema.HIJAS_DE_SOCIO == ("direcciones", "contactos")
@@ -175,6 +192,14 @@ def test_ventas_usa_las_etiquetas_del_gestor():
         "precio_lista": "Precio lista", "precio_unitario": "Precio unitario", "total": "Total",
         "iva": "IVA", "ganancia_bruta": "Ganancia bruta", "moneda": "Moneda", "trm": "TRM", "comentarios": "Comentarios",
     }
+
+
+def test_en_pedidos_el_alias_es_el_nombre_del_contrato():
+    # Consulta propia (no del gestor): sus alias ya son los nombres del contrato §11.3.
+    pedidos = PARTES["pedidos"]
+    assert pedidos.consulta == "pedidos/pedidos.sql"
+    assert all(c.hana == c.nombre for c in pedidos.columnas)
+    assert len(pedidos.columnas) == 36
 
 
 def _tipos(nombre: str) -> dict[str, str]:
@@ -252,10 +277,38 @@ def test_tipos_de_ventas():
             assert tipo == TEXTO, nombre
 
 
+def test_tipos_de_pedidos():
+    tipos = _tipos("pedidos")
+    enteros = {"doc_entry", "numero_pedido", "linea", "dias", "dias_atraso", "slp_code"}
+    fechas = {"fecha_pedido", "fecha_compromiso", "fecha_entrega_linea"}
+    # Cantidades y tasas: hasta 6 decimales (contrato §4.2).
+    cantidades = {"cantidad_pedida", "cantidad_pendiente", "descuento_documento", "trm"}
+    montos = {"precio_lista", "precio_unitario", "total_pendiente", "ganancia_bruta_pendiente"}
+    for nombre, tipo in tipos.items():
+        if nombre in enteros:
+            assert tipo == ENTERO, nombre
+        elif nombre in fechas:
+            assert tipo == FECHA, nombre
+        elif nombre in cantidades:
+            assert tipo == CANTIDAD, nombre
+        elif nombre in montos:
+            assert tipo == MONTO, nombre
+        else:
+            assert tipo == TEXTO, nombre
+
+
+def test_pedidos_rechaza_la_llave_repetida_de_doc_entry_y_linea():
+    alias = [c.hana for c in PARTES["pedidos"].columnas]
+    filas = [fila("pedidos", 1, doc_entry=7, linea=0), fila("pedidos", 2, doc_entry=7, linea=0)]
+    with pytest.raises(LlaveRepetida, match="doc_entry, linea"):
+        preparar_filas(PARTES["pedidos"], alias, [[f[a] for a in alias] for f in filas])
+
+
 def test_partes_por_solicitud_segun_contrato_7_1():
     assert esquema.PARTES_POR_SOLICITUD == {
         ("CARTERA", None): ("cartera",),
         ("VENTAS", None): ("ventas",),
+        ("PEDIDOS", None): ("pedidos",),
         ("MAESTROS", None): tuple(MAESTROS),
         ("MAESTROS", "clientes"): ("clientes", "direcciones", "contactos"),
         ("MAESTROS", "proveedores"): ("proveedores", "direcciones", "contactos"),

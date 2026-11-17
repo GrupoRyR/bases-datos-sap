@@ -33,11 +33,13 @@ PARTES = {
     ),
     "CARTERA": ("cartera",),
     "VENTAS": ("ventas",),
+    "PEDIDOS": ("pedidos",),
 }
 # Contrato §7.1: partes que trae una corrida según la parte pedida.
 PARTES_POR_SOLICITUD = {
     ("CARTERA", None): {"cartera"},
     ("VENTAS", None): {"ventas"},
+    ("PEDIDOS", None): {"pedidos"},
     ("MAESTROS", None): set(PARTES["MAESTROS"]),
     ("MAESTROS", "clientes"): {"clientes", "direcciones", "contactos"},
     ("MAESTROS", "proveedores"): {"proveedores", "direcciones", "contactos"},
