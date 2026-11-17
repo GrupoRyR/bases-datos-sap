@@ -295,6 +295,16 @@ CABECERA_ARCHIVO = (
     "VALIDAR CON DATOS REALES: columnas tomadas de la documentación de SAP B1; "
     r"confirmarlas con _CATALOGO\<empresa>\columnas antes de la primera extracción"
 )
+# Consultas ya confirmadas con el catálogo de Segurex (17/11/2026): llevan esa nota en
+# vez de la cabecera de «VALIDAR CON DATOS REALES». Columnas exactas, en minúscula
+# o mayúscula tal como las guarda HANA.
+CONFIRMADAS_CON_CATALOGO = r"Columnas confirmadas con _CATALOGO\SEGUREX\columnas el 17/11/2026"
+COLUMNAS_CONFIRMADAS = {
+    "OSUL": ["ID", "RealName", "LogReason", "LogDetail", "Mac", "Machine",
+             "StartDate", "StartTime", "EndDate", "EndTime"],
+    "AUSR": ["logInstanc", "USERID", "USER_CODE", "U_NAME", "E_Mail", "SUPERUSER",
+             "Locked", "updateDate"],
+}
 OHEM_PERMITIDAS = {"empID", "firstName", "middleName", "lastName", "jobTitle", "position", "dept", "email"}
 RE_CLAVE = re.compile(r"PASS|PWD|CLAVE", re.IGNORECASE)
 
@@ -316,7 +326,10 @@ def test_hay_consultas_de_archivo():
 @pytest.mark.parametrize("ruta", TABLAS_ARCHIVO, ids=_id)
 def test_cada_archivo_lee_su_tabla_con_columnas_listadas(ruta: Path):
     sql = _texto(ruta)
-    assert CABECERA_ARCHIVO in sql
+    if ruta.stem in COLUMNAS_CONFIRMADAS:
+        assert CONFIRMADAS_CON_CATALOGO in sql
+    else:
+        assert CABECERA_ARCHIVO in sql
     codigo = _sin_comentarios(sql)
     assert re.search(rf'FROM "{re.escape(ruta.stem)}" T0\b', codigo)
     columnas = _columnas(sql)
@@ -329,6 +342,22 @@ def test_usuarios_sin_columnas_de_claves(tabla: str):
     [ruta] = [r for r in TABLAS_ARCHIVO if r.stem == tabla]
     for columna in _columnas(_texto(ruta)):
         assert not RE_CLAVE.search(columna), columna
+
+
+@pytest.mark.parametrize("tabla", list(COLUMNAS_CONFIRMADAS))
+def test_osul_y_ausr_traen_solo_las_columnas_confirmadas(tabla: str):
+    [ruta] = [r for r in TABLAS_ARCHIVO if r.stem == tabla]
+    # Lista cerrada: una columna nueva (contraseñas, llaves, hashes como ChkHash) falla aquí.
+    assert _columnas(_texto(ruta)) == COLUMNAS_CONFIRMADAS[tabla]
+
+
+def test_la_columna_de_fecha_de_cada_registro_esta_en_su_consulta():
+    import archivo
+
+    for tabla in archivo.TABLAS:
+        if tabla.modo == "registro":
+            columnas = _columnas(_texto(QUERIES / tabla.consulta))
+            assert tabla.columna_fecha in columnas, tabla.tabla
 
 
 def test_ohem_solo_nombre_cargo_area_y_correo():

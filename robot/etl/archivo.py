@@ -77,11 +77,11 @@ _I, _O, _V = "INVENTARIO", "ORGANIZACION", "VENTAS_Y_CRM"
 # Plan §5. LICENCIAS es manual (TI la exporta); las tablas @HBT_* se descubren al correr.
 TABLAS: tuple[TablaArchivo, ...] = (
     _registro(_A, "USR5", "Date"),
-    _registro(_A, "OSUL", "Date"),
+    _registro(_A, "OSUL", "StartDate"),
     _registro(_A, "ACRD", "UpdateDate"),
     _registro(_A, "ACR1", "UpdateDate"),
     _registro(_A, "AITM", "UpdateDate"),
-    _registro(_A, "AUSR", "UpdateDate"),
+    _registro(_A, "AUSR", "updateDate"),
     _registro(_A, "ADOC", "UpdateDate", grande=True),
     _registro(_A, "ADO1", "UpdateDate", grande=True),
     _registro(_A, "AJDT", "UpdateDate", grande=True),

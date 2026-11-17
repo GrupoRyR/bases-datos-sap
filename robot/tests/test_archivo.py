@@ -72,6 +72,8 @@ def test_modos_y_columnas_de_fecha():
     registros = {t.tabla: t.columna_fecha for t in archivo.TABLAS if t.modo == "registro"}
     assert set(registros) == set(PLAN["AUDITORIA"].split()) | {"ORTT"}
     assert registros["USR5"] == "Date"
+    assert registros["OSUL"] == "StartDate"
+    assert registros["AUSR"] == "updateDate"
     assert registros["ORTT"] == "RateDate"
     assert registros["OWDD"] == "CreateDate"
     assert all(t.columna_fecha is None for t in archivo.TABLAS if t.modo == "foto")
