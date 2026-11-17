@@ -245,7 +245,7 @@ _VENTAS = (
     Columna("Comentarios", "comentarios", TEXTO),
 )
 
-# Orden del contrato §11.3; el alias del SQL es el nombre del contrato (consulta propia).
+# Orden del contrato §11.2; el alias del SQL es el nombre del contrato (consulta propia).
 _PEDIDOS = (
     _m("doc_entry", ENTERO, requerida=True),
     _m("numero_pedido", ENTERO, requerida=True),

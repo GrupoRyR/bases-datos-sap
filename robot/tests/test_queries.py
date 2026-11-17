@@ -299,7 +299,7 @@ def test_pedidos_es_una_sola_consulta_con_los_alias_del_contrato(monkeypatch):
     assert sorted(p.name for p in (QUERIES / "pedidos").iterdir()) == ["pedidos.sql"]
     for esquema in ESQUEMAS:
         assert consultas.ruta_consulta(PARTES["pedidos"].consulta, esquema) == PEDIDOS
-    # El orden del SELECT es el del contrato §11.3 (el CSV y el lote salen en ese orden).
+    # El orden del SELECT es el del contrato §11.2 (el CSV y el lote salen en ese orden).
     assert _alias(_texto(PEDIDOS)) == PARTES["pedidos"].nombres
 
 

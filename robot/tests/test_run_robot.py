@@ -91,7 +91,7 @@ def test_completa_trae_pedidos_de_las_dos_empresas_con_su_conteo(entorno, correo
         assert (corrida.ventana_desde, corrida.fecha_corte) == (None, None)
     for empresa in ("SGX", "SDC"):
         assert (e.csv_dir / "PEDIDOS" / empresa / "2026-10-26_0200.csv").is_file()
-        # El conteo es el COUNT(*) de la misma consulta, en la misma conexión (contrato §11.4).
+        # El conteo es el COUNT(*) de la misma consulta, en la misma conexión (contrato §11.3).
         pasos = e.hana.de(empresa, parte="pedidos")
         assert [x.tipo for x in pasos] == ["todo", "contar"]
         assert len({x.conexion for x in pasos}) == 1

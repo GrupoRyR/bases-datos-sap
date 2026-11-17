@@ -72,7 +72,7 @@ COLUMNAS = {
         "descripcion", "cantidad", "costo_unitario", "costo_total", "precio_lista",
         "precio_unitario", "total", "iva", "ganancia_bruta", "moneda", "trm", "comentarios",
     ],
-    # Contrato §11.3, en ese orden.
+    # Contrato §11.2, en ese orden.
     "pedidos": [
         "doc_entry", "numero_pedido", "linea", "fecha_pedido", "fecha_compromiso",
         "fecha_entrega_linea", "dias", "rango", "dias_atraso", "slp_code", "vendedor", "canal",
@@ -195,7 +195,7 @@ def test_ventas_usa_las_etiquetas_del_gestor():
 
 
 def test_en_pedidos_el_alias_es_el_nombre_del_contrato():
-    # Consulta propia (no del gestor): sus alias ya son los nombres del contrato §11.3.
+    # Consulta propia (no del gestor): sus alias ya son los nombres del contrato §11.2.
     pedidos = PARTES["pedidos"]
     assert pedidos.consulta == "pedidos/pedidos.sql"
     assert all(c.hana == c.nombre for c in pedidos.columnas)

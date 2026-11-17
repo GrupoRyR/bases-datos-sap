@@ -63,7 +63,7 @@ def test_completa_cierra_las_ocho_corridas(escenario):
     iniciar = [p.datos for p in e.servidor.peticiones_a("iniciar")]
     assert [d["ventana_desde"] for d in iniciar if "ventana_desde" in d] == ["2026-09-24", "2026-09-24"]
     assert [d["conjunto"] for d in iniciar if "ventana_desde" in d] == ["VENTAS", "VENTAS"]
-    # PEDIDOS: una parte en modo todo, sin fecha de corte ni ventana, con su conteo (§11.4).
+    # PEDIDOS: una parte en modo todo, sin fecha de corte ni ventana, con su conteo (§11.3).
     pedidos = corridas[3]
     assert (pedidos.partes, pedidos.fecha_corte, pedidos.ventana_desde) == ({"pedidos": "todo"}, None, None)
     assert pedidos.conteo_sap == {"pedidos": 2} == pedidos.total_filas()
@@ -136,7 +136,7 @@ def test_pedidos_de_derivados_pide_la_consulta_sin_los_campos_de_segurex(escenar
 
 
 def test_pedidos_con_cero_filas_no_se_envia_y_falla_la_corrida(escenario):
-    # Contrato §11.4: nunca vacía. Los pedidos anteriores se quedan en MySQL.
+    # Contrato §11.3: nunca vacía. Los pedidos anteriores se quedan en MySQL.
     e = escenario
     e.hana.datos["SDC"]["pedidos"] = []
     fallos = _enviar(e, _resultados(e, [trabajos_completos(["SDC"], HOY, [])[3]]))

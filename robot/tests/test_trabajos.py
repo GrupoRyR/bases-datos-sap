@@ -47,7 +47,7 @@ def test_solicitud_de_ventas_es_una_corrida_de_ventas_de_su_empresa():
 
 
 def test_solicitud_de_pedidos_es_una_corrida_de_pedidos_de_su_empresa():
-    # Contrato §7.1 y §11.4: PEDIDOS | null | pedidos, sin fecha de corte ni ventana.
+    # Contrato §7.1 y §11.3: PEDIDOS | null | pedidos, sin fecha de corte ni ventana.
     [t] = trabajos_de_solicitudes([_sol(14, empresa="SGX", conjunto="PEDIDOS")], HOY)
     assert t == Trabajo(
         empresa="SGX", conjunto="PEDIDOS", tipo="solicitud", partes={"pedidos": "todo"},
@@ -165,7 +165,7 @@ def test_completa_de_las_dos_empresas():
     # VENTAS: una parte en modo todo y sin fecha de corte (contrato §10.2).
     assert trabajos[2].partes == {"ventas": "todo"}
     assert trabajos[2].fecha_corte is None
-    # PEDIDOS: igual, una parte en modo todo y sin fecha de corte (contrato §11.4).
+    # PEDIDOS: igual, una parte en modo todo y sin fecha de corte (contrato §11.3).
     assert trabajos[3].partes == {"pedidos": "todo"}
     assert trabajos[3].fecha_corte is None
 
