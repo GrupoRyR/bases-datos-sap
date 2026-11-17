@@ -93,7 +93,7 @@ Si la transacción falla, nada cambia y la corrida sigue abierta para reintentar
 
 ## Conteo diario
 
-Al cerrar una corrida `completa`, `Application\Apply\CountRun` compara por parte el conteo de SAP que envía el robot (`conteo_sap`), las filas recibidas y las filas activas de la empresa en MySQL después de aplicar (en CARTERA, todas las líneas de la empresa; en VENTAS, las de la empresa con `fecha_contabilizacion` desde `ventana_desde`). Si no cuadra, la corrida no falla: queda registrado.
+Al cerrar una corrida `completa`, `Application\Apply\CountRun` compara por parte el conteo de SAP que envía el robot (`conteo_sap`), las filas recibidas (`recibidas`), las recibidas activas (`activas_recibidas`: las de `activo = true`; en una parte sin columna `activo`, todas) y las filas activas de la empresa en MySQL después de aplicar (`activas_mysql`; en CARTERA, todas las líneas de la empresa; en VENTAS, las de la empresa con `fecha_contabilizacion` desde `ventana_desde`). `cuadra` es `sap == recibidas` y `activas_mysql == activas_recibidas`: SAP envía también las filas inactivas, que en MySQL no son activas. Si no cuadra, la corrida no falla: queda registrado.
 
 - La respuesta del cierre trae `conteo` (solo en la `completa`) y la corrida lo guarda.
 - `daily_counts` guarda el resultado del día (fecha de `extraida_en` en Bogotá), una fila por empresa y parte; si la corrida completa se repite el mismo día, la reemplaza. Es el criterio 3 de estabilidad del plan (§6), que el panel muestra; el panel lo leerá por un contrato de `Sap` cuando lo pida.
