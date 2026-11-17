@@ -163,6 +163,7 @@ final class BatchRows
         return match (true) {
             $length > self::MAX_TEXT => [null, 'Pasa de 4.000 caracteres.'],
             $length > $max && $isKey => [null, "Pasa de {$max} caracteres."],
+            $column->values !== null && ! in_array($value, $column->values, true) => [null, 'Debe ser uno de: '.implode(', ', $column->values).'.'],
             default => [mb_substr($value, 0, $max), null],
         };
     }

@@ -19,11 +19,17 @@ final readonly class Column
         public ?int $min = null,
         // A header may leave the column out (contract section 4.2); its values are then null.
         public bool $omittable = false,
+        // The only texts a text column accepts, exactly; null accepts any.
+        /** @var list<string>|null */
+        public ?array $values = null,
     ) {}
 
-    public static function text(string $name, int $length = 255, bool $required = false): self
+    /**
+     * @param  list<string>|null  $values  The only texts accepted, exactly.
+     */
+    public static function text(string $name, int $length = 255, bool $required = false, ?array $values = null): self
     {
-        return new self($name, ColumnType::Text, $required, length: $length);
+        return new self($name, ColumnType::Text, $required, length: $length, values: $values);
     }
 
     public static function integer(string $name, bool $required = false, ?int $min = null): self

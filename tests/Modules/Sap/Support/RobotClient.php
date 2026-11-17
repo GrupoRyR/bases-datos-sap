@@ -56,7 +56,7 @@ final class RobotClient
 
         foreach ($part->columns() as $name => $column) {
             $row[$name] = ! $column->required ? null : match ($column->type) {
-                ColumnType::Text => mb_substr('X'.$name, 0, $column->length ?? 255),
+                ColumnType::Text => $column->values[0] ?? mb_substr('X'.$name, 0, $column->length ?? 255),
                 ColumnType::Integer => 1,
                 ColumnType::Decimal => '1000.50',
                 ColumnType::Quantity => '2.500000',

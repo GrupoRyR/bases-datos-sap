@@ -43,7 +43,7 @@ final class StartRun
         $type = RunType::tryFrom(is_string($input['tipo'] ?? null) ? $input['tipo'] : '');
 
         if ($dataset === null) {
-            $this->fail('conjunto', 'Conjunto desconocido: solo MAESTROS, CARTERA o VENTAS.');
+            $this->fail('conjunto', 'Conjunto desconocido: solo MAESTROS, CARTERA, VENTAS o PEDIDOS.');
         }
 
         if ($company === null) {

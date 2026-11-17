@@ -7,7 +7,7 @@ use App\Modules\Sap\Domain\Columns\PartColumns;
 
 /**
  * A logical table inside a dataset (docs/contrato-robot.md, sections 1, 5,
- * 6 and 10). The value is the contract name, which is also the MySQL table;
+ * 6, 10 and 11). The value is the contract name, which is also the MySQL table;
  * apps read it through the view v_<value>.
  */
 enum Part: string
@@ -26,6 +26,7 @@ enum Part: string
     case Municipalities = 'municipios';
     case Receivables = 'cartera';
     case Sales = 'ventas';
+    case Orders = 'pedidos';
 
     /**
      * The parts of a dataset, in contract order.
@@ -42,6 +43,7 @@ enum Part: string
         return match ($this) {
             self::Receivables => Dataset::Cartera,
             self::Sales => Dataset::Ventas,
+            self::Orders => Dataset::Pedidos,
             default => Dataset::Maestros,
         };
     }
@@ -62,7 +64,8 @@ enum Part: string
     /**
      * The columns that identify a row inside a company. CARTERA has none:
      * each close replaces the whole company (contract section 6). A VENTAS
-     * line is its document type, document and line (contract section 10).
+     * line is its document type, document and line (contract section 10); a
+     * PEDIDOS line, its order and line (contract section 11.2).
      *
      * @return list<string>
      */
@@ -74,6 +77,7 @@ enum Part: string
             self::Prices => ['articulo_codigo'],
             self::Receivables => [],
             self::Sales => ['tipo_objeto', 'doc_entry', 'linea'],
+            self::Orders => ['doc_entry', 'linea'],
             default => ['codigo'],
         };
     }

@@ -3,8 +3,8 @@
 namespace App\Modules\Sap\Contracts\Enums;
 
 /**
- * A group of SAP data with its own MySQL database (docs/contrato-robot.md,
- * section 1). Only these datasets exist; archive-only tables never reach
+ * A group of SAP data with its own MySQL tables, each on the database of its
+ * connection (docs/contrato-robot.md, section 1). Only these datasets exist; archive-only tables never reach
  * the API (docs/plan-bases-sap.md, section 5).
  */
 enum Dataset: string
@@ -18,6 +18,9 @@ enum Dataset: string
     /** Invoice and credit note lines, replaced only inside a window, in ventas_sap. */
     case Ventas = 'VENTAS';
 
+    /** Open customer order lines, replaced whole per company, in ventas_sap next to VENTAS. */
+    case Pedidos = 'PEDIDOS';
+
     /**
      * The database connection that holds the tables of the dataset
      * (config/database.php).
@@ -27,7 +30,7 @@ enum Dataset: string
         return match ($this) {
             self::Maestros => 'maestros',
             self::Cartera => 'cartera',
-            self::Ventas => 'ventas',
+            self::Ventas, self::Pedidos => 'ventas',
         };
     }
 }
