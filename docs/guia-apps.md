@@ -6,7 +6,7 @@ El detalle de la API está en [`contrato-robot.md`](contrato-robot.md) §7; el a
 
 ## Ruta rápida
 
-1. Pídele a TI el **usuario MySQL de solo lectura** de tu app (permiso en `maestros_sap`, `cartera_sap` o las dos) y la **llave de la API** de tu app.
+1. Pídele a TI el **usuario MySQL de solo lectura** de tu app (permiso en `maestros_sap`, `cartera_sap`, `ventas_sap` o las que uses) y la **llave de la API** de tu app.
 2. Agrega la conexión de Laravel y lee las vistas `v_*` (sección 1).
 3. Pon el botón «Actualizar datos» en cada pantalla, diciendo qué actualiza (sección 2).
 4. Muestra «Datos actualizados a las 10:42» con `GET /api/v1/estado` (sección 2.4).
@@ -18,7 +18,7 @@ El detalle de la API está en [`contrato-robot.md`](contrato-robot.md) §7; el a
 | Qué | Para qué |
 |---|---|
 | Usuario MySQL de solo lectura, uno por app | Leer las vistas. Si se corta uno, las demás apps siguen. |
-| Permiso solo en las bases que usa la app | `maestros_sap` (clientes, artículos, catálogos…), `cartera_sap` (cartera y fotos diarias). |
+| Permiso solo en las bases que usa la app | `maestros_sap` (clientes, artículos, catálogos…), `cartera_sap` (cartera y fotos diarias), `ventas_sap` (líneas de facturas y notas crédito). |
 | Si la app no está en GoDaddy: su IP fija | TI abre MySQL remoto solo para esa IP, con conexión cifrada (SSL). |
 
 cPanel da permisos por base, no por tabla, así que el usuario también podría ver las tablas. **Lee siempre las vistas**, nunca las tablas: las tablas pueden cambiar y las vistas no.
@@ -47,6 +47,10 @@ En `config/database.php` de tu app, una conexión por base que uses:
 'sap_cartera' => [
     // Igual, con 'database' => env('SAP_DB_CARTERA', 'cartera_sap').
 ],
+
+'sap_ventas' => [
+    // Igual, con 'database' => env('SAP_DB_VENTAS', 'ventas_sap').
+],
 ```
 
 Y en el `.env` de tu app (los valores los da TI; nunca van al repositorio):
@@ -57,6 +61,7 @@ SAP_DB_USERNAME=
 SAP_DB_PASSWORD=
 SAP_DB_MAESTROS=maestros_sap
 SAP_DB_CARTERA=cartera_sap
+SAP_DB_VENTAS=ventas_sap
 SAP_DB_SSL_CA=
 ```
 
@@ -76,6 +81,17 @@ $cartera = DB::connection('sap_cartera')->table('v_cartera')
     ->where('empresa', 'SGX')
     ->where('email_asesor', $user->email)
     ->get();
+
+// Ventas de un mes (por fecha de contabilización) y su margen.
+$ventas = DB::connection('sap_ventas')->table('v_ventas')
+    ->where('empresa', 'SGX')
+    ->whereBetween('fecha_contabilizacion', ['2026-11-01', '2026-11-30'])
+    ->selectRaw('SUM(total) AS venta_neta')
+    ->selectRaw('SUM(CASE WHEN ganancia_bruta IS NOT NULL THEN ganancia_bruta END) AS ganancia_bruta')
+    ->selectRaw('SUM(CASE WHEN ganancia_bruta IS NOT NULL THEN total END) AS venta_con_ganancia')
+    ->first();
+
+// Margen = ganancia_bruta / venta_con_ganancia, si venta_con_ganancia no es 0 (ver 1.4).
 ```
 
 Nunca escribas en estas bases: el usuario es de solo lectura y los datos los pone el robot.
@@ -92,8 +108,9 @@ Nunca escribas en estas bases: el usuario es de solo lectura y los datos los pon
 | | `v_vendedores`, `v_grupos_clientes`, `v_condiciones_pago`, `v_municipios` | `codigo` |
 | `cartera_sap` | `v_cartera` (la actual) | — |
 | | `v_cartera_fotos` (una por empresa y `fecha_corte`) | — |
+| `ventas_sap` | `v_ventas` (una fila por línea de factura o nota crédito) | `tipo_objeto`, `doc_entry`, `linea` |
 
-Las columnas son las de `contrato-robot.md` (§5.2 y §6), con estas reglas:
+Las columnas son las de `contrato-robot.md` (§5.2, §6 y §10), con estas reglas:
 
 - **`empresa`** es `SGX` o `SDC`. Filtra siempre por empresa: un mismo código puede existir en las dos.
 - **`activo`**: nunca se borran filas. Lo que se inactiva en SAP, o deja de llegar en la corrida completa, queda con `activo = 0`. Muestra solo los activos salvo que la pantalla necesite el histórico (por ejemplo, el cliente de una factura vieja).
@@ -101,6 +118,17 @@ Las columnas son las de `contrato-robot.md` (§5.2 y §6), con estas reglas:
 - **`v_cartera_fotos`**: la foto de cada día con `dias` contados a la `fecha_corte`. Úsala para la circularización y el histórico.
 - Una vista solo crece: se agregan columnas al final, nunca se renombra ni se quita una. Lista tus columnas (`get([...])`), no uses `select *`.
 - Clientes, contactos y cartera tienen datos personales (Ley 1581 de 2012): muéstralos solo a quien los necesite.
+
+#### `v_ventas` (`ventas_sap`)
+
+Una fila por línea de factura de clientes (incluidas las notas débito) o de nota crédito. Además de `empresa` y `sincronizado_en`, trae estas columnas de `contrato-robot.md` §10, en este orden: `tipo_objeto` (13 factura, 14 nota crédito), `doc_entry`, `numero_documento`, `linea`, `clase_documento` (`factura`, `nota_debito` o `nota_credito`), `estado_documento` (`anulado`, `anulacion`, `cerrado` o `abierto`), `fecha_documento`, `fecha_contabilizacion`, `slp_code`, `vendedor`, `canal`, `codigo_cliente`, `cliente`, `nit`, `ciudad`, `pedido`, `id_pedido_app`, `oc_cliente`, `ciudad_envio`, `direccion_envio`, `marca`, `familia`, `codigo_articulo`, `descripcion`, `cantidad`, `costo_unitario`, `costo_total`, `precio_lista`, `precio_unitario`, `total`, `iva`, `ganancia_bruta`, `moneda`, `trm`, `comentarios`.
+
+- **El mes de una venta** lo da `fecha_contabilizacion` (`DocDate`), no `fecha_documento`.
+- **Venta neta** = `SUM(total)`: las notas crédito llegan con `cantidad`, `total`, `iva` y `ganancia_bruta` negativos, así que la suma ya las descuenta.
+- **Margen** = `SUM(ganancia_bruta) / SUM(total)`, **solo sobre las filas donde `ganancia_bruta IS NOT NULL`** (en el divisor también). `ganancia_bruta` viene de `GrssProfit` de SAP y cuadra con su «Ganancia bruta»; es `null` en las líneas cargadas antes de que el robot la enviara, y mezclarlas bajaría el margen.
+- **`costo_total` nunca se usa para márgenes**: es el costo de inventario y no cuadra con la ganancia bruta de SAP (plan §4).
+- **Historia**: empieza en la primera carga (ventana desde el 2026-10-25). Cada corrida nocturna reemplaza solo la ventana actual, que es el mes en curso más los últimos 7 días del mes anterior; lo anterior queda congelado y no se toca.
+- `id_pedido_app` solo existe en `SGX`; en `SDC` siempre es `null`.
 
 ## 2. El botón «Actualizar datos»
 
@@ -117,6 +145,7 @@ Cada pantalla pide **solo lo que muestra**. Ejemplos:
 | Vendedores | `MAESTROS` | `vendedores` |
 | Canales, condiciones de pago, municipios | `MAESTROS` | `catalogos` |
 | Todo MAESTROS | `MAESTROS` | `null` |
+| Ventas y margen (mini panel de gerencia) | `VENTAS` | `null` (trae la parte `ventas`) |
 
 El botón dice qué actualiza: «Actualizar cartera», «Actualizar clientes», no un «Actualizar» genérico.
 
