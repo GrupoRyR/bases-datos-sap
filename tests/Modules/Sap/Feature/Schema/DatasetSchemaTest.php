@@ -180,3 +180,22 @@ it('stores VENTAS quantities and rates with 6 decimals and reads them through v_
         ->and($row['empresa'])->toBe('SGX')
         ->and($row)->not->toHaveKeys(['id', 'corrida_id']);
 });
+
+it('exposes the gross profit through v_ventas, nullable and with its sign', function () {
+    $sales = DB::connection('ventas')->table('ventas');
+    $line = fn (int $entry, array $overrides): array => [
+        ...inventedRow(Part::Sales, 'SGX'), 'doc_entry' => $entry, ...$overrides,
+    ];
+
+    $sales->insert([
+        $line(1, ['ganancia_bruta' => '1234567.89']),
+        $line(2, ['tipo_objeto' => 14, 'ganancia_bruta' => '-100.50']),
+        $line(3, ['ganancia_bruta' => null]),
+    ]);
+
+    $profit = DB::connection('ventas')->table('v_ventas')->orderBy('doc_entry')->pluck('ganancia_bruta', 'doc_entry')
+        ->map(fn (mixed $value): ?float => $value === null ? null : (float) $value)->all();
+
+    expect($profit)->toBe([1 => 1234567.89, 2 => -100.5, 3 => null])
+        ->and(Schema::connection('ventas')->getColumnListing('v_ventas'))->toContain('ganancia_bruta');
+});

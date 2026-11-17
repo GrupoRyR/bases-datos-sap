@@ -116,7 +116,8 @@ No se usa MCP: las apps hablan con la API. Si más adelante un agente de IA nece
 - El robot envía, junto con las filas, la fecha de inicio de la ventana que usó. La app borra y vuelve a escribir solo las filas de esa empresa con `fecha_contabilizacion` (`DocDate`) desde ese día. La columna `fecha_documento` (`TaxDate`) es solo de referencia y nunca define la ventana.
 - Un documento de un mes anterior que se cancele o se corrija en SAP fuera de la ventana no se actualiza. Así funciona hoy el robot del gestor; si hace falta, se agrega una recarga de un mes a pedido.
 - Las líneas «Sólo impuesto» (obsequios) llegan con venta 0, como en la consulta del gestor.
-- El costo de cada línea es el costo de inventario y **no** cuadra con la «Ganancia bruta» de SAP; ninguna app debe usarlo para márgenes.
+- El costo de cada línea (`costo_total`) es el costo de inventario y **no** cuadra con la «Ganancia bruta» de SAP; ninguna app debe usarlo para márgenes.
+- El margen es `SUM(ganancia_bruta) / SUM(total)`, con `ganancia_bruta` tomada de `GrssProfit` (`INV1`/`RIN1`), que sí cuadra con SAP al peso. Es negativa en las notas crédito. Mientras el robot no la envíe, llega `null` (contrato §4.2) y no hay margen que calcular.
 
 ### Para todos los conjuntos
 

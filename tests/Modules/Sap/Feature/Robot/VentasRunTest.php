@@ -196,6 +196,83 @@ it('replaces only the window of the company and never touches earlier lines', fu
         ->and(DB::connection('ventas')->table('ventas')->where('doc_entry', 1)->value('sincronizado_en'))->toStartWith('2026-10-01 02:30:00');
 });
 
+/**
+ * A batch body of sale lines whose header leaves out the given columns, as the
+ * robot did before it sent ganancia_bruta.
+ *
+ * @param  list<array<string, mixed>>  $lines
+ * @param  list<string>  $without
+ * @return array<string, mixed>
+ */
+function ventasBatchWithout(array $lines, array $without): array
+{
+    $body = RobotClient::batch(1, Part::Sales, $lines);
+    $keep = array_keys(array_filter($body['columns'], fn (string $column): bool => ! in_array($column, $without, true)));
+
+    return [
+        ...$body,
+        'columns' => array_values(array_intersect_key($body['columns'], array_flip($keep))),
+        'rows' => array_map(fn (array $row): array => array_values(array_intersect_key($row, array_flip($keep))), $body['rows']),
+    ];
+}
+
+it('stores the gross profit of a line and keeps it negative on a credit note', function () {
+    $run = sendVentas($this, [
+        saleLine(1, '2026-10-01', ['total' => '1000.00', 'ganancia_bruta' => '250.75']),
+        saleLine(2, '2026-10-02', ['tipo_objeto' => 14, 'total' => '-400.00', 'ganancia_bruta' => '-100.50']),
+    ]);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2]])->assertOk();
+
+    $profit = DB::connection('ventas')->table('ventas')->orderBy('doc_entry')->pluck('ganancia_bruta', 'doc_entry')
+        ->map(fn (mixed $value): float => (float) $value)->all();
+
+    expect($profit)->toBe([1 => 250.75, 2 => -100.5]);
+});
+
+it('stores a null gross profit when the batch header leaves the column out', function () {
+    $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', ventasRun())->assertCreated()->json('run_id');
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/lotes", ventasBatchWithout([saleLine(1, '2026-10-01', ['total' => '1000.00'])], ['ganancia_bruta']))
+        ->assertCreated()
+        ->assertJson(['batch' => 1, 'rows' => 1]);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 1]])->assertOk();
+
+    $line = (array) DB::connection('ventas')->table('ventas')->sole();
+
+    expect($line['ganancia_bruta'])->toBeNull()
+        ->and((float) $line['total'])->toBe(1000.0);
+});
+
+it('still refuses a batch that misses or adds any other column', function (array $without, ?string $extra, string $message) {
+    $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', ventasRun())->assertCreated()->json('run_id');
+    $body = ventasBatchWithout([saleLine(1, '2026-10-01')], $without);
+
+    if ($extra !== null) {
+        $body['columns'][] = $extra;
+        $body['rows'][0][] = 'x';
+    }
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/lotes", $body)
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.columns.0', fn (string $found): bool => str_contains($found, $message));
+
+    expect(DB::table('robot_batches')->count())->toBe(0);
+})->with([
+    'other column missing' => [['costo_total'], null, 'Faltan columnas: costo_total'],
+    'other column missing next to the profit' => [['iva', 'ganancia_bruta'], null, 'Faltan columnas: iva'],
+    'unknown column' => [['ganancia_bruta'], 'margen', 'Columnas desconocidas: margen'],
+]);
+
+it('refuses a gross profit that is not an amount', function () {
+    $run = sendVentas($this, []);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/lotes", RobotClient::batch(1, Part::Sales, [saleLine(1, '2026-10-01', ['ganancia_bruta' => '10.505'])]))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['rows.0.ganancia_bruta']);
+});
+
 it('fails an empty close and keeps the previous window', function () {
     DB::connection('ventas')->table('ventas')->insert(storedSale('SGX', 3, '2026-10-10'));
     $run = sendVentas($this, []);

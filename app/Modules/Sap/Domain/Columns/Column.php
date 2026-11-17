@@ -17,6 +17,8 @@ final readonly class Column
         public ?int $length = null,
         // The minimum value of an integer column.
         public ?int $min = null,
+        // A header may leave the column out (contract section 4.2); its values are then null.
+        public bool $omittable = false,
     ) {}
 
     public static function text(string $name, int $length = 255, bool $required = false): self
@@ -29,9 +31,9 @@ final readonly class Column
         return new self($name, ColumnType::Integer, $required, min: $min);
     }
 
-    public static function decimal(string $name, bool $required = false): self
+    public static function decimal(string $name, bool $required = false, bool $omittable = false): self
     {
-        return new self($name, ColumnType::Decimal, $required);
+        return new self($name, ColumnType::Decimal, $required, omittable: $omittable);
     }
 
     public static function quantity(string $name, bool $required = false): self
