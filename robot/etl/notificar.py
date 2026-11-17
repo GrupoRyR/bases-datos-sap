@@ -1,14 +1,13 @@
-"""Aviso por correo cuando el robot falla. Opcional: sin Graph ni SMTP, no hace nada.
+"""Email alert when the robot fails. Optional: with neither Graph nor SMTP it does nothing.
 
-Canales, por prioridad (AlertaConfig.channel):
-1. Microsoft Graph (sendMail con el flujo client credentials), si sus cuatro
-   variables y los destinatarios están completos.
-2. SMTP, si su host y los destinatarios están completos.
-3. Ninguno: las alertas quedan desactivadas y el fallo solo va al log.
+Channels, by priority (AlertaConfig.channel):
+1. Microsoft Graph (sendMail with the client-credentials flow), when its four
+   variables and the recipients are complete.
+2. SMTP, when its host and the recipients are complete.
+3. Neither: alerts are off and the failure only goes to the log.
 
-Un envío fallido solo se registra: nunca hace fallar la ejecución del robot.
-En el log van estados y códigos de error, nunca el secreto, el token ni el
-cuerpo de las respuestas.
+A failed send is only logged: it never fails the robot run. The log carries
+statuses and error codes, never the secret, the token or a response body.
 """
 from __future__ import annotations
 
@@ -19,12 +18,11 @@ import socket
 import ssl
 import time
 import urllib.parse
-from datetime import datetime
 from email.message import EmailMessage
 from typing import Callable
 
 import api
-from config import AlertaConfig
+from config import AlertaConfig, ahora
 from registro import obtener, redactar, registrar_secreto
 
 log = obtener("alerta")
@@ -33,15 +31,15 @@ TOKEN_URL = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 SEND_URL = "https://graph.microsoft.com/v1.0/users/{remitente}/sendMail"
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 TIMEOUT_S = 30
-REINTENTOS = 1  # one retry after the first attempt
-ESPERA_REINTENTO_S = 2
+RETRIES = 1  # one retry after the first attempt
+RETRY_WAIT_S = 2
 
 _RE_CODIGO = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 _RE_AADSTS = re.compile(r"AADSTS\d{3,7}")
 
 
 class GraphError(RuntimeError):
-    """Microsoft Graph o Entra no dejó enviar. El mensaje es seguro para el log."""
+    """Entra ID or Graph refused the send. The message is safe to log."""
 
 
 def avisar_fallo(
@@ -58,7 +56,7 @@ def avisar_fallos(
     transporte: api.Transporte | None = None,
     dormir: Callable[[float], None] | None = None,
 ) -> None:
-    """Envía UN correo con todos los fallos de la ejecución: (etapa, error)."""
+    """Send ONE email with all the failures of the run: (stage, error)."""
     if not fallos:
         return
     asunto = fallos[0][0] if len(fallos) == 1 else f"{len(fallos)} fallos"
@@ -71,7 +69,7 @@ def avisar_fallos(
         "La app sigue con los últimos datos buenos.\n"
         "Revisa robot/logs/robot.log para el detalle completo."
     )
-    _enviar(cfg, f"[Bases SAP] Falló el robot - {asunto}", cuerpo, transporte, dormir)
+    _send(cfg, f"[Bases SAP] Falló el robot - {asunto}", cuerpo, transporte, dormir)
 
 
 def probar_alerta(
@@ -80,24 +78,24 @@ def probar_alerta(
     transporte: api.Transporte | None = None,
     dormir: Callable[[float], None] | None = None,
 ) -> bool:
-    """Manda un correo de prueba por el canal configurado. True si salió, False si no."""
+    """Send a test email through the configured channel. True if sent, False if not."""
     cuerpo = (
         "Este es un correo de prueba del robot de Bases de datos SAP.\n\n"
         f"Equipo:  {socket.gethostname()}\n"
-        f"Hora:    {datetime.now():%Y-%m-%d %H:%M:%S}\n\n"
+        f"Hora:    {ahora():%Y-%m-%d %H:%M:%S} (Bogotá)\n\n"
         "Si lo recibes, las alertas por correo funcionan."
     )
-    return _enviar(cfg, "[Bases SAP] Prueba de alertas", cuerpo, transporte, dormir)
+    return _send(cfg, "[Bases SAP] Prueba de alertas", cuerpo, transporte, dormir)
 
 
-def _enviar(
+def _send(
     cfg: AlertaConfig,
     asunto: str,
     cuerpo: str,
     transporte: api.Transporte | None,
     dormir: Callable[[float], None] | None,
 ) -> bool:
-    """Envía por el canal que toca. Nunca lanza: True si salió, False si no."""
+    """Send through the channel in use. Never raises: True if sent, False if not."""
     registrar_secreto(cfg.smtp_password)
     registrar_secreto(cfg.graph_client_secret)
 
@@ -115,12 +113,12 @@ def _enviar(
 
     try:
         if canal == "graph":
-            _enviar_por_graph(
+            _send_via_graph(
                 cfg, asunto, cuerpo,
                 transporte or api.transporte_urllib, dormir or time.sleep,
             )
         else:
-            _enviar_por_smtp(cfg, asunto, cuerpo)
+            _send_via_smtp(cfg, asunto, cuerpo)
     except GraphError as exc:
         log.error("No se pudo enviar la alerta por Microsoft Graph: %s", exc)
         return False
@@ -133,14 +131,14 @@ def _enviar(
     return True
 
 
-def _enviar_por_graph(
+def _send_via_graph(
     cfg: AlertaConfig,
     asunto: str,
     cuerpo: str,
     transporte: api.Transporte,
     dormir: Callable[[float], None],
 ) -> None:
-    token = _pedir_token(cfg, transporte, dormir)
+    token = _request_token(cfg, transporte, dormir)
     registrar_secreto(token)  # in case it ever reaches a log line
     mensaje = {
         "message": {
@@ -157,10 +155,10 @@ def _enviar_por_graph(
         json.dumps(mensaje).encode("utf-8"), transporte, dormir,
     )
     if not 200 <= respuesta.status < 300:
-        raise GraphError(f"sendMail respondió {respuesta.status}{_codigo_error(respuesta)}")
+        raise GraphError(f"sendMail respondió {respuesta.status}{_error_code(respuesta)}")
 
 
-def _pedir_token(
+def _request_token(
     cfg: AlertaConfig, transporte: api.Transporte, dormir: Callable[[float], None]
 ) -> str:
     formulario = urllib.parse.urlencode({
@@ -175,7 +173,7 @@ def _pedir_token(
         formulario.encode("utf-8"), transporte, dormir,
     )
     if respuesta.status != 200:
-        raise GraphError(f"el token respondió {respuesta.status}{_codigo_error(respuesta)}")
+        raise GraphError(f"el token respondió {respuesta.status}{_error_code(respuesta)}")
     try:
         token = json.loads(respuesta.cuerpo.decode("utf-8")).get("access_token")
     except (UnicodeDecodeError, ValueError, AttributeError):
@@ -186,37 +184,39 @@ def _pedir_token(
 
 
 def _post(
-    que: str,
+    what: str,
     url: str,
     headers: dict[str, str],
-    cuerpo: bytes,
-    transporte: api.Transporte,
-    dormir: Callable[[float], None],
+    body: bytes,
+    transport: api.Transporte,
+    sleep: Callable[[float], None],
 ) -> api.Respuesta:
-    """POST con 30 s de plazo y un reintento si no hubo respuesta, o fue 429 o 5xx.
+    """POST with a 30 s timeout and one retry when there was no response, or it was a 429 or 5xx.
 
-    Un 4xx distinto de 429 es una respuesta definitiva (credenciales, permisos): no se reintenta.
+    Any other 4xx is a final answer (credentials, permissions): not retried. A sendMail retry
+    after a lost response can deliver the same alert twice; that is harmless.
     """
-    for intento in range(REINTENTOS + 1):
-        ultimo = intento == REINTENTOS
+    for attempt in range(RETRIES + 1):
+        last = attempt == RETRIES
         try:
-            respuesta = transporte(url, headers, cuerpo, TIMEOUT_S)
+            response = transport(url, headers, body, TIMEOUT_S)
         except api.ErrorRed as exc:
-            if ultimo:
-                raise GraphError(f"{que}: {redactar(str(exc))}") from exc
-            log.warning("%s: sin respuesta (%s); reintento una vez.", que, redactar(str(exc)))
+            if last:
+                raise GraphError(f"{what}: {redactar(str(exc))}") from exc
+            log.warning("%s: sin respuesta (%s); reintento una vez.", what, redactar(str(exc)))
         else:
-            if respuesta.status != 429 and respuesta.status < 500 or ultimo:
-                return respuesta
-            log.warning("%s: respondió %s; reintento una vez.", que, respuesta.status)
-        dormir(ESPERA_REINTENTO_S)
-    raise AssertionError("inalcanzable")  # pragma: no cover
+            retryable = response.status == 429 or response.status >= 500
+            if last or not retryable:
+                return response
+            log.warning("%s: respondió %s; reintento una vez.", what, response.status)
+        sleep(RETRY_WAIT_S)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
-def _codigo_error(respuesta: api.Respuesta) -> str:
-    """" (código)" con solo el código corto del error (invalid_client, AADSTS7000215...).
+def _error_code(respuesta: api.Respuesta) -> str:
+    """Only the short error code, as " (invalid_client, AADSTS7000215)", or "" if there is none.
 
-    Nunca el cuerpo: puede repetir el secreto o el token. Lo que no parezca un código se omite.
+    Never the body: it can repeat the secret or the token. Anything that is not a plain code is dropped.
     """
     try:
         datos = json.loads(respuesta.cuerpo.decode("utf-8"))
@@ -235,7 +235,7 @@ def _codigo_error(respuesta: api.Respuesta) -> str:
     return f" ({', '.join(partes)})" if partes else ""
 
 
-def _enviar_por_smtp(cfg: AlertaConfig, asunto: str, cuerpo: str) -> None:
+def _send_via_smtp(cfg: AlertaConfig, asunto: str, cuerpo: str) -> None:
     msg = EmailMessage()
     msg["Subject"] = asunto
     msg["From"] = cfg.smtp_user or "robot-bases-sap@localhost"

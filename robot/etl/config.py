@@ -232,16 +232,19 @@ class AlertaConfig:
     graph_remitente: str = ""
 
     @property
-    def graph_missing(self) -> list[str]:
-        """Names (never values) of what Graph still needs, or [] if it is untouched or complete.
+    def graph_in_use(self) -> bool:
+        """True as soon as one of the four Graph variables is filled in."""
+        return any((self.graph_tenant_id, self.graph_client_id, self.graph_client_secret,
+                    self.graph_remitente))
 
-        Graph counts as "in use" as soon as one of its four variables is filled in.
-        """
+    @property
+    def graph_missing(self) -> list[str]:
+        """Names (never values) of what Graph still needs; [] if it is untouched or complete."""
+        if not self.graph_in_use:
+            return []
         valores = (
             self.graph_tenant_id, self.graph_client_id, self.graph_client_secret, self.graph_remitente
         )
-        if not any(valores):
-            return []
         faltan = [nombre for nombre, valor in zip(GRAPH_VARIABLES, valores) if not valor]
         if not self.destinatarios:
             faltan.append("ALERTA_DESTINATARIOS")
@@ -249,8 +252,7 @@ class AlertaConfig:
 
     @property
     def graph_complete(self) -> bool:
-        return any((self.graph_tenant_id, self.graph_client_id, self.graph_client_secret,
-                    self.graph_remitente)) and not self.graph_missing
+        return self.graph_in_use and not self.graph_missing
 
     @property
     def smtp_complete(self) -> bool:

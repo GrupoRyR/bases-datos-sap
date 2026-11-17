@@ -62,6 +62,22 @@ def _cfg(**cambios: object) -> AlertaConfig:
     return AlertaConfig(**valores)  # type: ignore[arg-type]
 
 
+def _smtp_falso(enviados: list[object]) -> type:
+    """A minimal smtplib.SMTP that keeps what it is asked to send."""
+
+    class SmtpFalso:
+        def __init__(self, host: str, port: int, timeout: int = 0) -> None: ...
+        def __enter__(self) -> "SmtpFalso":
+            return self
+        def __exit__(self, *args: object) -> None: ...
+        def starttls(self, context: object = None) -> None: ...
+        def login(self, usuario: str, clave: str) -> None: ...
+        def send_message(self, msg: object) -> None:
+            enviados.append(msg)
+
+    return SmtpFalso
+
+
 def _avisar(cfg: AlertaConfig, graph: GraphFalso, dormidas: list[float], fallos=None) -> None:
     notificar.avisar_fallos(
         cfg, fallos or [("VPN", "sin túnel")], "Corrida nocturna",
@@ -135,17 +151,7 @@ def test_con_graph_a_medias_usa_smtp_y_nombra_lo_que_falta(
 ) -> None:
     enviados: list[object] = []
 
-    class SmtpFalso:
-        def __init__(self, host: str, port: int, timeout: int = 0) -> None: ...
-        def __enter__(self) -> "SmtpFalso":
-            return self
-        def __exit__(self, *args: object) -> None: ...
-        def starttls(self, context: object = None) -> None: ...
-        def login(self, usuario: str, clave: str) -> None: ...
-        def send_message(self, msg: object) -> None:
-            enviados.append(msg)
-
-    monkeypatch.setattr(notificar.smtplib, "SMTP", SmtpFalso)
+    monkeypatch.setattr(notificar.smtplib, "SMTP", _smtp_falso(enviados))
     cfg = _cfg(smtp_host="smtp.prueba.test", graph_client_secret="")
 
     with caplog.at_level(logging.WARNING, logger="bases_sap"):
@@ -316,17 +322,7 @@ def test_probar_alerta_por_smtp_si_graph_no_esta_completo(
 ) -> None:
     enviados: list[object] = []
 
-    class SmtpFalso:
-        def __init__(self, host: str, port: int, timeout: int = 0) -> None: ...
-        def __enter__(self) -> "SmtpFalso":
-            return self
-        def __exit__(self, *args: object) -> None: ...
-        def starttls(self, context: object = None) -> None: ...
-        def login(self, usuario: str, clave: str) -> None: ...
-        def send_message(self, msg: object) -> None:
-            enviados.append(msg)
-
-    monkeypatch.setattr(notificar.smtplib, "SMTP", SmtpFalso)
+    monkeypatch.setattr(notificar.smtplib, "SMTP", _smtp_falso(enviados))
     cfg = _cfg(smtp_host="smtp.prueba.test", graph_tenant_id="")
 
     assert notificar.probar_alerta(cfg, transporte=graph, dormir=dormidas.append) is True
