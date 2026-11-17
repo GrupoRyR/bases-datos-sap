@@ -206,11 +206,47 @@ VENTAS = QUERIES / "ventas" / "ventas.sql"
 BLOB_VENTAS_GESTOR = "c768a24e9a66cda617be8be6381ce26478e3bcd0"
 
 
-def test_ventas_es_la_consulta_del_gestor_sin_cambios():
-    contenido = VENTAS.read_bytes()
-    blob = hashlib.sha1(b"blob %d\0" % len(contenido) + contenido).hexdigest()
+# Lo único propio que lleva la consulta sobre la copia del gestor: la ganancia bruta.
+NOTA_GANANCIA = (
+    "--\n"
+    '-- "Ganancia bruta" (GrssProfit de INV1/RIN1, con signo) es la unica columna\n'
+    "-- propia que se agrega a la copia de la consulta del gestor de cartera. Cuadra\n"
+    "-- con la «Ganancia bruta» del Analisis de ventas de SAP al peso; el costo de\n"
+    "-- inventario (StockPrice) se desvia cerca de 0,5 %.\n"
+)
+COLUMNA_GANANCIA = (
+    '    ROUND(X."GrssProfit", 2) * X."Signo"                       AS "Ganancia bruta",\n'
+)
+SUBCONSULTA_GANANCIA = 'T1."VatSum", T1."GrssProfit",\n'
+
+
+def test_ventas_es_la_consulta_del_gestor_mas_la_ganancia_bruta():
+    texto = _texto(VENTAS)
+    # Cada adición aparece donde debe y una sola vez (la columna, la nota y las dos subconsultas).
+    assert texto.count(NOTA_GANANCIA) == 1
+    assert texto.count(COLUMNA_GANANCIA) == 1
+    assert texto.count(SUBCONSULTA_GANANCIA) == 2
+    # Quitadas esas adiciones, queda exactamente la consulta del gestor.
+    gestor = (
+        texto.replace(NOTA_GANANCIA, "")
+        .replace(COLUMNA_GANANCIA, "")
+        .replace(SUBCONSULTA_GANANCIA, 'T1."VatSum",\n')
+        .encode("utf-8")
+    )
+    blob = hashlib.sha1(b"blob %d\0" % len(gestor) + gestor).hexdigest()
     assert blob == BLOB_VENTAS_GESTOR
     assert sorted(p.name for p in (QUERIES / "ventas").iterdir()) == ["ventas.sql"]
+
+
+def test_ventas_ganancia_bruta_va_despues_del_iva_y_con_signo():
+    codigo = _sin_comentarios(_texto(VENTAS))
+    alias = _alias(codigo)
+    assert alias.index("Ganancia bruta") == alias.index("IVA") + 1
+    # Las notas crédito restan: el signo (-1 en RIN1) multiplica la ganancia, como el IVA.
+    assert 'ROUND(X."GrssProfit", 2) * X."Signo"' in codigo
+    assert 'ROUND(X."VatSum", 2) * X."Signo"' in codigo
+    assert codigo.count('13 AS "ObjType", 1 AS "Signo"') == 1
+    assert codigo.count('14 AS "ObjType", -1 AS "Signo"') == 1
 
 
 def test_ventas_trae_las_etiquetas_del_esquema_y_un_solo_marcador():

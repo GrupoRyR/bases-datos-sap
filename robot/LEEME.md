@@ -34,7 +34,7 @@ py -3.14 -m venv .venv
 
 3. Los precios salen de la lista pública de cada empresa, buscada por **número** (no por nombre): `HANA_SGX_LISTA_PRECIOS` (por defecto `1`) y `HANA_SDC_LISTA_PRECIOS` (vacía: Derivados todavía no tiene lista pública). Sin número, esa empresa manda su MAESTROS sin la parte `precios` (contrato §4.1): la nocturna no falla y no consulta precios. Una solicitud de solo precios de esa empresa falla al instante, en la nocturna o en la revisión de cada minuto, con un mensaje que dice qué variable poner; no arrastra a las solicitudes de todo MAESTROS de la misma empresa. Cuando Derivados defina su lista, pon su número en `HANA_SDC_LISTA_PRECIOS` y los precios vuelven solos.
 4. La cartera sale de las cuentas contables de cada empresa: `HANA_SGX_CUENTAS_CARTERA` (por defecto `13050505,13051005`) y `HANA_SDC_CUENTAS_CARTERA` (por defecto `13050501,13051005`), separadas por coma y solo dígitos. Casi nunca hay que tocarlas.
-5. Las ventas (facturas, notas débito y notas crédito de clientes) salen de la consulta del gestor de cartera, copiada tal cual en `queries\ventas\ventas.sql`. No llevan variables: en Derivados el robot cambia el id del pedido de la app (`U_SGX_IdPedidoApp`, que solo existe en Segurex) por un vacío.
+5. Las ventas (facturas, notas débito y notas crédito de clientes) salen de la consulta del gestor de cartera, copiada en `queries\ventas\ventas.sql` con una sola columna propia más: `Ganancia bruta` (`GrssProfit` de `INV1`/`RIN1`, con signo), que cuadra con la del Análisis de ventas de SAP al peso. No llevan variables: en Derivados el robot cambia el id del pedido de la app (`U_SGX_IdPedidoApp`, que solo existe en Segurex) por un vacío.
 
 6. La carpeta de los CSV es `BASES_SAP_CSV_DIR`. Si no la pones, el robot usa `C:\Users\Claude\Documents\CEREBRO\SAP\BASES_DE_DATOS`, la carpeta real del PC de TI. En cualquier otro PC ponla siempre a mano, con una ruta **fuera del repo**: los CSV traen datos de SAP y nunca se suben a Git.
 
@@ -114,6 +114,7 @@ Cada corrida de VENTAS (la nocturna o una solicitud) trae el mes en curso más l
 - El primer día de la ventana (`ventana_desde`) lo calcula HANA con la misma expresión de la consulta, en la misma conexión, antes y después de extraer. Nunca se usa el reloj del PC.
 - Si cambió entre las dos lecturas (la extracción cruzó la medianoche), se repite la extracción una vez; si vuelve a cambiar, esa corrida falla.
 - Si alguna fila trae una `fecha_contabilizacion` anterior a `ventana_desde`, la corrida falla antes de enviar nada.
+- `ganancia_bruta` es la ganancia de cada línea según SAP (`GrssProfit`), con signo negativo en las notas crédito. No se calcula con el costo de inventario (`costo_total`), que se desvía cerca de 0,5 % de lo que muestra SAP. Para revisarla, suma `ganancia_bruta` del 01 al 16/11/2026 en el CSV de `VENTAS\<empresa>`: SGX 294.070.622,59 y SDC 604.768.247,13.
 - Si la extracción falla antes de que HANA dé la ventana (por ejemplo, no conectó la VPN), la corrida no se puede abrir para marcarla fallida: el fallo va al correo y sus solicitudes vencen solas en la app.
 
 ## Tareas programadas

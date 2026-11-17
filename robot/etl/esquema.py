@@ -239,6 +239,7 @@ _VENTAS = (
     Columna("Precio unitario", "precio_unitario", MONTO),
     Columna("Total", "total", MONTO, requerida=True),
     Columna("IVA", "iva", MONTO),
+    Columna("Ganancia bruta", "ganancia_bruta", MONTO),
     Columna("Moneda", "moneda", TEXTO),
     Columna("TRM", "trm", CANTIDAD),
     Columna("Comentarios", "comentarios", TEXTO),
