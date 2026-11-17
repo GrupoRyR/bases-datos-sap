@@ -236,7 +236,7 @@ def test_cartera_pide_las_cuentas_de_cada_empresa_con_la_misma_consulta(escenari
     assert [r.error for r in resultados] == [None, None]
     [sgx] = e.hana.de("SGX", "todo", "cartera")
     [sdc] = e.hana.de("SDC", "todo", "cartera")
-    assert 'X."Cuenta visible" IN (\'13050505\', \'13051005\')' in sgx.sql
+    assert 'X."Cuenta visible" IN (\'13050505\', \'13050510\', \'13051005\')' in sgx.sql
     assert 'X."Cuenta visible" IN (\'13050501\', \'13051005\')' in sdc.sql
     assert sgx.sql.split(" WHERE X.")[0] == sdc.sql.split(" WHERE X.")[0]
 

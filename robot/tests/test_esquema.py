@@ -70,7 +70,7 @@ COLUMNAS = {
         "canal", "codigo_cliente", "cliente", "nit", "ciudad", "pedido", "id_pedido_app",
         "oc_cliente", "ciudad_envio", "direccion_envio", "marca", "familia", "codigo_articulo",
         "descripcion", "cantidad", "costo_unitario", "costo_total", "precio_lista",
-        "precio_unitario", "total", "iva", "moneda", "trm", "comentarios",
+        "precio_unitario", "total", "iva", "ganancia_bruta", "moneda", "trm", "comentarios",
     ],
 }
 REQUERIDAS = {
@@ -173,7 +173,7 @@ def test_ventas_usa_las_etiquetas_del_gestor():
         "familia": "Familia", "codigo_articulo": "Código artículo", "descripcion": "Descripción",
         "cantidad": "Cantidad", "costo_unitario": "Costo unitario", "costo_total": "Costo total",
         "precio_lista": "Precio lista", "precio_unitario": "Precio unitario", "total": "Total",
-        "iva": "IVA", "moneda": "Moneda", "trm": "TRM", "comentarios": "Comentarios",
+        "iva": "IVA", "ganancia_bruta": "Ganancia bruta", "moneda": "Moneda", "trm": "TRM", "comentarios": "Comentarios",
     }
 
 
@@ -237,7 +237,8 @@ def test_tipos_de_ventas():
     enteros = {"tipo_objeto", "doc_entry", "numero_documento", "linea", "slp_code"}
     fechas = {"fecha_documento", "fecha_contabilizacion"}
     cantidades = {"cantidad", "trm"}
-    montos = {"costo_unitario", "costo_total", "precio_lista", "precio_unitario", "total", "iva"}
+    montos = {"costo_unitario", "costo_total", "precio_lista", "precio_unitario", "total", "iva",
+              "ganancia_bruta"}
     for nombre, tipo in tipos.items():
         if nombre in enteros:
             assert tipo == ENTERO, nombre
@@ -307,6 +308,19 @@ def test_cantidad_con_hasta_seis_decimales(valor, esperado):
 def test_cantidad_invalida(valor):
     with pytest.raises(ValorInvalido, match="cantidad"):
         serializar(valor, CANTIDAD, "cantidad")
+
+
+def test_ventas_ganancia_bruta_es_un_monto_con_signo_de_nota_credito():
+    alias = [c.hana for c in PARTES["ventas"].columnas]
+    filas = [
+        fila("ventas", 1, ganancia_bruta=Decimal("1234.5")),
+        fila("ventas", 2, ganancia_bruta=Decimal("-1234.5")),  # nota crédito
+        fila("ventas", 3, ganancia_bruta=None),
+    ]
+    listas = preparar_filas(PARTES["ventas"], alias, [[f[a] for a in alias] for f in filas])
+    posicion = PARTES["ventas"].nombres.index("ganancia_bruta")
+    assert [f[posicion] for f in listas] == ["1234.50", "-1234.50", None]
+    assert posicion == PARTES["ventas"].nombres.index("iva") + 1
 
 
 def test_ventas_con_llave_repetida_falla():

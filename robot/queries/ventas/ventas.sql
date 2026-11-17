@@ -35,6 +35,11 @@
 -- conserva, con su cantidad y su IVA.
 -- Precios y costos unitarios van sin signo; solo los totales llevan signo.
 --
+-- "Ganancia bruta" (GrssProfit de INV1/RIN1, con signo) es la unica columna
+-- propia que se agrega a la copia de la consulta del gestor de cartera. Cuadra
+-- con la «Ganancia bruta» del Analisis de ventas de SAP al peso; el costo de
+-- inventario (StockPrice) se desvia cerca de 0,5 %.
+--
 -- Valores de texto:
 --   "Clase documento":  factura | nota_debito | nota_credito
 --   "Estado documento": anulado | anulacion | cerrado | abierto
@@ -107,6 +112,7 @@ SELECT
                     * (1 - IFNULL(X."DiscPrcnt", 0) / 100), 2) * X."Signo"
     END                                                        AS "Total",
     ROUND(X."VatSum", 2) * X."Signo"                           AS "IVA",
+    ROUND(X."GrssProfit", 2) * X."Signo"                       AS "Ganancia bruta",
     X."DocCur"                                                 AS "Moneda",
     X."DocRate"                                                AS "TRM",
     X."Comments"                                               AS "Comentarios"
@@ -119,7 +125,7 @@ FROM (
         T0."NumAtCard", T0."Address2", T0."DiscPrcnt", T0."DocCur", T0."DocRate",
         T0."Comments",
         T1."LineNum", T1."ItemCode", T1."Dscription", T1."Quantity", T1."Price",
-        T1."PriceBefDi", T1."StockPrice", T1."LineTotal", T1."VatSum",
+        T1."PriceBefDi", T1."StockPrice", T1."LineTotal", T1."VatSum", T1."GrssProfit",
         T1."TaxOnly", T1."BaseType", T1."BaseRef",
         CAST(T0."U_SGX_IdPedidoApp" AS NVARCHAR(254)) AS "IdPedidoApp" -- @id_pedido_app
     FROM "OINV" T0
@@ -137,7 +143,7 @@ FROM (
         T0."NumAtCard", T0."Address2", T0."DiscPrcnt", T0."DocCur", T0."DocRate",
         T0."Comments",
         T1."LineNum", T1."ItemCode", T1."Dscription", T1."Quantity", T1."Price",
-        T1."PriceBefDi", T1."StockPrice", T1."LineTotal", T1."VatSum",
+        T1."PriceBefDi", T1."StockPrice", T1."LineTotal", T1."VatSum", T1."GrssProfit",
         T1."TaxOnly", T1."BaseType", T1."BaseRef",
         CAST(NULL AS NVARCHAR(254)) AS "IdPedidoApp"
     FROM "ORIN" T0
