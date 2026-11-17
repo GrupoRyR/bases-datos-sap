@@ -10,7 +10,8 @@
 -- cuentas de cartera cambian por empresa y el robot se queda con las de cada una
 -- por la etiqueta "Cuenta visible" (HANA_SGX_CUENTAS_CARTERA y
 -- HANA_SDC_CUENTAS_CARTERA; consultas.sql_cuentas). Segurex: 13050505, 13050510
--- («Deudores comerciales difícil cobro») y 13051005; Derivados: 13050501 y 13051005. Para verla a mano como la ve el robot, agrega
+-- («Deudores comerciales difícil cobro») y 13051005; Derivados: 13050501 y
+-- 13051005. Para verla a mano como la ve el robot, agrega
 -- AND T0."Account" IN (...) al WHERE de la consulta interna.
 -- VALIDAR CON DATOS REALES: que las cuentas de Derivados den las mismas cifras que
 -- el informe de cartera de SAP; robot --diagnostico guarda el conteo y las filas.
