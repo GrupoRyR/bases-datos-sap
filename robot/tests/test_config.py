@@ -244,6 +244,79 @@ def test_alertas_habilitadas_con_host_y_destinatarios(monkeypatch: pytest.Monkey
     assert alertas.destinatarios == ["ti@prueba.test", "otro@prueba.test"]
 
 
+GRAPH_VARIABLES = {
+    "ALERTA_GRAPH_TENANT_ID": "tenant-de-prueba",
+    "ALERTA_GRAPH_CLIENT_ID": "cliente-de-prueba",
+    "ALERTA_GRAPH_CLIENT_SECRET": "secreto-graph-de-prueba",
+    "ALERTA_GRAPH_REMITENTE": "alertas@prueba.test",
+}
+
+
+def _graph(monkeypatch: pytest.MonkeyPatch, *, sin: tuple[str, ...] = ()) -> None:
+    for nombre, valor in GRAPH_VARIABLES.items():
+        if nombre not in sin:
+            monkeypatch.setenv(nombre, valor)
+    monkeypatch.setenv("ALERTA_DESTINATARIOS", "ti@prueba.test")
+
+
+def test_graph_completa_se_lee_del_entorno_y_gana_a_smtp(monkeypatch: pytest.MonkeyPatch) -> None:
+    _graph(monkeypatch)
+    monkeypatch.setenv("ALERTA_SMTP_HOST", "smtp.prueba.test")
+
+    alertas = cargar_config().alertas
+
+    assert alertas.graph_tenant_id == "tenant-de-prueba"
+    assert alertas.graph_client_id == "cliente-de-prueba"
+    assert alertas.graph_client_secret == "secreto-graph-de-prueba"
+    assert alertas.graph_remitente == "alertas@prueba.test"
+    assert alertas.graph_complete is True
+    assert alertas.channel == "graph"
+    assert alertas.habilitada is True
+
+
+def test_sin_graph_completo_se_usa_smtp_si_esta_completo(monkeypatch: pytest.MonkeyPatch) -> None:
+    _graph(monkeypatch, sin=("ALERTA_GRAPH_CLIENT_SECRET",))
+    monkeypatch.setenv("ALERTA_SMTP_HOST", "smtp.prueba.test")
+
+    alertas = cargar_config().alertas
+
+    assert alertas.graph_complete is False
+    assert alertas.channel == "smtp"
+    assert alertas.habilitada is True
+
+
+def test_sin_graph_ni_smtp_las_alertas_siguen_desactivadas(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALERTA_DESTINATARIOS", "ti@prueba.test")
+
+    alertas = cargar_config().alertas
+
+    assert alertas.channel == ""
+    assert alertas.habilitada is False
+    assert alertas.graph_missing == []
+
+
+@pytest.mark.parametrize("falta", list(GRAPH_VARIABLES))
+def test_graph_a_medias_nombra_la_variable_que_falta(
+    monkeypatch: pytest.MonkeyPatch, falta: str
+) -> None:
+    _graph(monkeypatch, sin=(falta,))
+
+    alertas = cargar_config().alertas
+
+    assert alertas.graph_missing == [falta]
+    assert alertas.habilitada is False
+
+
+def test_graph_completo_sin_destinatarios_no_envia(monkeypatch: pytest.MonkeyPatch) -> None:
+    _graph(monkeypatch)
+    monkeypatch.delenv("ALERTA_DESTINATARIOS")
+
+    alertas = cargar_config().alertas
+
+    assert alertas.graph_missing == ["ALERTA_DESTINATARIOS"]
+    assert alertas.habilitada is False
+
+
 def test_leer_query(tmp_path: Path) -> None:
     carpeta = tmp_path / "queries" / "maestros"
     carpeta.mkdir(parents=True)

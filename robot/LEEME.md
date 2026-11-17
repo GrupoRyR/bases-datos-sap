@@ -171,11 +171,40 @@ Las tablas `@HBT_*` de `CONFIGURACION` se leen columna por columna y el robot sa
 
 ## Correos de fallo
 
-Si llenas `ALERTA_SMTP_*` y `ALERTA_DESTINATARIOS`, el robot manda un correo con todos los fallos de cada ejecución. La app sigue con los últimos datos buenos de lo que falló.
+Si llenas `ALERTA_GRAPH_*` (recomendado, ver la sección siguiente) o `ALERTA_SMTP_*`, y `ALERTA_DESTINATARIOS`, el robot manda un correo con todos los fallos de cada ejecución. La app sigue con los últimos datos buenos de lo que falló.
 
 La conexión al servidor de correo va cifrada (puerto 465, o 587 con STARTTLS) y comprueba su certificado: si el certificado no es válido para `ALERTA_SMTP_HOST`, el correo no sale y el error queda en el log.
 
 Para no llenar el buzón, los avisos de la revisión de cada minuto tienen límite: la configuración incompleta avisa una vez al día y un error al tomar las solicitudes o uno inesperado, una vez por hora. El diagnóstico no avisa: lo corres tú y ves el resumen.
+
+## Correos de fallo por Microsoft Graph
+
+Microsoft está retirando la autenticación básica de SMTP en Exchange Online, así que el canal recomendado es Microsoft Graph. El robot pide un token a Entra ID con el flujo *client credentials* y envía con `sendMail` desde un buzón compartido. TI crea una app registrada solo para esto («Bases SAP Robot – Alertas»), con el permiso de aplicación `Mail.Send` limitado a ese buzón. No se reutiliza la app del inicio de sesión de la web.
+
+Variables de `robot/.env`:
+
+| Variable | Qué es |
+|---|---|
+| `ALERTA_GRAPH_TENANT_ID` | Id del directorio (tenant) de Microsoft 365. |
+| `ALERTA_GRAPH_CLIENT_ID` | Id de la aplicación (cliente) de la app de alertas. |
+| `ALERTA_GRAPH_CLIENT_SECRET` | Secreto de esa app. Se guarda solo aquí y nunca se escribe en el log. |
+| `ALERTA_GRAPH_REMITENTE` | Dirección del buzón compartido desde el que sale el correo. |
+| `ALERTA_DESTINATARIOS` | Quién recibe los avisos, separados por comas (la misma de SMTP). |
+
+Qué canal se usa:
+
+1. Si las cuatro variables `ALERTA_GRAPH_*` y `ALERTA_DESTINATARIOS` están llenas, sale por Graph.
+2. Si no, y `ALERTA_SMTP_HOST` y `ALERTA_DESTINATARIOS` están llenos, sale por SMTP.
+3. Si no, las alertas quedan desactivadas y el fallo solo va al log, como antes.
+
+Si llenas solo parte de las variables de Graph, el robot no se cae: avisa en el log qué **nombres** faltan (nunca sus valores) y usa SMTP si está completo.
+
+Cómo se comporta:
+
+- Cada petición (token y envío) tiene 30 s de plazo y un reintento si no hubo respuesta, o si fue un 429 o un 5xx. Un 401 o un 403 no se reintenta.
+- Un envío fallido solo queda en el log (`robot/logs/robot.log`, con el estado HTTP y el código de error, p. ej. `invalid_client` o `ErrorAccessDenied`). Nunca hace fallar la ejecución del robot.
+- Se envía con la VPN abajo, igual que la API: el túnel completo corta el internet.
+- El correo no se guarda en «Enviados» del buzón compartido.
 
 ## Pruebas
 

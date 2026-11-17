@@ -76,12 +76,13 @@ def test_los_secretos_del_env_se_registran_al_cargar(entorno_completo, monkeypat
     import config
 
     monkeypatch.setenv("ALERTA_SMTP_PASSWORD", "clave-smtp-prueba")
+    monkeypatch.setenv("ALERTA_GRAPH_CLIENT_SECRET", "secreto-graph-prueba")
     cfg = config.cargar_config()
 
     registro.registrar_secretos(cfg)
 
     secretos = ["clave-vpn-prueba", "clave-sgx-prueba", "clave-sdc-prueba",
-                "secreto-robot-de-prueba", "clave-smtp-prueba"]
+                "secreto-robot-de-prueba", "clave-smtp-prueba", "secreto-graph-prueba"]
     record = _registro("Valores: %s", " ".join(secretos))
     registro._RedactarSecretos().filter(record)
     mensaje = record.getMessage()
