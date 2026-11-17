@@ -21,7 +21,7 @@ from esquema import PRECIOS, Parte
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
 
 # Campos de usuario que solo existen en Segurex: el id del pedido de la app
-# (U_SGX_IdPedidoApp) en VENTAS (contrato §10) y PEDIDOS (§11.3), y la familia del
+# (U_SGX_IdPedidoApp) en VENTAS (contrato §10) y PEDIDOS (§11.2), y la familia del
 # artículo (OITM.U_GSP_FAMILIA) en PEDIDOS. Cada consulta lleva la expresión de Segurex
 # con su marcador al final de la línea (`-- @id_pedido_app`, `-- @familia`); en las demás
 # empresas el robot la cambia por un NULL del mismo tipo. La expresión regular de VENTAS
@@ -57,7 +57,7 @@ def _campo_de_pedidos(marcador: str, alias: str, nulo: str) -> CampoMarcado:
 ID_PEDIDO_APP_VENTAS = CampoMarcado(
     MARCADOR_ID_PEDIDO_APP, "IdPedidoApp", ID_PEDIDO_APP_NULO, _RE_ID_PEDIDO_APP
 )
-# PEDIDOS (contrato §11.3): ORDR.U_SGX_IdPedidoApp y OITM.U_GSP_FAMILIA, solo en Segurex.
+# PEDIDOS (contrato §11.2): ORDR.U_SGX_IdPedidoApp y OITM.U_GSP_FAMILIA, solo en Segurex.
 CAMPOS_SGX_PEDIDOS = (
     _campo_de_pedidos(MARCADOR_ID_PEDIDO_APP, "id_pedido_app", ID_PEDIDO_APP_NULO),
     _campo_de_pedidos("@familia", "familia", "CAST(NULL AS NVARCHAR(100))"),
@@ -147,7 +147,7 @@ def sql_id_pedido_app(sql: str, empresa: str) -> str:
 def sql_pedidos(sql: str, empresa: str) -> str:
     """La consulta de pedidos para una empresa: tal cual en Segurex; en las demás, con
     las expresiones marcadas `-- @id_pedido_app` y `-- @familia` cambiadas por un NULL
-    (contrato §11.3). Falla igual que sql_id_pedido_app si una marca no se reconoce."""
+    (contrato §11.2). Falla igual que sql_id_pedido_app si una marca no se reconoce."""
     return _sin_campos_sgx(sql, empresa, CAMPOS_SGX_PEDIDOS, "pedidos")
 
 

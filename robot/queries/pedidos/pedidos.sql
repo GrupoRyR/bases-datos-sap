@@ -4,9 +4,9 @@
 -- extraccion: la API reemplaza todos los pedidos de la empresa en cada corrida.
 --
 -- Llave natural: "doc_entry" + "linea".
--- Los alias son los nombres del contrato, en su orden (§11.3).
+-- Los alias son los nombres del contrato, en su orden (§11.2).
 --
--- Filtro (§11.2): pedido abierto y no anulado, linea abierta y con cantidad
+-- Filtro (§11.1): pedido abierto y no anulado, linea abierta y con cantidad
 -- pendiente. Sin filtro por bodega, lista de precios ni direccion. Solo se
 -- unen OCRD, OSLP, OCRG, OITM, OITB y OMRC, con LEFT JOIN: las tablas de
 -- direcciones, existencias por bodega, precios por lista y las direcciones

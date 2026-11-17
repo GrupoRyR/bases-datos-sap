@@ -316,7 +316,7 @@ def test_pedidos_filtra_las_lineas_abiertas_y_solo_une_las_tablas_permitidas():
     assert len(re.findall(r"\bJOIN\b", codigo)) == 7  # RDR1 y las seis de arriba
     for tabla in TABLAS_PROHIBIDAS_EN_PEDIDOS:
         assert not re.search(rf"\b{tabla}\b", codigo), tabla
-    # OpenInvQty va en unidades de inventario: nunca sirve para valorar (§11.2).
+    # OpenInvQty va en unidades de inventario: nunca sirve para valorar (§11.1).
     assert "OpenInvQty" not in codigo
 
 
@@ -420,7 +420,7 @@ def test_pedidos_trae_solo_las_lineas_abiertas_con_cantidad_pendiente():
     sql = _texto(PEDIDOS).rstrip()
     filas = _pedidos_en_sqlite(sql)
     assert [(f["doc_entry"], f["linea"]) for f in filas] == [(1, 0), (2, 0), (3, 0), (4, 0)]
-    # conteo_sap: el COUNT(*) de la misma consulta (contrato §11.4).
+    # conteo_sap: el COUNT(*) de la misma consulta (contrato §11.3).
     [conteo] = _pedidos_en_sqlite(consultas.sql_contar(sql))
     assert list(conteo.values()) == [len(filas)]
 
