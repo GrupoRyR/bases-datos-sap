@@ -307,7 +307,7 @@ El botón del panel crea solicitudes por dentro (contratos de `Sap`), con las mi
 
 ## 10. VENTAS
 
-Una sola parte, `ventas`, siempre en modo `todo`. Una fila por línea de factura de clientes (`OINV`/`INV1`, incluidas las notas débito) o de nota crédito de clientes (`ORIN`/`RIN1`). Origen: la consulta `etl/queries/ventas.sql` del gestor de cartera (main `9e2f877`), copiada tal cual. Las columnas son las de su `etl/esquema.py` (lote `ventas`), con los mismos nombres y en este orden:
+Una sola parte, `ventas`, siempre en modo `todo`. Una fila por línea de factura de clientes (`OINV`/`INV1`, incluidas las notas débito) o de nota crédito de clientes (`ORIN`/`RIN1`). Origen: la consulta `etl/queries/ventas.sql` del gestor de cartera (main `9e2f877`), copiada tal cual, salvo `ganancia_bruta`, que no sale de esa consulta y el robot debe añadir (`GrssProfit` de `INV1` y `RIN1`). Las columnas son las de su `etl/esquema.py` (lote `ventas`) más `ganancia_bruta`, con los mismos nombres y en este orden:
 
 **`tipo_objeto`**, **`doc_entry`**, **`numero_documento`**, **`linea`**, **`clase_documento`**, **`estado_documento`**, **`fecha_documento`**, **`fecha_contabilizacion`**, **`slp_code`**, `vendedor`, `canal`, **`codigo_cliente`**, `cliente`, `nit`, `ciudad`, `pedido`, `id_pedido_app`, `oc_cliente`, `ciudad_envio`, `direccion_envio`, `marca`, `familia`, `codigo_articulo`, `descripcion`, **`cantidad`**, `costo_unitario`, `costo_total`, `precio_lista`, `precio_unitario`, **`total`**, `iva`, `ganancia_bruta`, `moneda`, `trm`, `comentarios`.
 

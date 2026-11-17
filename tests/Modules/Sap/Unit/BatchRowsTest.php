@@ -2,6 +2,7 @@
 
 use App\Modules\Sap\Contracts\Enums\Part;
 use App\Modules\Sap\Domain\Batches\BatchRows;
+use App\Modules\Sap\Domain\Columns\Column;
 use Tests\Modules\Sap\Support\RobotClient;
 
 /*
@@ -154,10 +155,11 @@ it('lets a VENTAS header leave out ganancia_bruta and fills it with null', funct
 });
 
 it('only lets VENTAS leave out ganancia_bruta', function () {
+    // The one exception of contract section 4.2. If this fails, widening it is a contract change: the user approves it first.
     $omittable = [];
 
     foreach (Part::cases() as $part) {
-        $omittable[$part->value] = array_keys(array_filter($part->columns(), fn ($column): bool => $column->omittable));
+        $omittable[$part->value] = array_keys(array_filter($part->columns(), fn (Column $column): bool => $column->omittable));
     }
 
     expect(array_filter($omittable))->toBe(['ventas' => ['ganancia_bruta']]);
