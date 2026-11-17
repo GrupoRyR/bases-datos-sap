@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -23,6 +24,16 @@ class TransporteFalso:
         if "/oauth2/" in url:
             return api.Respuesta(200, {}, json.dumps({"access_token": TOKEN}).encode("utf-8"))
         return api.Respuesta(self.status_envio, {}, b"")
+
+
+@pytest.fixture(autouse=True)
+def sin_handlers_del_robot():
+    """main() llama a registro.configurar(): sus handlers apuntan a la carpeta tmp de la prueba."""
+    yield
+    logger = logging.getLogger("bases_sap")
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
 
 
 def _prohibido(*args: object, **kwargs: object) -> None:
