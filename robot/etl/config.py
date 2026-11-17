@@ -29,7 +29,9 @@ LISTAS_PRECIOS_POR_DEFECTO: dict[str, int | None] = {"SGX": 1, "SDC": None}
 # Cuentas contables de cartera (JDT1.Account) de cada empresa: la consulta de cartera
 # es una sola y el robot se queda con estas cuentas.
 CUENTAS_CARTERA_POR_DEFECTO: dict[str, tuple[str, ...]] = {
-    "SGX": ("13050505", "13051005"),
+    # Segurex incluye 13050510 («Deudores comerciales difícil cobro»): con ella cuadra
+    # con el informe de cartera por edades de SAP.
+    "SGX": ("13050505", "13050510", "13051005"),
     "SDC": ("13050501", "13051005"),
 }
 # Carpeta real del PC de TI, fuera del repo. En otro PC se pone BASES_SAP_CSV_DIR (LEEME).

@@ -208,7 +208,7 @@ def test_lista_de_precios_invalida_falla_al_validar(
 def test_cuentas_de_cartera_por_defecto_son_las_de_cada_empresa() -> None:
     cfg = cargar_config()
 
-    assert cfg.hana.empresas["SGX"].cuentas_cartera == ("13050505", "13051005")
+    assert cfg.hana.empresas["SGX"].cuentas_cartera == ("13050505", "13050510", "13051005")
     assert cfg.hana.empresas["SDC"].cuentas_cartera == ("13050501", "13051005")
 
 
@@ -218,7 +218,7 @@ def test_cuentas_de_cartera_se_configuran_por_empresa(monkeypatch: pytest.Monkey
     cfg = cargar_config()
 
     assert cfg.hana.empresas["SDC"].cuentas_cartera == ("13050501", "13051005", "13059999")
-    assert cfg.hana.empresas["SGX"].cuentas_cartera == ("13050505", "13051005")
+    assert cfg.hana.empresas["SGX"].cuentas_cartera == ("13050505", "13050510", "13051005")
 
 
 @pytest.mark.parametrize("valor", ["13050501;", "13050501') OR ('1'='1", "cartera", ","])

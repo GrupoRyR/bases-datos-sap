@@ -89,7 +89,7 @@ def test_precios_trae_todas_las_listas_y_no_filtra_por_nombre():
 
 CARTERA = QUERIES / "cartera" / "cartera.sql"
 CUENTAS_DE_CARTERA = {
-    "SGX": ("13050505", "13051005"),
+    "SGX": ("13050505", "13050510", "13051005"),
     "SDC": ("13050501", "13051005"),
 }
 
