@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import consultas
+import esquema
 
 PRODUCCION = Path(__file__).resolve().parent.parent / "queries" / "produccion"
 VALIDAR = "VALIDAR CON DATOS REALES"
@@ -77,6 +78,10 @@ def _alias_externos(parte: str) -> list[str]:
     select = re.search(r"\bSELECT\b(.*?)\bFROM\b", texto, flags=re.DOTALL)
     assert select, parte
     return re.findall(r'\bAS\s+"([^"]+)"', select.group(1))
+
+
+def test_las_partes_del_esquema_son_las_del_contrato():
+    assert {n: p.nombres for n, p in esquema.PARTES.items() if p.conjunto == "PRODUCCION"} == COLUMNAS
 
 
 def test_hay_una_consulta_por_parte():

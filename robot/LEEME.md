@@ -73,6 +73,7 @@ Con lo que dejan en `_CATALOGO` y `_DIAGNOSTICO`, revisa lo que las consultas ma
 - [ ] La cartera de Derivados (cuentas 13050501 y 13051005) da las mismas cifras que el informe de cartera de SAP. Segurex usa 13050505, 13050510 y 13051005 (suma 3.629.899.418,80 en el informe de cartera por edades de SAP). La consulta es una sola (`queries\cartera\cartera.sql`) y el robot se queda con las cuentas de cada empresa.
 - [ ] Las ventas de cada empresa (`_DIAGNOSTICO\<empresa>\ventas`) contra el informe de ventas de SAP, por mes de `fecha_contabilizacion`, y lo que la consulta marca como `VALIDAR CON DATOS REALES` (el campo `U_SGX_IdPedidoApp` en Segurex, el pedido, el costo y el precio de lista). El resumen muestra el `ventana_desde` que dio HANA.
 - [ ] Los pedidos de cada empresa (`_DIAGNOSTICO\<empresa>\pedidos`) contra el informe estándar de pedidos de cliente pendientes de SAP, sacado a la misma hora: líneas, pedidos y valor pendiente (`total_pendiente`), con los pedidos en otra moneda aparte. Y lo que la consulta marca como `VALIDAR CON DATOS REALES`: `U_SGX_IdPedidoApp` en `ORDR` y `U_GSP_FAMILIA` en `OITM` de Segurex, `LineTotal` y `GrssProfit` en pesos en un pedido en otra moneda, y `unitMsr` lleno en las dos empresas.
+- [ ] PRODUCCION (`_DIAGNOSTICO\SGX\produccion_*`) contra las consultas originales del tablero, como dice el §12 del contrato, y lo que las consultas marcan como `VALIDAR CON DATOS REALES`: que `BELNR_ID`, `BELPOS_ID` y `POS_ID` sean enteros, que el despiece y las rutas no repitan su llave, qué deja una entrada de producto terminado anulada y cuánto tarda la consulta de costos.
 - [ ] Los nombres de columna del archivo (`queries\archivo`) contra `_CATALOGO\<empresa>\columnas`.
 - [ ] El tamaño de `ADOC`, `ADO1`, `AJDT` y `AJD1` en `_CATALOGO\<empresa>\tablas` antes de activar `BASES_SAP_ARCHIVO_HISTORIAL_DOCUMENTOS`.
 
@@ -92,12 +93,12 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 
 | Comando | Qué hace | Usa la API |
 |---|---|---|
-| `run_robot.py --completa` | Nocturna: MAESTROS, CARTERA, VENTAS y PEDIDOS de las dos empresas, la foto diaria de cartera y los registros del archivo. Toma también las solicitudes listas | Sí |
+| `run_robot.py --completa` | Nocturna: MAESTROS, CARTERA, VENTAS y PEDIDOS de las dos empresas, PRODUCCION de Segurex, la foto diaria de cartera y los registros del archivo. Toma también las solicitudes listas | Sí |
 | `run_robot.py --archivo fotos` | Domingo: fotos de las tablas del archivo y el catálogo | No |
 | `run_robot.py --archivo registros` | Solo los registros del archivo (auditoría y tasas de cambio) | No |
 | `run_robot.py --catalogo` | Solo el catálogo de tablas y columnas | No |
-| `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS y PEDIDOS con sus conteos; no envía nada | No |
-| `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS o PEDIDOS) y las corre; sin solicitudes no sube la VPN | Sí |
+| `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
+| `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
 Opciones de `run_robot.py`:
 
@@ -128,6 +129,16 @@ Cada corrida de PEDIDOS (la nocturna o una solicitud) trae todas las líneas abi
 - `linea_articulo` es el grupo de artículos (`OITB`); `familia` es `U_GSP_FAMILIA`, solo en Segurex. En VENTAS, en cambio, `familia` es el grupo de artículos.
 - Nunca se envía vacía: si una empresa llega con 0 pedidos abiertos, la corrida falla y los pedidos anteriores se quedan.
 - La nocturna manda `conteo_sap.pedidos`, el `COUNT(*)` de la misma consulta en la misma conexión.
+
+## Producción
+
+PRODUCCION (contrato §12) trae los datos del tablero «Producción mes a mes» de Segurex, en seis partes. Es **solo de Segurex**: las tablas BEAS de las órdenes de producción no existen en Derivados, así que la nocturna, las solicitudes y el diagnóstico no la piden para SDC.
+
+- Las consultas están en `queries\produccion`, copiadas de las del tablero con los cambios del §12: la ventana de VENTAS en vez del rango fijo, una fila por línea de entrada en el producto terminado, sin el nombre de quien reportó, los nombres del contrato y los montos con 2 decimales.
+- Movimiento (`produccion_terminado`, `produccion_carga_planta`, `produccion_costos`): traen las filas con `fecha` desde el primer día de la ventana, el mismo de VENTAS. El robot pide `ventana_desde` a HANA antes y después de extraer y, si alguna fila trae una `fecha` anterior, la corrida falla antes de enviar nada. La app reemplaza solo la ventana.
+- Maestros (`produccion_despiece`, `produccion_rutas`, `produccion_costeo_teorico`): todas las filas cada vez; la app las reemplaza todas.
+- `produccion_costos` envía también las filas de `Material intermedio` (lo que la planta fabricó y vuelve a entrar como insumo). El panel las excluye al sumar el costo.
+- Nunca se envía una parte vacía: si una llega con 0 filas, falla la corrida de PRODUCCION y no cambia nada.
 
 ## Tareas programadas
 
@@ -162,6 +173,7 @@ Todo queda en `BASES_SAP_CSV_DIR` (UTF-8 con BOM, separador `;`):
 | `CARTERA\<empresa>\cartera\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
 | `VENTAS\<empresa>\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
 | `PEDIDOS\<empresa>\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
+| `PRODUCCION\SGX\<parte>\aaaa-mm-dd_hhmm.csv` | Una por parte y corrida | 90 días |
 | `CARTERA\<empresa>\historico\aaaa-mm-dd.csv` | Foto diaria de cartera, con fecha de corte de ayer y los días de mora contados a esa fecha | Siempre |
 | `<categoría>\<empresa>\<tabla>\aaaa-mm-dd.csv` | Foto del archivo (domingo) | 52 semanas |
 | `<categoría>\<empresa>\<tabla>\aaaa-mm.csv` | Registros del archivo, por mes | Siempre |

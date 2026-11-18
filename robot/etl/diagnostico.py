@@ -51,7 +51,7 @@ class ParteDiagnostico:
     conteo_sap: int | None = None
     activos: int | None = None
     inactivos: int | None = None
-    ventana_desde: str | None = None  # solo VENTAS: la que dio HANA
+    ventana_desde: str | None = None  # solo las partes con ventana: la que dio HANA
     error: str | None = None
 
     def resumen(self) -> list[Any]:
@@ -83,6 +83,8 @@ class Diagnostico:
         empresa_cfg = self.cfg.hana.empresas[empresa]
         esquema_db = empresa_cfg.esquema
         for parte in esquema.PARTES.values():
+            if not esquema.es_de_la_empresa(parte.conjunto, empresa):
+                continue  # PRODUCCION es solo de Segurex (contrato §12)
             p = ParteDiagnostico(empresa, parte.conjunto, parte.nombre)
             self.partes.append(p)
             if parte.nombre == esquema.PRECIOS and empresa_cfg.sin_precios:
@@ -91,7 +93,7 @@ class Diagnostico:
                            f"({empresa_cfg.variable_lista_precios}).")
                 continue
             try:
-                if parte.conjunto == "VENTAS":
+                if parte.columna_ventana:
                     self._leer_en_ventana(conn, empresa_cfg, parte, p)
                 else:
                     self._leer_parte(conn, empresa_cfg, parte, p)
@@ -110,7 +112,7 @@ class Diagnostico:
     def _leer_en_ventana(
         self, conn: Any, empresa_cfg: EmpresaHana, parte: esquema.Parte, p: ParteDiagnostico
     ) -> None:
-        """VENTAS: la ventana se pide a HANA antes y después, en la misma conexión."""
+        """Parte con ventana: se pide a HANA antes y después, en la misma conexión."""
         antes = p.ventana_desde = leer_ventana(conn, p.empresa)
         self._leer_parte(conn, empresa_cfg, parte, p)
         despues = p.ventana_desde = leer_ventana(conn, p.empresa)

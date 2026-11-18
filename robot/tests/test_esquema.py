@@ -8,6 +8,7 @@ import pytest
 
 import esquema
 from fake_hana import fila
+from test_queries_produccion import COLUMNAS as COLUMNAS_PRODUCCION
 from esquema import (
     BOOL,
     CANTIDAD,
@@ -83,6 +84,9 @@ COLUMNAS = {
         "ganancia_bruta_pendiente", "moneda", "trm",
     ],
 }
+COLUMNAS.update(COLUMNAS_PRODUCCION)  # contrato §12, en su orden
+PRODUCCION = tuple(COLUMNAS_PRODUCCION)
+MOVIMIENTO = ("produccion_terminado", "produccion_carga_planta", "produccion_costos")
 REQUERIDAS = {
     "clientes": {"codigo", "nombre", "activo", "actualizado_en_sap"},
     "proveedores": {"codigo", "nombre", "activo", "actualizado_en_sap"},
@@ -108,6 +112,23 @@ REQUERIDAS = {
         "cantidad_pedida", "cantidad_pendiente", "total_pendiente",
     },
 }
+REQUERIDAS.update({
+    "produccion_terminado": {
+        "doc_entry", "numero_documento", "linea", "fecha", "grupo", "familia", "codigo_articulo",
+        "cantidad", "valor",
+    },
+    "produccion_carga_planta": {
+        "fecha", "area", "linea_producto", "linea_negocio", "etapa", "nro_ot", "posicion",
+        "operacion", "codigo_articulo", "unidades",
+    },
+    "produccion_costos": {
+        "fecha", "concepto", "area", "linea_producto", "linea_negocio", "etapa", "nro_ot",
+        "posicion", "codigo_articulo", "costo",
+    },
+    "produccion_despiece": {"padre", "hijo", "cantidad"},
+    "produccion_rutas": {"codigo_articulo", "operacion"},
+    "produccion_costeo_teorico": {"codigo_articulo", "familia", "posiciones", "cantidad"},
+})
 LLAVES = {
     "clientes": ("codigo",),
     "proveedores": ("codigo",),
@@ -124,6 +145,13 @@ LLAVES = {
     "cartera": (),
     "ventas": ("tipo_objeto", "doc_entry", "linea"),
     "pedidos": ("doc_entry", "linea"),
+    # Sin llave hasta validar con SAP las de despiece y rutas (contrato §12).
+    "produccion_terminado": ("doc_entry", "linea"),
+    "produccion_carga_planta": (),
+    "produccion_costos": (),
+    "produccion_despiece": (),
+    "produccion_rutas": (),
+    "produccion_costeo_teorico": ("codigo_articulo",),
 }
 MODOS = {
     "clientes": "cambios", "proveedores": "cambios", "articulos": "cambios",
@@ -131,8 +159,10 @@ MODOS = {
     "grupos_articulos": "todo", "marcas": "todo", "precios": "todo", "vendedores": "todo",
     "grupos_clientes": "todo", "condiciones_pago": "todo", "municipios": "todo",
     "cartera": "todo", "ventas": "todo", "pedidos": "todo",
+    **{p: "todo" for p in PRODUCCION},
 }
-CONJUNTOS = {"cartera": "CARTERA", "ventas": "VENTAS", "pedidos": "PEDIDOS"}
+CONJUNTOS = {"cartera": "CARTERA", "ventas": "VENTAS", "pedidos": "PEDIDOS",
+             **{p: "PRODUCCION" for p in PRODUCCION}}
 MAESTROS = [p for p in COLUMNAS if p not in CONJUNTOS]
 
 
@@ -140,7 +170,7 @@ def test_estan_todas_las_partes_del_contrato():
     assert list(PARTES) == list(COLUMNAS)
     assert esquema.PARTES_POR_CONJUNTO == {
         "MAESTROS": tuple(MAESTROS), "CARTERA": ("cartera",), "VENTAS": ("ventas",),
-        "PEDIDOS": ("pedidos",),
+        "PEDIDOS": ("pedidos",), "PRODUCCION": PRODUCCION,
     }
     assert esquema.SOCIOS == ("clientes", "proveedores")
     assert esquema.HIJAS_DE_SOCIO == ("direcciones", "contactos")
@@ -277,6 +307,47 @@ def test_tipos_de_ventas():
             assert tipo == TEXTO, nombre
 
 
+@pytest.mark.parametrize("nombre", PRODUCCION)
+def test_en_produccion_el_alias_es_el_nombre_del_contrato(nombre):
+    parte = PARTES[nombre]
+    assert parte.consulta == f"produccion/{nombre}.sql"
+    assert all(c.hana == c.nombre for c in parte.columnas)
+
+
+def test_ventana_de_cada_parte():
+    # VENTAS filtra por fecha_contabilizacion; en PRODUCCION, las de movimiento por fecha
+    # y los maestros no tienen ventana (contrato §10.1 y §12).
+    con_ventana = {n: p.columna_ventana for n, p in PARTES.items() if p.columna_ventana}
+    assert con_ventana == {"ventas": "fecha_contabilizacion", **{p: "fecha" for p in MOVIMIENTO}}
+    assert esquema.CONJUNTOS_CON_VENTANA == ("VENTAS", "PRODUCCION")
+
+
+def test_produccion_es_solo_de_segurex():
+    assert esquema.EMPRESAS_POR_CONJUNTO == {"PRODUCCION": ("SGX",)}
+    assert esquema.es_de_la_empresa("PRODUCCION", "SGX")
+    assert not esquema.es_de_la_empresa("PRODUCCION", "SDC")
+    assert esquema.es_de_la_empresa("VENTAS", "SDC")
+
+
+def test_tipos_de_produccion():
+    enteros = {"doc_entry", "numero_documento", "linea", "nro_ot", "posicion", "operacion", "posiciones"}
+    cantidades = {"cantidad", "unidades", "unidades_no_conformes", "horas", "merma", "tiempo",
+                  "cantidad_base", "factor_merma"}
+    montos = {"valor", "costo", "material_soll", "fabricacion_soll", "total_soll", "total_ist"}
+    for parte in PRODUCCION:
+        for nombre, tipo in _tipos(parte).items():
+            if nombre in enteros:
+                assert tipo == ENTERO, (parte, nombre)
+            elif nombre == "fecha":
+                assert tipo == FECHA, (parte, nombre)
+            elif nombre in cantidades:
+                assert tipo == CANTIDAD, (parte, nombre)
+            elif nombre in montos:
+                assert tipo == MONTO, (parte, nombre)
+            else:
+                assert tipo == TEXTO, (parte, nombre)
+
+
 def test_tipos_de_pedidos():
     tipos = _tipos("pedidos")
     enteros = {"doc_entry", "numero_pedido", "linea", "dias", "dias_atraso", "slp_code"}
@@ -309,6 +380,7 @@ def test_partes_por_solicitud_segun_contrato_7_1():
         ("CARTERA", None): ("cartera",),
         ("VENTAS", None): ("ventas",),
         ("PEDIDOS", None): ("pedidos",),
+        ("PRODUCCION", None): PRODUCCION,
         ("MAESTROS", None): tuple(MAESTROS),
         ("MAESTROS", "clientes"): ("clientes", "direcciones", "contactos"),
         ("MAESTROS", "proveedores"): ("proveedores", "direcciones", "contactos"),

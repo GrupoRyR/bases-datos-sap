@@ -34,12 +34,23 @@ PARTES = {
     "CARTERA": ("cartera",),
     "VENTAS": ("ventas",),
     "PEDIDOS": ("pedidos",),
+    "PRODUCCION": (
+        "produccion_terminado", "produccion_carga_planta", "produccion_costos",
+        "produccion_despiece", "produccion_rutas", "produccion_costeo_teorico",
+    ),
+}
+# Contrato §10.1 y §12: conjuntos con ventana_desde y la columna que filtra cada parte.
+CONJUNTOS_CON_VENTANA = ("VENTAS", "PRODUCCION")
+COLUMNA_VENTANA = {
+    "ventas": "fecha_contabilizacion",
+    "produccion_terminado": "fecha", "produccion_carga_planta": "fecha", "produccion_costos": "fecha",
 }
 # Contrato §7.1: partes que trae una corrida según la parte pedida.
 PARTES_POR_SOLICITUD = {
     ("CARTERA", None): {"cartera"},
     ("VENTAS", None): {"ventas"},
     ("PEDIDOS", None): {"pedidos"},
+    ("PRODUCCION", None): set(PARTES["PRODUCCION"]),
     ("MAESTROS", None): set(PARTES["MAESTROS"]),
     ("MAESTROS", "clientes"): {"clientes", "direcciones", "contactos"},
     ("MAESTROS", "proveedores"): {"proveedores", "direcciones", "contactos"},
@@ -354,14 +365,16 @@ class ApiFalsa:
             raise _rechazo("fecha_corte va solo, y siempre, en CARTERA.", "fecha_corte")
         if not datos.get("extraida_en"):
             raise _rechazo("extraida_en es obligatorio.", "extraida_en")
-        # Contrato §4.1: ventana_desde va solo, y siempre, en VENTAS. El robot ni siquiera
-        # manda la llave en los demás conjuntos.
+        # Contrato §4.1 y §12: ventana_desde va solo, y siempre, en VENTAS y PRODUCCION. El
+        # robot ni siquiera manda la llave en los demás conjuntos.
         ventana_desde = datos.get("ventana_desde")
-        if conjunto == "VENTAS":
+        if conjunto in CONJUNTOS_CON_VENTANA:
             if not isinstance(ventana_desde, str) or not _RE_FECHA.fullmatch(ventana_desde):
-                raise _rechazo("VENTAS lleva ventana_desde AAAA-MM-DD.", "ventana_desde")
+                raise _rechazo(f"{conjunto} lleva ventana_desde AAAA-MM-DD.", "ventana_desde")
         elif "ventana_desde" in datos:
-            raise _rechazo("Solo VENTAS lleva ventana_desde.", "ventana_desde")
+            raise _rechazo("Solo VENTAS y PRODUCCION llevan ventana_desde.", "ventana_desde")
+        if conjunto == "PRODUCCION" and empresa != "SGX":
+            raise _rechazo("PRODUCCION es solo de SGX.", "empresa")
 
         for corrida in self.corridas.values():
             if (corrida.conjunto, corrida.empresa, corrida.estado) == (conjunto, empresa, "abierta"):
@@ -397,12 +410,13 @@ class ApiFalsa:
         for i, fila in enumerate(rows):
             if not isinstance(fila, list) or len(fila) != len(columns):
                 raise _rechazo("La fila no tiene un valor por columna.", f"rows.{i}")
-        # Contrato §10.1: una fila anterior a ventana_desde hace rechazar el lote.
-        if corrida.ventana_desde is not None and "fecha_contabilizacion" in columns:
-            posicion = columns.index("fecha_contabilizacion")
+        # Contrato §10.1 y §12: una fila anterior a ventana_desde hace rechazar el lote.
+        columna = COLUMNA_VENTANA.get(parte)
+        if corrida.ventana_desde is not None and columna in columns:
+            posicion = columns.index(columna)
             for i, fila in enumerate(rows):
                 if not isinstance(fila[posicion], str) or fila[posicion] < corrida.ventana_desde:
-                    raise _rechazo("Fila anterior a ventana_desde.", f"rows.{i}.fecha_contabilizacion")
+                    raise _rechazo("Fila anterior a ventana_desde.", f"rows.{i}.{columna}")
         corrida.lotes[batch] = Lote(batch, parte, list(columns), rows, sha)
         return 201, {"batch": batch, "rows": len(rows)}
 

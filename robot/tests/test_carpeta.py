@@ -118,16 +118,18 @@ def test_purgar_corridas_borra_solo_corridas_viejas(tmp_path: Path):
     vieja_v = _tocar(raiz / "VENTAS" / "SDC" / "2026-07-27_0200.csv")
     limite_v = _tocar(raiz / "VENTAS" / "SDC" / "2026-07-28_0200.csv")
     vieja_p = _tocar(raiz / "PEDIDOS" / "SGX" / "2026-07-27_0200.csv")
+    vieja_prod = _tocar(raiz / "PRODUCCION" / "SGX" / "produccion_costos" / "2026-07-27_0200.csv")
+    limite_prod = _tocar(raiz / "PRODUCCION" / "SGX" / "produccion_rutas" / "2026-07-28_0200.csv")
     limite_p = _tocar(raiz / "PEDIDOS" / "SGX" / "2026-07-28_0200.csv")
     otro = _tocar(raiz / "MAESTROS" / "SGX" / "clientes" / "notas.txt")
     archivo = _tocar(raiz / "AUDITORIA" / "SGX" / "USR5" / "2024-01-01.csv")
 
     borrados = Carpeta(raiz).purgar_corridas(date(2026, 10, 26))
 
-    assert sorted(borrados) == sorted([vieja_m, vieja_m2, vieja_c, vieja_v, vieja_p])
-    for ruta in (vieja_m, vieja_m2, vieja_c, vieja_v, vieja_p):
+    assert sorted(borrados) == sorted([vieja_m, vieja_m2, vieja_c, vieja_v, vieja_p, vieja_prod])
+    for ruta in (vieja_m, vieja_m2, vieja_c, vieja_v, vieja_p, vieja_prod):
         assert not ruta.exists()
-    for ruta in (limite_m, nueva_c, historico, limite_v, limite_p, otro, archivo):
+    for ruta in (limite_m, nueva_c, historico, limite_v, limite_p, limite_prod, otro, archivo):
         assert ruta.exists()
 
 

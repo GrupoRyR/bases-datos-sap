@@ -65,6 +65,9 @@ def _partes_de(solicitud: dict[str, Any]) -> tuple[str, ...]:
         raise TrabajoInvalido(
             f"Solicitud {id_}: conjunto {conjunto!r} con parte {parte!r} no existe en el contrato (§7.1)."
         )
+    if not esquema.es_de_la_empresa(conjunto, empresa):
+        de = ", ".join(esquema.EMPRESAS_POR_CONJUNTO[conjunto])
+        raise TrabajoInvalido(f"Solicitud {id_}: {conjunto} es solo de {de}, no de {empresa}.")
     return partes
 
 
@@ -173,7 +176,8 @@ def trabajos_completos(
     solicitudes_tomadas: list[dict[str, Any]],
     sin_precios: Collection[str] = (),
 ) -> list[Trabajo]:
-    """Corrida nocturna: por empresa, MAESTROS, CARTERA, VENTAS y PEDIDOS, todo en modo `todo`.
+    """Corrida nocturna: por empresa, MAESTROS, CARTERA, VENTAS, PEDIDOS y, solo en Segurex,
+    PRODUCCION (contrato §12), todo en modo `todo`.
 
     Las solicitudes tomadas de la misma empresa y conjunto van en la corrida
     completa (§7.3); las de otras empresas quedan como trabajos de solicitud.
@@ -187,7 +191,9 @@ def trabajos_completos(
 
     trabajos: list[Trabajo] = []
     for empresa in empresas:
-        for conjunto in esquema.PARTES_POR_CONJUNTO:  # MAESTROS, CARTERA, VENTAS y PEDIDOS
+        for conjunto in esquema.PARTES_POR_CONJUNTO:  # MAESTROS, CARTERA, VENTAS, PEDIDOS, PRODUCCION
+            if not esquema.es_de_la_empresa(conjunto, empresa):
+                continue
             de_solicitud = por_grupo.pop((empresa, conjunto), None)
             trabajos.append(Trabajo(
                 empresa=empresa,

@@ -37,7 +37,8 @@ class Resultado:
     filas: dict[str, list[list[Any]]] = field(default_factory=dict)  # ya serializadas
     conteo_sap: dict[str, int] | None = None  # solo en una corrida completa
     extraida_en: str = ""  # hora de Bogotá con zona, al terminar la última consulta
-    # Solo VENTAS: primer día de la ventana (AAAA-MM-DD), calculado por HANA (contrato §10.1).
+    # Solo VENTAS y PRODUCCION: primer día de la ventana (AAAA-MM-DD), calculado por HANA
+    # (contrato §10.1 y §12).
     # Si la extracción falla, queda el último que dio HANA: con él se abre y se falla la
     # corrida; sin él (la VPN o la conexión fallaron antes) la corrida no se puede abrir.
     ventana_desde: str | None = None
@@ -56,39 +57,42 @@ class FalloTrabajo(RuntimeError):
         self.etapa = etapa
 
 
-INTENTOS_VENTANA = 2  # la extracción de VENTAS se repite una vez si la ventana cambió
+INTENTOS_VENTANA = 2  # la extracción con ventana se repite una vez si la ventana cambió
 
 
 def leer_ventana(conn: Any, empresa: str) -> str:
-    """Primer día de la ventana de VENTAS según HANA, en esta conexión (contrato §10.1).
+    """Primer día de la ventana según HANA, en esta conexión (contrato §10.1 y §12).
 
     Nunca se calcula con el reloj del PC: la consulta filtra con CURRENT_DATE del
     servidor HANA y la ventana debe ser exactamente esa.
     """
-    _, filas = hana.ejecutar(conn, consultas.SQL_VENTANA, f"{empresa} ventana de ventas")
+    _, filas = hana.ejecutar(conn, consultas.SQL_VENTANA, f"{empresa} ventana")
     if len(filas) != 1 or len(filas[0]) != 1:
         raise hana.HanaError(
-            f"La consulta de la ventana de ventas de {empresa} debía devolver una fila con una "
+            f"La consulta de la ventana de {empresa} debía devolver una fila con una "
             f"columna y devolvió {len(filas)} filas."
         )
     dia = esquema.serializar(filas[0][0], esquema.FECHA, "ventana_desde")
     if dia is None:
-        raise esquema.ValorInvalido(f"La ventana de ventas de {empresa} llegó vacía de HANA.")
+        raise esquema.ValorInvalido(f"La ventana de {empresa} llegó vacía de HANA.")
     return dia
 
 
 def revisar_ventana(parte: esquema.Parte, filas: list[list[Any]], ventana_desde: str) -> None:
-    """Falla si alguna fila trae fecha_contabilizacion anterior a ventana_desde.
+    """Falla si alguna fila trae su columna de ventana anterior a ventana_desde.
 
-    La API rechazaría el lote (contrato §10.1); se corta antes de abrir la corrida.
-    Las fechas ya están serializadas (AAAA-MM-DD), así que se comparan como texto.
+    La API rechazaría el lote (contrato §10.1 y §12); se corta antes de abrir la corrida.
+    Una parte sin ventana (los maestros de PRODUCCION) no se revisa. Las fechas ya están
+    serializadas (AAAA-MM-DD), así que se comparan como texto.
     """
-    posicion = parte.nombres.index(esquema.COLUMNA_VENTANA)
+    if not parte.columna_ventana:
+        return
+    posicion = parte.nombres.index(parte.columna_ventana)
     antes = sum(1 for fila in filas if fila[posicion] < ventana_desde)
     if antes:
         raise FalloTrabajo(
             "VALIDACION",
-            f"Parte {parte.nombre}: {antes} filas con {esquema.COLUMNA_VENTANA} anterior a "
+            f"Parte {parte.nombre}: {antes} filas con {parte.columna_ventana} anterior a "
             f"ventana_desde {ventana_desde}; la API las rechazaría.",
         )
 
@@ -181,7 +185,7 @@ def resultado_fallido(trabajo: Trabajo, exc: BaseException) -> Resultado:
 
 def _extraer_trabajo(conn: Any, empresa_cfg: EmpresaHana, r: Resultado, ahora: Callable[[], datetime]) -> None:
     t = r.trabajo
-    if t.conjunto == "VENTAS":
+    if t.conjunto in esquema.CONJUNTOS_CON_VENTANA:
         _extraer_en_ventana(conn, empresa_cfg, r)
     else:
         _extraer_partes(conn, empresa_cfg, r)
@@ -194,7 +198,8 @@ def _extraer_trabajo(conn: Any, empresa_cfg: EmpresaHana, r: Resultado, ahora: C
 
 
 def _extraer_en_ventana(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
-    """VENTAS: la ventana se pide a HANA antes y después de la consulta (contrato §10.1).
+    """VENTAS y PRODUCCION: la ventana se pide a HANA antes y después de las consultas
+    (contrato §10.1 y §12).
 
     Si cambió (la extracción cruzó la medianoche del servidor HANA), se repite la
     extracción una vez; si vuelve a cambiar, el trabajo falla. El conteo de la

@@ -8,7 +8,7 @@ import envio
 import esquema
 import extraccion
 from extraccion import Resultado
-from fake_hana import datos_empresa, revisar_fases
+from fake_hana import datos_empresa, fila, revisar_fases
 from trabajos import Trabajo, trabajos_completos, trabajos_de_solicitudes
 
 HOY = date(2026, 10, 26)
@@ -26,7 +26,7 @@ def _leer_csv(ruta: Path) -> list[list[str]]:
     return [linea.split(";") for linea in ruta.read_text(encoding="utf-8-sig").splitlines()]
 
 
-def test_completa_cierra_las_ocho_corridas(escenario):
+def test_completa_cierra_las_nueve_corridas(escenario):
     e = escenario
     resultados = _resultados(e, trabajos_completos(["SGX", "SDC"], HOY, []))
     assert _enviar(e, resultados) == []
@@ -36,6 +36,7 @@ def test_completa_cierra_las_ocho_corridas(escenario):
     assert [(c.conjunto, c.empresa, c.tipo, c.estado) for c in corridas] == [
         ("MAESTROS", "SGX", "completa", "cerrada"), ("CARTERA", "SGX", "completa", "cerrada"),
         ("VENTAS", "SGX", "completa", "cerrada"), ("PEDIDOS", "SGX", "completa", "cerrada"),
+        ("PRODUCCION", "SGX", "completa", "cerrada"),
         ("MAESTROS", "SDC", "completa", "cerrada"), ("CARTERA", "SDC", "completa", "cerrada"),
         ("VENTAS", "SDC", "completa", "cerrada"), ("PEDIDOS", "SDC", "completa", "cerrada"),
     ]
@@ -61,12 +62,41 @@ def test_completa_cierra_las_ocho_corridas(escenario):
     assert ventas.conteo_sap == {"ventas": 2} == ventas.total_filas()
     # ventana_desde va solo en VENTAS: los demás conjuntos ni siquiera mandan la llave.
     iniciar = [p.datos for p in e.servidor.peticiones_a("iniciar")]
-    assert [d["ventana_desde"] for d in iniciar if "ventana_desde" in d] == ["2026-09-24", "2026-09-24"]
-    assert [d["conjunto"] for d in iniciar if "ventana_desde" in d] == ["VENTAS", "VENTAS"]
+    assert [d["ventana_desde"] for d in iniciar if "ventana_desde" in d] == ["2026-09-24"] * 3
+    assert [d["conjunto"] for d in iniciar if "ventana_desde" in d] == ["VENTAS", "PRODUCCION", "VENTAS"]
     # PEDIDOS: una parte en modo todo, sin fecha de corte ni ventana, con su conteo (§11.3).
     pedidos = corridas[3]
     assert (pedidos.partes, pedidos.fecha_corte, pedidos.ventana_desde) == ({"pedidos": "todo"}, None, None)
     assert pedidos.conteo_sap == {"pedidos": 2} == pedidos.total_filas()
+
+
+def test_completa_de_produccion_va_solo_en_segurex_con_ventana_y_conteo(escenario):
+    e = escenario
+    assert _enviar(e, _resultados(e, trabajos_completos(["SGX", "SDC"], HOY, []))) == []
+    [corrida] = [c for c in e.servidor.corridas.values() if c.conjunto == "PRODUCCION"]
+    assert (corrida.empresa, corrida.estado, corrida.fecha_corte) == ("SGX", "cerrada", None)
+    # La ventana sale de HANA, como en VENTAS (contrato §12).
+    assert corrida.ventana_desde == "2026-09-24"
+    partes = esquema.PARTES_POR_CONJUNTO["PRODUCCION"]
+    assert corrida.partes == {p: "todo" for p in partes}
+    assert corrida.conteo_sap == {p: 2 for p in partes} == corrida.total_filas()
+    pasos = [x.tipo for x in e.hana.de("SGX") if x.parte == "ventana"]
+    assert pasos == ["ventana"] * 4  # VENTAS y PRODUCCION, antes y después
+    for parte in partes:
+        ruta = e.csv_dir / "PRODUCCION" / "SGX" / parte / "2026-10-26_0200.csv"
+        assert _leer_csv(ruta)[0] == esquema.PARTES[parte].nombres
+    assert not (e.csv_dir / "PRODUCCION" / "SDC").exists()
+    assert not e.hana.de("SDC", parte="produccion_costos")
+
+
+def test_produccion_con_una_fila_anterior_a_la_ventana_no_se_envia(escenario):
+    e = escenario
+    e.hana.datos["SGX"]["produccion_costos"].append(fila("produccion_costos", 3, fecha=date(2026, 9, 1)))
+    fallos = _enviar(e, _resultados(e, [trabajos_completos(["SGX"], HOY, [])[4]]))
+    assert fallos == [("VALIDACION", "PRODUCCION SGX: Parte produccion_costos: 1 filas con fecha anterior "
+                                     "a ventana_desde 2026-09-24; la API las rechazaría.")]
+    [corrida] = e.servidor.corridas.values()
+    assert (corrida.estado, corrida.lotes, corrida.ventana_desde) == ("fallida", {}, "2026-09-24")
 
 
 def test_completa_escribe_los_csv_y_la_foto_de_cartera(escenario):

@@ -187,7 +187,7 @@ class ApiCliente:
             "extraida_en": extraida_en,
         }
         if ventana_desde is not None:
-            # Solo VENTAS (contrato §4.1): en los demás conjuntos la llave ni siquiera va.
+            # Solo VENTAS y PRODUCCION (contrato §4.1 y §12): en los demás la llave ni siquiera va.
             cuerpo["ventana_desde"] = ventana_desde
         def recuperar(datos: dict[str, Any]) -> dict[str, Any] | None:
             # La corrida abierta es la que creó el intento cuya respuesta se perdió.
