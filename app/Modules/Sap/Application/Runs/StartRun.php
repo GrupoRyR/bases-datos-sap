@@ -25,8 +25,11 @@ use LogicException;
  */
 final class StartRun
 {
-    /** The earliest window start accepted, in days before today (the formula reaches 37). */
+    /** The earliest VENTAS window start accepted, in days before today (the formula reaches 37). */
     private const WINDOW_MAX_DAYS = 40;
+
+    /** The earliest PRODUCCION window start, so the initial load can reach back months (contract section 12.3). */
+    private const PRODUCTION_WINDOW_FROM = '2026-01-01';
 
     /** @var array<string, string> */
     private array $errors = [];
@@ -43,11 +46,13 @@ final class StartRun
         $type = RunType::tryFrom(is_string($input['tipo'] ?? null) ? $input['tipo'] : '');
 
         if ($dataset === null) {
-            $this->fail('conjunto', 'Conjunto desconocido: solo MAESTROS, CARTERA, VENTAS o PEDIDOS.');
+            $this->fail('conjunto', 'Conjunto desconocido: solo MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION.');
         }
 
         if ($company === null) {
             $this->fail('empresa', 'Empresa desconocida: solo SGX o SDC.');
+        } elseif ($dataset !== null && ! in_array($company, $dataset->companies(), true)) {
+            $this->fail('empresa', "{$dataset->value} es solo de ".implode(' y ', array_map(fn (Company $only): string => $only->value, $dataset->companies())).'.');
         }
 
         if ($type === null) {
@@ -238,31 +243,35 @@ final class StartRun
     }
 
     /**
-     * The first day of the VENTAS window (contract sections 4.1 and 10.1),
-     * computed by the robot in HANA. Between today minus 40 days and
-     * tomorrow, today in Bogota, so a robot error never reaches closed
-     * months. The other datasets have no window.
+     * The first day of the window of VENTAS or PRODUCCION (contract sections
+     * 4.1, 10.1 and 12.3), computed by the robot in HANA, up to tomorrow,
+     * today in Bogota. VENTAS reaches back 40 days at most, so a robot error
+     * never reaches closed months; PRODUCCION, to 2026-01-01, since all of it
+     * comes again from SAP. The other datasets have no window.
      */
     private function window(mixed $date, Dataset $dataset): ?string
     {
-        if ($dataset !== Dataset::Ventas) {
+        if (! in_array($dataset, [Dataset::Ventas, Dataset::Produccion], true)) {
             if ($date !== null) {
-                $this->fail('ventana_desde', 'Solo VENTAS lleva ventana_desde.');
+                $this->fail('ventana_desde', 'Solo VENTAS y PRODUCCION llevan ventana_desde.');
             }
 
             return null;
         }
 
         if (! SapTime::isDate($date)) {
-            $this->fail('ventana_desde', 'VENTAS lleva ventana_desde AAAA-MM-DD.');
+            $this->fail('ventana_desde', "{$dataset->value} lleva ventana_desde AAAA-MM-DD.");
 
             return null;
         }
 
         $today = CarbonImmutable::now((string) config('app.timezone'));
+        [$earliest, $message] = $dataset === Dataset::Ventas
+            ? [$today->subDays(self::WINDOW_MAX_DAYS)->toDateString(), 'Debe estar entre hoy menos '.self::WINDOW_MAX_DAYS.' días y mañana.']
+            : [self::PRODUCTION_WINDOW_FROM, 'Debe estar entre '.self::PRODUCTION_WINDOW_FROM.' y mañana.'];
 
-        if ($date > $today->addDay()->toDateString() || $date < $today->subDays(self::WINDOW_MAX_DAYS)->toDateString()) {
-            $this->fail('ventana_desde', 'Debe estar entre hoy menos '.self::WINDOW_MAX_DAYS.' días y mañana.');
+        if ($date > $today->addDay()->toDateString() || $date < $earliest) {
+            $this->fail('ventana_desde', $message);
 
             return null;
         }

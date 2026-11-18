@@ -79,27 +79,29 @@ final class ReceiveBatch
     }
 
     /**
-     * A VENTAS line posted before the run's window would reach a month the
-     * close never touches (contract section 10.1): the batch is refused.
+     * A row of a part with a window (VENTAS and the PRODUCCION movement)
+     * dated before the run's window would land where the close never
+     * replaces (contract sections 10.1 and 12.3): the batch is refused.
      *
      * @param  list<list<mixed>>  $rows
      * @return array<string, string>
      */
     private function outsideWindow(Run $run, Part $part, array $rows): array
     {
-        // StartRun always stores the window of a VENTAS run.
+        // StartRun always stores the window of a run whose parts have one.
         $from = $run->ventana_desde?->toDateString();
+        $column = $part->windowColumn();
 
-        if ($part !== Part::Sales || $from === null) {
+        if ($column === null || $from === null) {
             return [];
         }
 
-        $position = array_search('fecha_contabilizacion', array_keys($part->columns()), true);
+        $position = array_search($column, array_keys($part->columns()), true);
         $errors = [];
 
         foreach ($rows as $index => $row) {
             if ($row[$position] < $from) {
-                $errors["rows.{$index}.fecha_contabilizacion"] = "Es anterior a ventana_desde ({$from}).";
+                $errors["rows.{$index}.{$column}"] = "Es anterior a ventana_desde ({$from}).";
             }
         }
 
