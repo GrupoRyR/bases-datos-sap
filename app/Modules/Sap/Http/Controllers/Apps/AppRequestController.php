@@ -31,10 +31,12 @@ final class AppRequestController
 
         if ($company === null) {
             $errors['empresa'] = 'Empresa desconocida: solo SGX o SDC.';
+        } elseif ($dataset !== null && ! in_array($company, $dataset->companies(), true)) {
+            $errors['empresa'] = "{$dataset->value} es solo de SGX.";
         }
 
         if ($dataset === null) {
-            $errors['conjunto'] = 'Conjunto desconocido: solo MAESTROS, CARTERA, VENTAS o PEDIDOS.';
+            $errors['conjunto'] = 'Conjunto desconocido: solo MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION.';
         } elseif ($request->input('parte') !== null && ($scope === null || ! in_array($scope, RequestScope::forDataset($dataset), true))) {
             $errors['parte'] = match ($dataset) {
                 Dataset::Maestros => 'Parte desconocida: clientes, proveedores, articulos, precios, vendedores o catalogos.',

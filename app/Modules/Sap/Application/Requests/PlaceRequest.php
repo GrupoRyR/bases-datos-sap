@@ -44,6 +44,10 @@ final class PlaceRequest implements UpdateRequests
             throw new InvalidArgumentException("{$dataset->value} cannot be requested by scope [{$scope->value}].");
         }
 
+        if (! in_array($company, $dataset->companies(), true)) {
+            throw new InvalidArgumentException("{$dataset->value} does not exist for company [{$company->value}].");
+        }
+
         $place = fn () => DB::transaction(function () use ($company, $dataset, $scope, $email, $name, $appId) {
             $request = UpdateRequest::query()->sisters($company, $dataset)
                 ->where('parte', $scope)
