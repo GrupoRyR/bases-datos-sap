@@ -182,6 +182,52 @@ def test_leer_parte_de_ventas_sin_marcador_no_corre():
         consultas.leer_parte(PARTES["ventas"], _empresa(None))
 
 
+PEDIDOS_REAL = Path(__file__).resolve().parent.parent / "queries" / "pedidos" / "pedidos.sql"
+ID_APP_SGX = 'CAST(T0."U_SGX_IdPedidoApp" AS NVARCHAR(254))'
+FAMILIA_SGX = 'CAST(T4."U_GSP_FAMILIA" AS NVARCHAR(100))'
+
+
+def _pedidos_real() -> str:
+    return PEDIDOS_REAL.read_text(encoding="utf-8")
+
+
+def test_pedidos_de_segurex_queda_tal_cual():
+    sql = _pedidos_real()
+    assert consultas.sql_pedidos(sql, "SGX") == sql
+
+
+def test_pedidos_de_derivados_cambia_el_id_de_la_app_y_la_familia_por_null():
+    sql = _pedidos_real()
+    cambiada = consultas.sql_pedidos(sql, "SDC")
+    assert re.search(r'CAST\(NULL AS NVARCHAR\(254\)\) +AS "id_pedido_app", -- @id_pedido_app\n', cambiada)
+    assert re.search(r'CAST\(NULL AS NVARCHAR\(100\)\) +AS "familia", -- @familia\n', cambiada)
+    # Los campos de Segurex solo quedan nombrados en comentarios: HANA no los pide en Derivados.
+    codigo = re.sub(r"--[^\n]*", "", cambiada)
+    assert "U_SGX_IdPedidoApp" not in codigo and "U_GSP_FAMILIA" not in codigo
+    # Solo cambian esas dos expresiones: el resto del archivo queda igual.
+    assert cambiada == sql.replace(ID_APP_SGX, "CAST(NULL AS NVARCHAR(254))").replace(
+        FAMILIA_SGX, "CAST(NULL AS NVARCHAR(100))"
+    )
+
+
+_ID_APP = 'CAST(T0."U" AS NVARCHAR(254)) AS "id_pedido_app", -- @id_pedido_app\n'
+_FAMILIA = 'CAST(T4."F" AS NVARCHAR(100)) AS "familia", -- @familia\n'
+
+
+@pytest.mark.parametrize("empresa", ["SGX", "SDC"])
+@pytest.mark.parametrize("texto, marcador", [
+    ("SELECT " + _FAMILIA + 'FROM "ORDR" T0', "@id_pedido_app"),
+    ("SELECT " + _ID_APP + 'FROM "ORDR" T0', "@familia"),
+    ("SELECT " + _ID_APP + _ID_APP + _FAMILIA + 'FROM "ORDR" T0', "@id_pedido_app"),
+    ("SELECT " + _ID_APP + _FAMILIA + _FAMILIA + 'FROM "ORDR" T0', "@familia"),
+    ('SELECT T0."U" AS "id_pedido_app", -- @id_pedido_app\n' + _FAMILIA, "@id_pedido_app"),
+    ("SELECT " + _ID_APP + 'CAST(T4."F" AS NVARCHAR(100)) AS "otra", -- @familia\n', "@familia"),
+])
+def test_pedidos_sin_un_solo_marcador_reconocible_de_cada_campo_falla(texto: str, marcador: str, empresa: str):
+    with pytest.raises(ConfigError, match=marcador):
+        consultas.sql_pedidos(texto, empresa)
+
+
 def test_sql_contar():
     assert consultas.sql_contar(SQL) == f"SELECT COUNT(*) FROM (\n{SQL}\n) X"
 
