@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,12 @@ def aislar_entorno(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(hana, "_modo_tls_avisado", False, raising=False)
     yield
     _limpiar_variables()
+    # registro.configurar() no vuelve a configurar un logger con handlers: los de una prueba
+    # que corrió el robot apuntarían al robot.log de otra carpeta temporal.
+    logger = logging.getLogger("bases_sap")
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
 
 
 class RelojFalso:

@@ -29,6 +29,9 @@ class Trabajo:
     solicitudes: list[int] = field(default_factory=list)
     fecha_corte: str | None = None  # solo CARTERA. VENTAS lleva su ventana_desde, que sale de HANA
     # al extraer (extraccion.Resultado.ventana_desde), no del trabajo.
+    # Solo la carga inicial de PRODUCCION: el primer día de la ventana, fijado a mano
+    # (--desde). Reemplaza al que daría HANA, en la consulta y en ventana_desde.
+    ventana_fija: str | None = None
 
     @property
     def nombre(self) -> str:
@@ -36,6 +39,35 @@ class Trabajo:
 
 
 _ORDEN = list(esquema.PARTES)
+
+# Contrato §12: la API acepta ventana_desde de PRODUCCION desde este día hasta mañana.
+PRIMER_DIA_PRODUCCION = date(2026, 1, 1)
+
+
+def trabajo_carga_produccion(desde: str, hoy: date) -> Trabajo:
+    """La carga inicial de PRODUCCION: la completa de Segurex desde `desde` (contrato §12).
+
+    Va una vez, a mano (run_robot.py --carga-produccion --desde AAAA-MM-DD), para que el
+    panel tenga desde el primer día los meses que ya usa. `desde` va del 1 de enero de
+    2026 a hoy: un día que todavía no pasó no trae nada.
+    """
+    try:
+        dia = date.fromisoformat(desde)
+    except ValueError:
+        dia = None
+    if dia is None or dia.isoformat() != desde or not PRIMER_DIA_PRODUCCION <= dia <= hoy:
+        raise TrabajoInvalido(
+            f"--desde debe ser una fecha AAAA-MM-DD entre {PRIMER_DIA_PRODUCCION.isoformat()} "
+            f"y hoy ({hoy.isoformat()}); llegó {desde!r}."
+        )
+    empresa, = esquema.EMPRESAS_POR_CONJUNTO["PRODUCCION"]
+    return Trabajo(
+        empresa=empresa,
+        conjunto="PRODUCCION",
+        tipo="completa",
+        partes={p: "todo" for p in esquema.PARTES_POR_CONJUNTO["PRODUCCION"]},
+        ventana_fija=dia.isoformat(),
+    )
 
 
 def _ordenar(partes: Iterable[str]) -> list[str]:

@@ -76,6 +76,7 @@ _RE_HBT = re.compile(r'FROM "(@HBT\w*)" T0')
 _RE_REGISTRO_DESDE = re.compile(r'X\."([^"]+)" >= \? AND X\."\1" < \?')
 _RE_REGISTRO_HASTA = re.compile(r'X\."([^"]+)" < \?')
 _RE_LISTA_PRECIOS = re.compile(r'X\."lista_codigo" = (\d+)')
+_RE_VENTANA_FIJA = re.compile(r"TO_DATE\('\d{4}-\d{2}-\d{2}', 'YYYY-MM-DD'\)")
 
 
 def columnas_select(sql: str) -> list[str]:
@@ -277,7 +278,10 @@ class _Cursor:
         if sql.strip() == consultas.SQL_VENTANA:
             self._ventana(sql)
             return
-        parte = h.identificar(sql, self.esquema, self.empresa)
+        # La carga inicial de PRODUCCION fija la ventana (consultas.sql_desde_fecha): se
+        # reconoce el archivo con la expresión de vuelta en su lugar.
+        original = _RE_VENTANA_FIJA.sub(consultas.EXPRESION_VENTANA, sql)
+        parte = h.identificar(original, self.esquema, self.empresa)
         params = tuple(params or ())
         if parte not in esquema.PARTES:
             self._otra(sql, parte, params)

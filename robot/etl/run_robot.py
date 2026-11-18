@@ -27,6 +27,9 @@ Uso:
     python run_robot.py --diagnostico              # cifras de MAESTROS, CARTERA, VENTAS, PEDIDOS y
                                                    # PRODUCCION (solo SGX), sin enviar
     python run_robot.py --completa --forzar        # no espera la franja bloqueada
+    python run_robot.py --carga-produccion --desde 2026-08-01
+                                                   # una vez, a mano: PRODUCCION de SGX desde esa
+                                                   # fecha en vez de la ventana de HANA (contrato §12)
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
@@ -61,7 +64,14 @@ import registro
 from api import ApiCliente
 from carpeta import Carpeta
 from config import EMPRESAS, Config, ConfigError, HanaConfig, cargar_config
-from trabajos import Trabajo, TrabajoInvalido, separar_solo_precios, trabajos_completos, trabajos_de_solicitudes
+from trabajos import (
+    Trabajo,
+    TrabajoInvalido,
+    separar_solo_precios,
+    trabajo_carga_produccion,
+    trabajos_completos,
+    trabajos_de_solicitudes,
+)
 from vpn import RobotVPN
 
 SOLICITUDES_POR_PAGINA = 20
@@ -278,6 +288,9 @@ def _parser() -> argparse.ArgumentParser:
                            "o registros.")
     modo.add_argument("--catalogo", action="store_true",
                       help="Catálogo de tablas y columnas de cada empresa (carpeta _CATALOGO).")
+    modo.add_argument("--carga-produccion", action="store_true",
+                      help="Carga inicial de PRODUCCION desde la fecha de --desde, en vez de la ventana de "
+                           "HANA. Solo SGX: PRODUCCION no existe en SDC. Se corre una vez, a mano.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
@@ -286,8 +299,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--sin-vpn", action="store_true",
                         help="No gestionar la VPN (asume que ya está activa).")
     parser.add_argument("--forzar", action="store_true",
-                        help="Correr la completa o el archivo aunque sea dentro de una franja "
-                             "bloqueada de los otros robots.")
+                        help="Correr la completa, la carga de producción o el archivo aunque sea "
+                             "dentro de una franja bloqueada de los otros robots.")
+    parser.add_argument("--desde", metavar="AAAA-MM-DD",
+                        help="Primer día de la carga de producción (solo con --carga-produccion).")
     return parser
 
 
@@ -300,10 +315,26 @@ def main(
     ahora: Callable[[], datetime] = config.ahora,
     dormir: Callable[[float], None] = time.sleep,
 ) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
+    carga: Trabajo | None = None
+    if args.desde is not None and not args.carga_produccion:
+        parser.error("--desde va solo con --carga-produccion.")
+    if args.carga_produccion:
+        if args.desde is None:
+            parser.error("--carga-produccion necesita --desde AAAA-MM-DD.")
+        try:
+            carga = trabajo_carga_produccion(args.desde, ahora().date())
+        except TrabajoInvalido as exc:
+            parser.error(str(exc))
+        if args.empresa and empresas != [carga.empresa]:
+            parser.error(f"--carga-produccion es solo de {carga.empresa}.")
+        empresas = [carga.empresa]
     if args.completa:
         modo = "completa"
+    elif carga is not None:
+        modo = "carga produccion"
     elif args.archivo:
         modo = f"archivo {args.archivo}"
     else:
@@ -320,8 +351,10 @@ def main(
     try:
         cfg = cargar_config()
         registro.registrar_secretos(cfg)
-        # Solo la completa habla con la API; el archivo, el catálogo y el diagnóstico no.
-        cfg.validar(requiere_vpn=not args.sin_vpn, requiere_api=completa, empresas=empresas)
+        # Solo la completa y la carga hablan con la API; el archivo, el catálogo y el
+        # diagnóstico no.
+        cfg.validar(requiere_vpn=not args.sin_vpn, requiere_api=completa or carga is not None,
+                    empresas=empresas)
     except ConfigError as exc:
         log.error("Configuración incompleta:\n%s", exc)
         guardar_estado(estado="ERROR", modo=modo, etapa="CONFIGURACION", error=str(exc))
@@ -329,7 +362,9 @@ def main(
             notificar.avisar_fallos(cfg.alertas, [("CONFIGURACION", str(exc))])
         return 2
 
-    programado = completa or modo.startswith("archivo")  # los modos de las tareas programadas
+    # Los modos de las tareas programadas, y la carga, que es larga: respetan las franjas de
+    # los otros robots y esperan el candado.
+    programado = completa or carga is not None or modo.startswith("archivo")
     avisar = modo != "diagnostico"  # el diagnóstico lo corre el usuario y ve el resumen
     momento = ahora()
     franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
@@ -375,7 +410,7 @@ def main(
     try:
         return _ejecutar(
             cfg, args, modo, empresas, inicio, avisar=avisar, fabrica_api=fabrica_api,
-            fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora,
+            fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora, carga=carga,
         )
     finally:
         candado.soltar()
@@ -393,12 +428,20 @@ def _ejecutar(
     fabrica_vpn: Callable[..., Any],
     conectar: Callable[..., Any],
     ahora: Callable[[], datetime],
+    carga: Trabajo | None = None,
 ) -> int:
     """El modo pedido, con el candado ya tomado."""
-    completa = modo == "completa"
+    completa = modo == "completa" or carga is not None
     trabajos: list[Trabajo] = []
     try:
-        if completa:
+        if carga is not None:
+            trabajos = [carga]
+            fallos = ejecutar_trabajos(
+                cfg, trabajos, api=fabrica_api(cfg.api),
+                robot_vpn=None if args.sin_vpn else fabrica_vpn(cfg.vpn), conectar=conectar,
+                sin_vpn=args.sin_vpn, ahora=ahora,
+            )
+        elif completa:
             trabajos, fallos = _completa(
                 cfg, empresas, sin_vpn=args.sin_vpn, fabrica_api=fabrica_api,
                 fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora,

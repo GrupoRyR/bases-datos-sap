@@ -97,6 +97,7 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 | `run_robot.py --archivo fotos` | Domingo: fotos de las tablas del archivo y el catálogo | No |
 | `run_robot.py --archivo registros` | Solo los registros del archivo (auditoría y tasas de cambio) | No |
 | `run_robot.py --catalogo` | Solo el catálogo de tablas y columnas | No |
+| `run_robot.py --carga-produccion --desde AAAA-MM-DD` | Una vez, a mano: PRODUCCION de Segurex desde esa fecha (ver «Producción») | Sí |
 | `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
 | `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
@@ -139,6 +140,16 @@ PRODUCCION (contrato §12) trae los datos del tablero «Producción mes a mes» 
 - Maestros (`produccion_despiece`, `produccion_rutas`, `produccion_costeo_teorico`): todas las filas cada vez; la app las reemplaza todas.
 - `produccion_costos` envía también las filas de `Material intermedio` (lo que la planta fabricó y vuelve a entrar como insumo). El panel las excluye al sumar el costo.
 - Nunca se envía una parte vacía: si una llega con 0 filas, falla la corrida de PRODUCCION y no cambia nada.
+
+### Carga inicial
+
+Una vez, a mano y con la API de PRODUCCION ya desplegada, para que el panel tenga desde el primer día los meses que ya usa el tablero:
+
+```powershell
+.venv\Scripts\python.exe etl\run_robot.py --carga-produccion --desde 2026-08-01
+```
+
+Corre la completa de PRODUCCION de Segurex con `ventana_desde` = la fecha de `--desde` en vez de la que da HANA: las tres consultas de movimiento traen desde ese día. `--desde` va del 1 de enero de 2026 a hoy. Respeta las franjas de los otros robots (salvo con `--forzar`) y espera el candado, como la nocturna. Son unas 50 mil filas; la consulta de costos es la que más tarda.
 
 ## Tareas programadas
 
