@@ -7,8 +7,8 @@ Versión 1. Lo implementan dos sesiones en paralelo: «Datos y API» (el servido
 | Término | Qué es | Valores |
 |---|---|---|
 | Empresa | Empresa de SAP | `SGX` (esquema `SEGUREX`), `SDC` (esquema `HBT_SDERIVADOS`) |
-| Conjunto | Grupo de datos con su propia base MySQL | `MAESTROS` (`maestros_sap`), `CARTERA` (`cartera_sap`), `VENTAS` (`ventas_sap`) |
-| Parte | Tabla lógica dentro de un conjunto (§5, §6 y §10) | `clientes`, `proveedores`, `direcciones`, `contactos`, `articulos`, `grupos_articulos`, `marcas`, `precios`, `vendedores`, `grupos_clientes`, `condiciones_pago`, `municipios`, `cartera`, `ventas` |
+| Conjunto | Grupo de datos con su propia base MySQL | `MAESTROS` (`maestros_sap`), `CARTERA` (`cartera_sap`), `VENTAS` (`ventas_sap`), `PEDIDOS` (también en `ventas_sap`, §11) |
+| Parte | Tabla lógica dentro de un conjunto (§5, §6, §10 y §11) | `clientes`, `proveedores`, `direcciones`, `contactos`, `articulos`, `grupos_articulos`, `marcas`, `precios`, `vendedores`, `grupos_clientes`, `condiciones_pago`, `municipios`, `cartera`, `ventas`, `pedidos` |
 | Corrida | Un envío completo del robot: iniciar, lotes y cerrar (§4) | Tipo `completa` o `solicitud` |
 | Lote | Hasta 1.000 filas de una sola parte | Numerados desde 1 en cada corrida |
 | Solicitud | Pedido de actualización de una app o del panel (§7) | Estados en §7.2 |
@@ -88,8 +88,8 @@ Una corrida lleva un conjunto de una empresa. Los datos de una corrida no se ven
   - `cambios`: llegan solo las filas que cambiaron (§5.1). Al cerrar, no se inactiva nada por ausencia.
 - En una corrida `completa` todas las partes del conjunto van, y van en modo `todo`. Única excepción: `SDC` (Derivados) todavía no tiene una lista de precios pública, así que su corrida `completa` de `MAESTROS` puede omitir `precios`; al cerrar no se inactiva nada por esa ausencia. `SGX` siempre la envía.
 - `solicitudes`: ids de las solicitudes que atiende (§7). Vacío en una corrida `completa` sin solicitudes. Cada id debe estar `tomada`, ser de la misma empresa y conjunto, y pedir partes incluidas en `partes`; si no, 422.
-- `fecha_corte`: solo en `CARTERA`. En la `completa` nocturna, el día anterior; en una `solicitud`, hoy.
-- `ventana_desde`: solo en `VENTAS`, donde es obligatoria; en los demás conjuntos, 422. El primer día de la ventana que trajo la consulta, calculado en HANA (§10.1).
+- `fecha_corte`: solo en `CARTERA`; en los demás conjuntos, 422 (también en `PEDIDOS`, §11). En la `completa` nocturna, el día anterior; en una `solicitud`, hoy.
+- `ventana_desde`: solo en `VENTAS`, donde es obligatoria; en los demás conjuntos, 422 (también en `PEDIDOS`, §11). El primer día de la ventana que trajo la consulta, calculado en HANA (§10.1).
 - `extraida_en`: cuándo terminó la consulta a SAP.
 
 Respuesta 201: `{"run_id": 42, "estado": "abierta", "abierta_hasta": "2026-10-23T11:11:30-05:00"}`.
@@ -110,9 +110,9 @@ Una corrida abierta que pasa **30 minutos sin recibir lotes** queda `vencida`, s
 ```
 
 - `batch`: entero desde 1, consecutivo en la corrida (no por parte). Hasta **1.000 filas** por lote y una sola parte.
-- `columns`: exactamente las columnas de la parte (§5, §6 o §10), en cualquier orden y sin repetir. Cada fila de `rows` es una lista con un valor por columna, en ese orden. **Única excepción:** un lote de `VENTAS` puede omitir `ganancia_bruta`; la API acepta ambos encabezados, con y sin esa columna, y guarda `null` cuando falta. Cualquier otra columna que falte o sobre sigue dando 422. Existe porque el robot del PC de TI se actualiza después del servidor y la corrida de las 02:00 no debe fallar entre los dos.
-- Valores: enteros como número JSON; montos como texto decimal con punto, hasta 2 decimales y sin separador de miles (`"1234567.89"`), con `-` si son negativos; cantidades y tasas (solo en `VENTAS`, §10) igual que los montos pero con hasta 6 decimales (`"2.500000"`); booleanos como `true`/`false`; fechas `"AAAA-MM-DD"`; horas ISO 8601 con zona; texto hasta 4.000 caracteres, recortado; `null` si falta. Las columnas obligatorias no pueden llegar nulas ni vacías.
-- Una llave (§5 y §6) no puede repetirse en la corrida, ni dentro del lote ni entre lotes.
+- `columns`: exactamente las columnas de la parte (§5, §6, §10 o §11), en cualquier orden y sin repetir. Cada fila de `rows` es una lista con un valor por columna, en ese orden. **Única excepción:** un lote de `VENTAS` puede omitir `ganancia_bruta`; la API acepta ambos encabezados, con y sin esa columna, y guarda `null` cuando falta. Cualquier otra columna que falte o sobre sigue dando 422. Existe porque el robot del PC de TI se actualiza después del servidor y la corrida de las 02:00 no debe fallar entre los dos.
+- Valores: enteros como número JSON; montos como texto decimal con punto, hasta 2 decimales y sin separador de miles (`"1234567.89"`), con `-` si son negativos; cantidades y tasas (solo en `VENTAS` y `PEDIDOS`, §10 y §11) igual que los montos pero con hasta 6 decimales (`"2.500000"`); booleanos como `true`/`false`; fechas `"AAAA-MM-DD"`; horas ISO 8601 con zona; texto hasta 4.000 caracteres, recortado; `null` si falta. Las columnas obligatorias no pueden llegar nulas ni vacías.
+- Una llave (§5, §6, §10 y §11) no puede repetirse en la corrida, ni dentro del lote ni entre lotes.
 
 Respuestas:
 
@@ -136,9 +136,9 @@ Un 422 no cierra la corrida: el robot corrige o la marca fallida (§4.4). Ante u
 ```
 
 - `batches` y `filas`: lo que el robot envió. Si la API no tiene todos los lotes del 1 al `batches` o las filas no cuadran, responde 409 con `{"faltan": [4, 5]}` y la corrida sigue abierta para que el robot los reenvíe.
-- `conteo_sap`: **obligatorio en una corrida `completa`** y prohibido en las demás. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y arma con él el conteo diario del plan §6. Por cada parte calcula cuatro números: `sap` (el `conteo_sap` que envió el robot), `recibidas` (todas las filas que llegaron en los lotes), `activas_recibidas` (las recibidas con `activo = true`; en una parte sin columna `activo`, como `direcciones`, `cartera` o `ventas`, todas las recibidas cuentan como activas) y `activas_mysql` (las filas de la empresa en MySQL después de aplicar: las de `activo = true` en MAESTROS, todas las líneas en CARTERA y, en VENTAS, las de la ventana, §10.2). SAP envía también las filas inactivas, que quedan en MySQL con `activo = false`: por eso `activas_mysql` se compara con `activas_recibidas` y no con `recibidas`.
-- `cuadra` es verdadero cuando `sap == recibidas` **y** `activas_mysql == activas_recibidas`. En CARTERA y VENTAS `activas_recibidas == recibidas`, así que la regla no cambia.
-- Al cerrar, la API aplica en una transacción: inserta o actualiza por llave, pone `sincronizado_en` y, en las partes `todo`, inactiva lo que no llegó. En `CARTERA` reemplaza la cartera actual de la empresa y, en la corrida `completa`, guarda además la foto del día con `fecha_corte` (§6). En `VENTAS` reemplaza solo la ventana de la empresa (§10.2).
+- `conteo_sap`: **obligatorio en una corrida `completa`** y prohibido en las demás. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y arma con él el conteo diario del plan §6. Por cada parte calcula cuatro números: `sap` (el `conteo_sap` que envió el robot), `recibidas` (todas las filas que llegaron en los lotes), `activas_recibidas` (las recibidas con `activo = true`; en una parte sin columna `activo`, como `direcciones`, `cartera`, `ventas` o `pedidos`, todas las recibidas cuentan como activas) y `activas_mysql` (las filas de la empresa en MySQL después de aplicar: las de `activo = true` en MAESTROS, todas las líneas en CARTERA, en VENTAS las de la ventana (§10.2) y todas las líneas en PEDIDOS (§11.3)). SAP envía también las filas inactivas, que quedan en MySQL con `activo = false`: por eso `activas_mysql` se compara con `activas_recibidas` y no con `recibidas`.
+- `cuadra` es verdadero cuando `sap == recibidas` **y** `activas_mysql == activas_recibidas`. En CARTERA, VENTAS y PEDIDOS `activas_recibidas == recibidas`, así que la regla no cambia.
+- Al cerrar, la API aplica en una transacción: inserta o actualiza por llave, pone `sincronizado_en` y, en las partes `todo`, inactiva lo que no llegó. En `CARTERA` reemplaza la cartera actual de la empresa y, en la corrida `completa`, guarda además la foto del día con `fecha_corte` (§6). En `VENTAS` reemplaza solo la ventana de la empresa (§10.2). En `PEDIDOS` reemplaza todos los pedidos de la empresa (§11.3).
 - Una parte `todo` con 0 filas no se aplica y la corrida falla (422): una lectura vacía de SAP nunca vacía una tabla.
 
 Respuesta 200:
@@ -229,6 +229,7 @@ Tipos: `slp_code`, `total_plazos`, `no_plazo` y `dias`, enteros; las `fecha_*`, 
 |---|---|---|
 | `CARTERA` | `null` | `cartera` |
 | `VENTAS` | `null` | `ventas` |
+| `PEDIDOS` | `null` | `pedidos` |
 | `MAESTROS` | `null` | Todas, cada una en su modo de §5.1 |
 | `MAESTROS` | `clientes` | `clientes`, `direcciones`, `contactos` |
 | `MAESTROS` | `proveedores` | `proveedores`, `direcciones`, `contactos` |
@@ -344,3 +345,90 @@ Una sola parte, `ventas`, siempre en modo `todo`. Una fila por línea de factura
 ### 10.3 Carpeta
 
 `VENTAS\<empresa>\aaaa-mm-dd_hhmm.csv` dentro de `BASES_SAP_CSV_DIR`, uno por corrida, con las columnas de este contrato. Se borran a los 90 días, como los de MAESTROS y CARTERA.
+
+## 11. PEDIDOS
+
+Una sola parte, `pedidos`, siempre en modo `todo`. Una fila por línea abierta de pedido de clientes (`ORDR`/`RDR1`) de cada empresa. Es una foto del estado abierto en el momento de la extracción, no un acumulado de un período. Se guarda en `ventas_sap` (conexión `ventas`, sin base nueva) y las apps leen la vista `v_pedidos`. Primera app que la lee: Panel Consolidado.
+
+### 11.1 Filtro de SAP
+
+Una línea entra si cumple todo:
+
+- `ORDR."DocStatus" = 'O'`
+- `ORDR."CANCELED" = 'N'`
+- `RDR1."LineStatus" = 'O'`
+- `RDR1."OpenCreQty" > 0`
+
+Sin filtro por bodega, lista de precios ni dirección. Solo LEFT JOIN a `OCRD`, `OSLP`, `OCRG`, `OITM`, `OITB` y `OMRC`. Prohibido unir `CRD1`, `OITW`, `ITM1`, `OPLN` o `RDR12` (multiplican o pierden líneas).
+
+`OpenCreQty` y `OpenQty` van en unidades de venta (las del precio). `OpenInvQty` va en unidades de inventario y nunca se usa para valorar: en el pedido 3859 de SDC daba 10.000 contra 400 (`NumInSale` 25).
+
+### 11.2 Columnas
+
+Cada fila en MySQL lleva además `empresa` y `sincronizado_en`. Obligatorias en **negrita**. En este orden:
+
+| # | Columna | Tipo | Origen o regla |
+|---|---|---|---|
+| 1 | **`doc_entry`** | entero | `ORDR.DocEntry` |
+| 2 | **`numero_pedido`** | entero | `ORDR.DocNum` |
+| 3 | **`linea`** | entero | `RDR1.LineNum` |
+| 4 | **`fecha_pedido`** | fecha | `ORDR.DocDate` |
+| 5 | **`fecha_compromiso`** | fecha | `ORDR.DocDueDate` |
+| 6 | `fecha_entrega_linea` | fecha | `RDR1.ShipDate` |
+| 7 | **`dias`** | entero | `DAYS_BETWEEN(DocDate, CURRENT_DATE)` |
+| 8 | **`rango`** | texto | Por `dias`: `Hasta 30 dias` (≤ 30), `De 31 a 60 dias`, `De 61 a 90 dias`, `Mas de 90 dias` (> 90). Textos ASCII exactos |
+| 9 | **`dias_atraso`** | entero | `DAYS_BETWEEN(DocDueDate, CURRENT_DATE)`: negativo si aún no vence |
+| 10 | **`slp_code`** | entero | `ORDR.SlpCode`, `-1` si no tiene |
+| 11 | `vendedor` | texto | `OSLP.SlpName` |
+| 12 | `canal` | texto | `OCRG.GroupName` del cliente (la «unidad de negocio» del panel) |
+| 13 | **`codigo_cliente`** | texto | `ORDR.CardCode` |
+| 14 | `cliente` | texto | `ORDR.CardName` |
+| 15 | `nit` | texto | `OCRD.LicTradNum` |
+| 16 | `ciudad` | texto | `OCRD.City` |
+| 17 | `id_pedido_app` | texto | `ORDR.U_SGX_IdPedidoApp`, marca `-- @id_pedido_app`; en SDC el robot pone `CAST(NULL AS NVARCHAR(254))` |
+| 18 | `oc_cliente` | texto | `ORDR.NumAtCard` |
+| 19 | `direccion_envio` | texto | `ORDR.Address2` |
+| 20 | `comentarios` | texto | `ORDR.Comments` |
+| 21 | **`codigo_articulo`** | texto | `RDR1.ItemCode` |
+| 22 | `descripcion` | texto | `RDR1.Dscription` |
+| 23 | `linea_articulo` | texto | `OITB.ItmsGrpNam` (la «Línea» del panel) |
+| 24 | `familia` | texto | `OITM.U_GSP_FAMILIA`, marca `-- @familia`; en SDC el robot pone `CAST(NULL AS NVARCHAR(100))` |
+| 25 | `marca` | texto | `OMRC.FirmName` |
+| 26 | `bodega` | texto | `RDR1.WhsCode` |
+| 27 | `unidad` | texto | `RDR1.unitMsr` |
+| 28 | **`cantidad_pedida`** | cantidad | `RDR1.Quantity` |
+| 29 | **`cantidad_pendiente`** | cantidad | `RDR1.OpenCreQty` |
+| 30 | `precio_lista` | monto | `RDR1.PriceBefDi`, en la moneda de la línea |
+| 31 | `precio_unitario` | monto | `RDR1.Price`, en la moneda de la línea |
+| 32 | `descuento_documento` | tasa | `ORDR.DiscPrcnt` |
+| 33 | **`total_pendiente`** | monto | En pesos: `ROUND(LineTotal * OpenCreQty / Quantity * (1 - IFNULL(DiscPrcnt,0)/100), 2)`; 0 si `TaxOnly = 'Y'` o `Quantity = 0` |
+| 34 | `ganancia_bruta_pendiente` | monto | En pesos: `ROUND(GrssProfit * OpenCreQty / Quantity, 2)`; 0 si `TaxOnly = 'Y'` o `Quantity = 0` |
+| 35 | `moneda` | texto | `ORDR.DocCur` |
+| 36 | `trm` | tasa | `ORDR.DocRate` |
+
+Formatos del §4.2: montos con hasta 2 decimales; cantidades y tasas con hasta 6.
+
+- **Margen.** `SUM(ganancia_bruta_pendiente) / SUM(total_pendiente)`, igual que VENTAS. No hay columnas de costo.
+- **Llave.** `doc_entry` + `linea`, única por empresa. No puede repetirse en la corrida (§4.2).
+- **Nombres.** En VENTAS la columna `familia` es `OITB.ItmsGrpNam`; en PEDIDOS ese dato es `linea_articulo` y `familia` es `U_GSP_FAMILIA`. VENTAS no se cambia (lo usa Comisiones); la guía de apps lo aclara.
+
+### 11.3 Corridas y cierre
+
+- `fecha_corte` y `ventana_desde` no aplican: si llegan, 422.
+- Al cerrar, en una transacción, la API **reemplaza todas** las filas de PEDIDOS de esa empresa por las recibidas, con `sincronizado_en`. Lo que ya se facturó o se cerró desaparece con el reemplazo.
+- **Nunca vacía.** Un cierre con 0 filas falla (§4.3) y los pedidos anteriores se quedan. Riesgo aceptado: si una empresa queda de verdad sin pedidos abiertos, la corrida falla y avisa.
+- Sin columna `activo`, sin ventana y sin foto diaria. La corrida `completa` de las 02:00 y las de solicitud hacen lo mismo.
+- **Conteo nocturno.** `conteo_sap.pedidos` es el `COUNT(*)` de la misma consulta, en la misma conexión, justo después de extraer. `activas_recibidas` = `recibidas`; `activas_mysql` = las filas de la empresa en MySQL después de aplicar.
+- **Solicitudes (§7.1).** `PEDIDOS` | `null` | `pedidos`.
+- Sin variables de entorno nuevas.
+
+### 11.4 Carpeta
+
+`PEDIDOS\<empresa>\aaaa-mm-dd_hhmm.csv` dentro de `BASES_SAP_CSV_DIR`, uno por corrida. Se borran a los 90 días.
+
+### 11.5 Validación con SAP (antes de dar el conjunto por bueno)
+
+- **Contra SAP, no contra archivos viejos.** El usuario saca el informe estándar de pedidos de cliente pendientes de SAP (líneas con cantidad abierta) a la misma hora de una corrida del robot y se comparan, por empresa, líneas, pedidos y valor pendiente. Los pedidos en otra moneda se revisan aparte.
+- El `conteo_sap` nocturno solo prueba que no se pierden filas, no que la lógica esté bien.
+- Los archivos `ia_Pendientes por facturar` que hoy lee el panel solo sirven para explicar las diferencias en la transición: bodegas distintas de PT, descuento, monedas y líneas repetidas.
+- **Por validar con datos reales:** que `U_SGX_IdPedidoApp` exista en `ORDR` de SGX; que `U_GSP_FAMILIA` exista en `OITM` de SGX; que `LineTotal` y `GrssProfit` de `RDR1` vengan en pesos en un pedido en otra moneda; que `unitMsr` venga lleno en las dos empresas.
