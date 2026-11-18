@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
  * Compares a full run once applied (docs/contrato-robot.md, section 4.3):
  * per part, the SAP count the robot sent, the rows received, the received
  * rows that are active and the active rows of the company in MySQL (in
- * VENTAS, the rows of its window). SAP sends the inactive rows too, so MySQL
+ * VENTAS, the rows of its window; in PEDIDOS, all of them). SAP sends the inactive rows too, so MySQL
  * is compared with the received active rows, not with all of them. A
  * mismatch never fails the run; it is kept in daily_counts and counts
  * against the 14 stable days (plan, section 6).
@@ -64,7 +64,7 @@ final class CountRun
 
     /**
      * The received rows that are active. A part without an activo column
-     * (addresses, CARTERA, VENTAS) stores every received row as active, so
+     * (addresses, CARTERA, VENTAS, PEDIDOS) stores every received row as active, so
      * they all count.
      */
     private function activeReceived(Run $run, Part $part, int $received): int
@@ -77,7 +77,7 @@ final class CountRun
     }
 
     /**
-     * Active rows of the company. CARTERA lines have no flag, so all count;
+     * Active rows of the company. CARTERA and PEDIDOS lines have no flag, so all count;
      * VENTAS counts the lines of the run's window, which is what the SAP
      * count covers (contract section 10.2).
      */

@@ -6,7 +6,7 @@ use App\Modules\Sap\Contracts\Enums\Part;
 
 /**
  * The columns of each part, exactly as docs/contrato-robot.md lists them
- * (sections 5.2, 6 and 10), with the SAP source in the comments. Changing this
+ * (sections 5.2, 6, 10 and 11.2), with the SAP source in the comments. Changing this
  * list changes the contract: the user approves it first.
  */
 final class PartColumns
@@ -17,6 +17,9 @@ final class PartColumns
      * @var array<string, array<string, Column>>
      */
     private static array $cache = [];
+
+    /** The ranges of an open order line by its days, exact ASCII texts (contract section 11.2). */
+    private const ORDER_RANGES = ['Hasta 30 dias', 'De 31 a 60 dias', 'De 61 a 90 dias', 'Mas de 90 dias'];
 
     /**
      * @return array<string, Column>
@@ -104,6 +107,7 @@ final class PartColumns
             ],
             Part::Receivables => self::receivables(),
             Part::Sales => self::sales(),
+            Part::Orders => self::orders(),
         };
 
         $byName = [];
@@ -248,6 +252,55 @@ final class PartColumns
             Column::text('moneda', 10),
             Column::quantity('trm'),
             Column::text('comentarios'),
+        ];
+    }
+
+    /**
+     * One open customer order line (contract section 11.2), in contract
+     * order. Quantities are in sales units; the pending total and gross
+     * profit are in pesos and 0 on a tax-only line.
+     *
+     * @return list<Column>
+     */
+    private static function orders(): array
+    {
+        return [
+            Column::integer('doc_entry', required: true),              // ORDR.DocEntry
+            Column::integer('numero_pedido', required: true),          // ORDR.DocNum
+            Column::integer('linea', required: true),                  // RDR1.LineNum
+            Column::date('fecha_pedido', required: true),              // ORDR.DocDate
+            Column::date('fecha_compromiso', required: true),          // ORDR.DocDueDate
+            Column::date('fecha_entrega_linea'),                       // RDR1.ShipDate
+            Column::integer('dias', required: true),                   // DocDate to today
+            Column::text('rango', 20, required: true, values: self::ORDER_RANGES), // by dias
+            Column::integer('dias_atraso', required: true),            // DocDueDate to today, negative until due
+            Column::integer('slp_code', required: true),               // ORDR.SlpCode, -1 without one
+            Column::text('vendedor'),                                  // OSLP.SlpName
+            Column::text('canal'),                                     // OCRG.GroupName of the customer
+            Column::text('codigo_cliente', 50, required: true),        // ORDR.CardCode
+            Column::text('cliente'),                                   // ORDR.CardName
+            Column::text('nit', 50),                                   // OCRD.LicTradNum
+            Column::text('ciudad'),                                    // OCRD.City
+            Column::text('id_pedido_app'),                             // ORDR.U_SGX_IdPedidoApp, only SGX
+            Column::text('oc_cliente'),                                // ORDR.NumAtCard
+            Column::text('direccion_envio'),                           // ORDR.Address2
+            Column::text('comentarios'),                               // ORDR.Comments
+            Column::text('codigo_articulo', 50, required: true),       // RDR1.ItemCode
+            Column::text('descripcion'),                               // RDR1.Dscription
+            Column::text('linea_articulo'),                            // OITB.ItmsGrpNam
+            Column::text('familia'),                                   // OITM.U_GSP_FAMILIA, only SGX
+            Column::text('marca'),                                     // OMRC.FirmName
+            Column::text('bodega', 50),                                // RDR1.WhsCode
+            Column::text('unidad', 100),                               // RDR1.unitMsr
+            Column::quantity('cantidad_pedida', required: true),       // RDR1.Quantity
+            Column::quantity('cantidad_pendiente', required: true),    // RDR1.OpenCreQty
+            Column::decimal('precio_lista'),                           // RDR1.PriceBefDi, line currency
+            Column::decimal('precio_unitario'),                        // RDR1.Price, line currency
+            Column::quantity('descuento_documento'),                   // ORDR.DiscPrcnt
+            Column::decimal('total_pendiente', required: true),        // LineTotal share of OpenCreQty, less DiscPrcnt
+            Column::decimal('ganancia_bruta_pendiente'),               // GrssProfit share of OpenCreQty
+            Column::text('moneda', 10),                                // ORDR.DocCur
+            Column::quantity('trm'),                                   // ORDR.DocRate
         ];
     }
 }

@@ -7,9 +7,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /*
-| The tables and v_* views of MAESTROS (maestros_sap), CARTERA (cartera_sap)
-| and VENTAS (ventas_sap): docs/plan-bases-sap.md, section 4, and
-| docs/arquitectura.md, section 4.
+| The tables and v_* views of MAESTROS (maestros_sap), CARTERA (cartera_sap),
+| VENTAS and PEDIDOS (both in ventas_sap): docs/plan-bases-sap.md, section 4,
+| docs/arquitectura.md, section 4, and docs/contrato-robot.md, section 11.
 */
 
 /** @return list<string> */
@@ -198,4 +198,40 @@ it('exposes the gross profit through v_ventas, nullable and with its sign', func
 
     expect($profit)->toBe([1 => 1234567.89, 2 => -100.5, 3 => null])
         ->and(Schema::connection('ventas')->getColumnListing('v_ventas'))->toContain('ganancia_bruta');
+});
+
+it('keeps one PEDIDOS line per company, order and line', function () {
+    $orders = DB::connection('ventas')->table('pedidos');
+    $line = fn (string $company, int $entry, int $line): array => [
+        ...inventedRow(Part::Orders, $company), 'doc_entry' => $entry, 'linea' => $line,
+    ];
+
+    $orders->insert([$line('SGX', 3859, 0), $line('SGX', 3859, 1), $line('SDC', 3859, 0)]);
+
+    expect($orders->count())->toBe(3)
+        ->and(fn () => $orders->insert($line('SGX', 3859, 1)))->toThrow(QueryException::class);
+});
+
+it('stores PEDIDOS quantities and rates with 6 decimals and reads them through v_pedidos', function () {
+    DB::connection('ventas')->table('pedidos')->insert([
+        ...inventedRow(Part::Orders, 'SDC'),
+        'dias_atraso' => -12,
+        'cantidad_pendiente' => '400.000000',
+        'descuento_documento' => '12.345678',
+        'trm' => '4123.456789',
+        'total_pendiente' => '1234567.89',
+        'ganancia_bruta_pendiente' => '-100.50',
+        'corrida_id' => 42,
+    ]);
+
+    $row = (array) DB::connection('ventas')->table('v_pedidos')->sole();
+
+    expect((float) $row['cantidad_pendiente'])->toBe(400.0)
+        ->and((string) $row['descuento_documento'])->toStartWith('12.345678')
+        ->and((string) $row['trm'])->toStartWith('4123.456789')
+        ->and((float) $row['total_pendiente'])->toBe(1234567.89)
+        ->and((float) $row['ganancia_bruta_pendiente'])->toBe(-100.5)
+        ->and((int) $row['dias_atraso'])->toBe(-12)
+        ->and($row['empresa'])->toBe('SDC')
+        ->and($row)->not->toHaveKeys(['id', 'corrida_id']);
 });

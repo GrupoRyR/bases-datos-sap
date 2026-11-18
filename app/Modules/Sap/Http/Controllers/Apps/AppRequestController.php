@@ -34,12 +34,13 @@ final class AppRequestController
         }
 
         if ($dataset === null) {
-            $errors['conjunto'] = 'Conjunto desconocido: solo MAESTROS, CARTERA o VENTAS.';
+            $errors['conjunto'] = 'Conjunto desconocido: solo MAESTROS, CARTERA, VENTAS o PEDIDOS.';
         } elseif ($request->input('parte') !== null && ($scope === null || ! in_array($scope, RequestScope::forDataset($dataset), true))) {
             $errors['parte'] = match ($dataset) {
                 Dataset::Maestros => 'Parte desconocida: clientes, proveedores, articulos, precios, vendedores o catalogos.',
                 Dataset::Cartera => 'CARTERA se pide completa: parte debe ser null.',
                 Dataset::Ventas => 'VENTAS se pide completo: parte debe ser null.',
+                Dataset::Pedidos => 'PEDIDOS se pide completo: parte debe ser null.',
             };
         }
 

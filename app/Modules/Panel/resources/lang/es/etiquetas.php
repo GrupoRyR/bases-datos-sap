@@ -13,6 +13,7 @@ return [
         'MAESTROS' => 'Maestros',
         'CARTERA' => 'Cartera',
         'VENTAS' => 'Ventas',
+        'PEDIDOS' => 'Pedidos',
     ],
 
     'partes' => [
@@ -30,6 +31,7 @@ return [
         'municipios' => 'Municipios',
         'cartera' => 'Cartera',
         'ventas' => 'Ventas',
+        'pedidos' => 'Pedidos',
     ],
 
     // What a request asks for (RequestScope); the parts it brings go in parentheses.

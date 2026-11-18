@@ -6,7 +6,7 @@ use App\Modules\Sap\Domain\Columns\Column;
 use App\Modules\Sap\Domain\Columns\ColumnType;
 
 /*
-| The parts and columns of docs/contrato-robot.md (sections 1, 5, 6 and 10).
+| The parts and columns of docs/contrato-robot.md (sections 1, 5, 6, 10 and 11).
 | Any change here is a change of the contract: ask the user first.
 */
 
@@ -16,22 +16,25 @@ it('groups every part in exactly one dataset', function () {
         Part::ItemGroups, Part::Brands, Part::Prices, Part::SalesPeople,
         Part::CustomerGroups, Part::PaymentTerms, Part::Municipalities,
     ])->and(Part::forDataset(Dataset::Cartera))->toBe([Part::Receivables])
-        ->and(Part::forDataset(Dataset::Ventas))->toBe([Part::Sales]);
+        ->and(Part::forDataset(Dataset::Ventas))->toBe([Part::Sales])
+        ->and(Part::forDataset(Dataset::Pedidos))->toBe([Part::Orders]);
 });
 
-it('keeps each dataset on its own connection', function () {
+it('keeps each dataset on its connection, PEDIDOS next to VENTAS in ventas_sap', function () {
     expect(array_map(fn (Dataset $dataset): string => $dataset->connection(), Dataset::cases()))
-        ->toBe(['maestros', 'cartera', 'ventas']);
+        ->toBe(['maestros', 'cartera', 'ventas', 'ventas']);
 });
 
 it('uses the contract names for parts, tables and views', function () {
     expect(array_map(fn (Part $part): string => $part->value, Part::cases()))->toBe([
         'clientes', 'proveedores', 'direcciones', 'contactos', 'articulos', 'grupos_articulos',
         'marcas', 'precios', 'vendedores', 'grupos_clientes', 'condiciones_pago', 'municipios', 'cartera', 'ventas',
+        'pedidos',
     ])->and(Part::Customers->table())->toBe('clientes')
         ->and(Part::Customers->view())->toBe('v_clientes')
         ->and(Part::Receivables->view())->toBe('v_cartera')
-        ->and(Part::Sales->view())->toBe('v_ventas');
+        ->and(Part::Sales->view())->toBe('v_ventas')
+        ->and(Part::Orders->view())->toBe('v_pedidos');
 });
 
 it('keys each part as the contract says', function (Part $part, array $key) {
@@ -52,6 +55,7 @@ it('keys each part as the contract says', function (Part $part, array $key) {
     // CARTERA has no natural key: every close replaces the whole company.
     [Part::Receivables, []],
     [Part::Sales, ['tipo_objeto', 'doc_entry', 'linea']],
+    [Part::Orders, ['doc_entry', 'linea']],
 ]);
 
 it('lists exactly the columns of the contract', function (Part $part, array $columns) {
@@ -96,6 +100,14 @@ it('lists exactly the columns of the contract', function (Part $part, array $col
         'familia', 'codigo_articulo', 'descripcion', 'cantidad', 'costo_unitario', 'costo_total', 'precio_lista',
         'precio_unitario', 'total', 'iva', 'ganancia_bruta', 'moneda', 'trm', 'comentarios',
     ]],
+    'pedidos' => [Part::Orders, [
+        'doc_entry', 'numero_pedido', 'linea', 'fecha_pedido', 'fecha_compromiso', 'fecha_entrega_linea', 'dias',
+        'rango', 'dias_atraso', 'slp_code', 'vendedor', 'canal', 'codigo_cliente', 'cliente', 'nit', 'ciudad',
+        'id_pedido_app', 'oc_cliente', 'direccion_envio', 'comentarios', 'codigo_articulo', 'descripcion',
+        'linea_articulo', 'familia', 'marca', 'bodega', 'unidad', 'cantidad_pedida', 'cantidad_pendiente',
+        'precio_lista', 'precio_unitario', 'descuento_documento', 'total_pendiente', 'ganancia_bruta_pendiente',
+        'moneda', 'trm',
+    ]],
 ]);
 
 it('gives the suppliers the same columns as the customers', function () {
@@ -113,6 +125,10 @@ it('marks the key columns and the bold columns of the contract as required', fun
         ->and($required(Part::Sales))->toBe([
             'tipo_objeto', 'doc_entry', 'numero_documento', 'linea', 'clase_documento', 'estado_documento',
             'fecha_documento', 'fecha_contabilizacion', 'slp_code', 'codigo_cliente', 'cantidad', 'total',
+        ])
+        ->and($required(Part::Orders))->toBe([
+            'doc_entry', 'numero_pedido', 'linea', 'fecha_pedido', 'fecha_compromiso', 'dias', 'rango', 'dias_atraso',
+            'slp_code', 'codigo_cliente', 'codigo_articulo', 'cantidad_pedida', 'cantidad_pendiente', 'total_pendiente',
         ]);
 
     foreach (Part::cases() as $part) {
@@ -146,6 +162,19 @@ it('types the VENTAS columns as contract section 10 says', function () {
         ->and($of(ColumnType::Quantity))->toBe(['cantidad', 'trm'])
         ->and($of(ColumnType::Decimal))->toBe(['costo_unitario', 'costo_total', 'precio_lista', 'precio_unitario', 'total', 'iva', 'ganancia_bruta'])
         ->and($of(ColumnType::Text))->toHaveCount(19);
+});
+
+it('types the PEDIDOS columns as contract section 11 says', function () {
+    $types = array_map(fn (Column $column): ColumnType => $column->type, Part::Orders->columns());
+    $of = fn (ColumnType $type): array => array_keys(array_filter($types, fn (ColumnType $found): bool => $found === $type));
+
+    expect($of(ColumnType::Integer))->toBe(['doc_entry', 'numero_pedido', 'linea', 'dias', 'dias_atraso', 'slp_code'])
+        ->and($of(ColumnType::Date))->toBe(['fecha_pedido', 'fecha_compromiso', 'fecha_entrega_linea'])
+        ->and($of(ColumnType::Quantity))->toBe(['cantidad_pedida', 'cantidad_pendiente', 'descuento_documento', 'trm'])
+        ->and($of(ColumnType::Decimal))->toBe(['precio_lista', 'precio_unitario', 'total_pendiente', 'ganancia_bruta_pendiente'])
+        ->and($of(ColumnType::Text))->toHaveCount(19)
+        // Days late are negative while the order is not due; no column has a minimum.
+        ->and(array_filter(Part::Orders->columns(), fn (Column $column): bool => $column->min !== null || $column->omittable))->toBe([]);
 });
 
 it('knows which parts carry the SAP update time used for changes', function () {

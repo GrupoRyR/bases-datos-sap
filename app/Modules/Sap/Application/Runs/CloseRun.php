@@ -4,6 +4,7 @@ namespace App\Modules\Sap\Application\Runs;
 
 use App\Modules\Sap\Application\Apply\ApplyCartera;
 use App\Modules\Sap\Application\Apply\ApplyMaestros;
+use App\Modules\Sap\Application\Apply\ApplyPedidos;
 use App\Modules\Sap\Application\Apply\ApplyVentas;
 use App\Modules\Sap\Application\Apply\CountRun;
 use App\Modules\Sap\Contracts\Enums\Dataset;
@@ -27,6 +28,7 @@ final class CloseRun
         private readonly ApplyMaestros $maestros,
         private readonly ApplyCartera $cartera,
         private readonly ApplyVentas $ventas,
+        private readonly ApplyPedidos $pedidos,
         private readonly CountRun $counts,
     ) {}
 
@@ -61,6 +63,7 @@ final class CloseRun
                 Dataset::Maestros => $this->maestros->apply($run, $appliedAt),
                 Dataset::Cartera => $this->cartera->apply($run, $appliedAt),
                 Dataset::Ventas => $this->ventas->apply($run, $appliedAt),
+                Dataset::Pedidos => $this->pedidos->apply($run, $appliedAt),
             });
 
             $run->finish(RunState::Closed, null, [
