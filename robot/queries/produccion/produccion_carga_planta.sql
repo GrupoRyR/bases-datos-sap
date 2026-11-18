@@ -69,6 +69,8 @@ SELECT
     Z."MENGE_GUT"                                           AS "unidades",
     Z."MENGE_SCHLECHT"                                      AS "unidades_no_conformes",
     -- ZEIT viene en minutos.
+    -- VALIDAR CON DATOS REALES: el tipo de ZEIT. Si es entero, HANA podria truncar la
+    -- division (90 minutos -> 1 hora); comparar las horas contra el tablero.
     Z."ZEIT" / 60                                           AS "horas",
     P."WhsCode"                                             AS "almacen",
     -- J/N = ja/nein. BEAS no usa P/R/L/C como SAP estandar.
