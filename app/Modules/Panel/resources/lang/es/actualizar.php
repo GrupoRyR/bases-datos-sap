@@ -18,6 +18,7 @@ return [
     'errores' => [
         'empresa' => 'Elige una de las empresas de la lista.',
         'datos' => 'Elige qué actualizar de la lista.',
+        'empresa_conjunto' => ':conjunto solo existe para :empresas.',
     ],
 
     // The flash message after asking, from the request the contract returns.
