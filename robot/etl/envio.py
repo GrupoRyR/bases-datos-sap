@@ -18,7 +18,6 @@ from typing import Any, Callable
 
 import config
 import esquema
-import esquema
 from api import ApiCliente, ApiError, ApiRechazo, CorridaAbierta, LotesFaltantes
 from carpeta import Carpeta
 from extraccion import Resultado, mensaje_seguro

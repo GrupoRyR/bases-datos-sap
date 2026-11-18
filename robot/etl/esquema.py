@@ -1,8 +1,8 @@
 """Partes del contrato, sus columnas y la conversión de valores (docs/contrato-robot.md).
 
 Este archivo replica §5 (MAESTROS), §6 (CARTERA), §10 (VENTAS), §11 (PEDIDOS),
-§12 (PRODUCCION) y §7.1 (qué trae cada solicitud) del contrato. El contrato manda: si cambia, se cambia aquí
-también.
+§12 (PRODUCCION) y §7.1 (qué trae cada solicitud) del contrato. El contrato
+manda: si cambia, se cambia aquí también.
 
 - En MAESTROS, PEDIDOS y PRODUCCION los alias del SQL ya son los nombres del contrato
   (`hana == nombre`).
