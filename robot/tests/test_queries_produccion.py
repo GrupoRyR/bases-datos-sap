@@ -226,12 +226,17 @@ def test_carga_de_planta_excluye_anulados_y_resuelve_la_linea():
 def test_costos_trae_los_conceptos_redondeados_sin_ceros_y_con_nulos():
     con, hoy = _conexion()
     dia = hoy.isoformat()
+    inicio = date.fromisoformat(con.execute(f"SELECT {VENTANA}").fetchone()[0])
+    antes = (inicio - timedelta(days=1)).isoformat()  # el día anterior a la ventana
     con.executemany('INSERT INTO "BEAS_ARBZEIT" VALUES (?, ?, ?, ?, 10, 1, 0, 60, ?, ?, ?, ?, NULL)', [
         (dia, "P1", 10, 1, 0, 100.004, 30.0, 80.0),  # MOD 100, variable 30, fijo 50
         (dia, "P1", 10, 1, 0, 0.0, 0.0, 10.0),       # solo costo fijo: los ceros no salen
         (dia, "P1", 10, 1, 1, 999.0, 1.0, 2.0),      # anulado
+        (antes, "P1", 10, 1, 0, 777.0, 0.0, 0.0),    # antes de la ventana: no sale
     ])
     con.execute('INSERT INTO "OIGE" VALUES (7, ?)', (dia,))
+    con.execute('INSERT INTO "OIGE" VALUES (8, ?)', (antes,))
+    con.execute('INSERT INTO "IGE1" VALUES (8, 0, \'MP1\', \'Lamina\', 20, 1, 888.0)')  # antes: no sale
     con.executemany('INSERT INTO "IGE1" VALUES (7, ?, ?, ?, ?, 1, ?)', [
         (0, "MP1", "Lamina", 20, 400.126),  # comprado
         (1, "PZ1", "Manija", 20, 250.0),    # la planta la fabrica: intermedio
@@ -239,6 +244,9 @@ def test_costos_trae_los_conceptos_redondeados_sin_ceros_y_con_nulos():
         (3, "MP1", "Lamina", 99, 50.0),     # OT que no existe: no sale (INNER JOIN)
     ])
     filas = _filas(con, "produccion_costos")
+    # Cada rama filtra por su propia fecha: nada del día anterior a la ventana.
+    assert antes not in {f["fecha"] for f in filas}
+    assert not {777.0, 888.0} & {f["costo"] for f in filas}
     por_concepto = {}
     for f in filas:
         por_concepto.setdefault(f["concepto"], []).append(f)

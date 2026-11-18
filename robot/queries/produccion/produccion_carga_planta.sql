@@ -30,6 +30,8 @@
 -- Es la misma expresion de VENTAS y el robot la calcula en HANA como ventana_desde.
 SELECT
     CAST(Z."DocDate" AS DATE)                               AS "fecha",
+    -- VALIDAR CON DATOS REALES: que BEAS_APLATZ.GRUPPE venga siempre lleno. "area" es
+    -- obligatoria: una sola fila sin area hace fallar toda la corrida de PRODUCCION.
     A."GRUPPE"                                              AS "area",
     CASE
       WHEN TRIM(COALESCE(I."U_GSP_FAMILIA", '')) NOT IN
