@@ -52,6 +52,12 @@ def test_resumen_con_filas_conteos_y_activos(escenario):
         assert ventas == {"empresa": empresa, "conjunto": "VENTAS", "parte": "ventas", "filas": "2",
                           "conteo_sap": "2", "activos": "", "inactivos": "", "ventana_desde": "2026-09-24",
                           "error": ""}
+        pedidos = _fila(resumen, empresa, "pedidos")
+        assert pedidos == {"empresa": empresa, "conjunto": "PEDIDOS", "parte": "pedidos", "filas": "2",
+                           "conteo_sap": "2", "activos": "", "inactivos": "", "ventana_desde": "",
+                           "error": ""}
+    datos = e.csv_dir / "_DIAGNOSTICO" / "SDC" / "pedidos" / "2026-10-26_0200.csv"
+    assert datos.read_text(encoding="utf-8-sig").splitlines()[0].split(";") == esquema.PARTES["pedidos"].nombres
     revisar_fases(e.linea)
 
 

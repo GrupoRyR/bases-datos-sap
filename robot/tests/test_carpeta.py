@@ -60,6 +60,15 @@ def test_guardar_corrida_ruta_y_nombre_en_hora_de_bogota(tmp_path: Path):
     assert ruta.read_text(encoding="utf-8-sig").splitlines() == ["codigo", "C1"]
 
 
+def test_guardar_corrida_de_pedidos_va_directo_en_la_carpeta_de_la_empresa(tmp_path: Path):
+    # Contrato §11.4: PEDIDOS\\<empresa>\\aaaa-mm-dd_hhmm.csv, uno por corrida.
+    c = Carpeta(tmp_path)
+    momento = datetime(2026, 11, 17, 2, 0, tzinfo=BOGOTA)
+    ruta = c.guardar_corrida("PEDIDOS", "SDC", "pedidos", ["doc_entry"], [[3859]], momento)
+    assert ruta == tmp_path / "PEDIDOS" / "SDC" / "2026-11-17_0200.csv"
+    assert ruta.read_text(encoding="utf-8-sig").splitlines() == ["doc_entry", "3859"]
+
+
 def test_guardar_corrida_de_ventas_va_directo_en_la_carpeta_de_la_empresa(tmp_path: Path):
     c = Carpeta(tmp_path)
     momento = datetime(2026, 10, 26, 2, 0, tzinfo=BOGOTA)
@@ -108,15 +117,17 @@ def test_purgar_corridas_borra_solo_corridas_viejas(tmp_path: Path):
     historico = _tocar(raiz / "CARTERA" / "SGX" / "historico" / "2025-01-01.csv")
     vieja_v = _tocar(raiz / "VENTAS" / "SDC" / "2026-07-27_0200.csv")
     limite_v = _tocar(raiz / "VENTAS" / "SDC" / "2026-07-28_0200.csv")
+    vieja_p = _tocar(raiz / "PEDIDOS" / "SGX" / "2026-07-27_0200.csv")
+    limite_p = _tocar(raiz / "PEDIDOS" / "SGX" / "2026-07-28_0200.csv")
     otro = _tocar(raiz / "MAESTROS" / "SGX" / "clientes" / "notas.txt")
     archivo = _tocar(raiz / "AUDITORIA" / "SGX" / "USR5" / "2024-01-01.csv")
 
     borrados = Carpeta(raiz).purgar_corridas(date(2026, 10, 26))
 
-    assert sorted(borrados) == sorted([vieja_m, vieja_m2, vieja_c, vieja_v])
-    for ruta in (vieja_m, vieja_m2, vieja_c, vieja_v):
+    assert sorted(borrados) == sorted([vieja_m, vieja_m2, vieja_c, vieja_v, vieja_p])
+    for ruta in (vieja_m, vieja_m2, vieja_c, vieja_v, vieja_p):
         assert not ruta.exists()
-    for ruta in (limite_m, nueva_c, historico, limite_v, otro, archivo):
+    for ruta in (limite_m, nueva_c, historico, limite_v, limite_p, otro, archivo):
         assert ruta.exists()
 
 

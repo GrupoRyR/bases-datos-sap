@@ -1,10 +1,10 @@
 """Partes del contrato, sus columnas y la conversión de valores (docs/contrato-robot.md).
 
-Este archivo replica §5 (MAESTROS), §6 (CARTERA), §10 (VENTAS) y §7.1 (qué
-trae cada solicitud) del contrato. El contrato manda: si cambia, se cambia aquí
+Este archivo replica §5 (MAESTROS), §6 (CARTERA), §10 (VENTAS), §11 (PEDIDOS)
+y §7.1 (qué trae cada solicitud) del contrato. El contrato manda: si cambia, se cambia aquí
 también.
 
-- En MAESTROS los alias del SQL ya son los nombres del contrato (`hana == nombre`).
+- En MAESTROS y PEDIDOS los alias del SQL ya son los nombres del contrato (`hana == nombre`).
 - En CARTERA y VENTAS la consulta es la del gestor de cartera, con sus etiquetas
   ("Código SN", "Tipo objeto"...), y `hana` es esa etiqueta.
 - `indices()` falla ruidosamente si alguien edita el SQL y desaparece una
@@ -25,7 +25,7 @@ from registro import obtener
 log = obtener("esquema")
 
 TEXTO, ENTERO, MONTO, FECHA, HORA, BOOL = "texto", "entero", "monto", "fecha", "hora", "bool"
-# Cantidades y tasas de VENTAS (contrato §4.2 y §10): como un monto, con hasta 6 decimales.
+# Cantidades y tasas de VENTAS y PEDIDOS (contrato §4.2, §10 y §11): como un monto, con hasta 6 decimales.
 CANTIDAD = "cantidad"
 
 MAX_TEXTO = 4000  # contrato §4.2
@@ -52,7 +52,7 @@ class Columna:
 @dataclass(frozen=True)
 class Parte:
     nombre: str
-    conjunto: str                   # MAESTROS, CARTERA o VENTAS
+    conjunto: str                   # MAESTROS, CARTERA, VENTAS o PEDIDOS
     consulta: str                   # archivo relativo a robot/queries
     columnas: tuple[Columna, ...]   # el ORDEN define el orden del CSV y del lote
     llave: tuple[str, ...]          # nombres del contrato; vacía = sin llave (cartera)
@@ -245,6 +245,46 @@ _VENTAS = (
     Columna("Comentarios", "comentarios", TEXTO),
 )
 
+# Orden del contrato §11.2; el alias del SQL es el nombre del contrato (consulta propia).
+_PEDIDOS = (
+    _m("doc_entry", ENTERO, requerida=True),
+    _m("numero_pedido", ENTERO, requerida=True),
+    _m("linea", ENTERO, requerida=True),
+    _m("fecha_pedido", FECHA, requerida=True),
+    _m("fecha_compromiso", FECHA, requerida=True),
+    _m("fecha_entrega_linea", FECHA),
+    _m("dias", ENTERO, requerida=True),
+    _m("rango", requerida=True),
+    _m("dias_atraso", ENTERO, requerida=True),
+    _m("slp_code", ENTERO, requerida=True),
+    _m("vendedor"),
+    _m("canal"),
+    _m("codigo_cliente", requerida=True),
+    _m("cliente"),
+    _m("nit"),
+    _m("ciudad"),
+    _m("id_pedido_app"),
+    _m("oc_cliente"),
+    _m("direccion_envio"),
+    _m("comentarios"),
+    _m("codigo_articulo", requerida=True),
+    _m("descripcion"),
+    _m("linea_articulo"),
+    _m("familia"),
+    _m("marca"),
+    _m("bodega"),
+    _m("unidad"),
+    _m("cantidad_pedida", CANTIDAD, requerida=True),
+    _m("cantidad_pendiente", CANTIDAD, requerida=True),
+    _m("precio_lista", MONTO),
+    _m("precio_unitario", MONTO),
+    _m("descuento_documento", CANTIDAD),
+    _m("total_pendiente", MONTO, requerida=True),
+    _m("ganancia_bruta_pendiente", MONTO),
+    _m("moneda"),
+    _m("trm", CANTIDAD),
+)
+
 # Columna que define la ventana de VENTAS (contrato §10.1): la que filtra la consulta.
 COLUMNA_VENTANA = "fecha_contabilizacion"
 
@@ -264,7 +304,8 @@ PRECIOS = "precios"
 # Orden de las partes: el del contrato §1. `precios` trae todas las listas y
 # consultas.leer_parte() deja solo la pública de la empresa, por número. `cartera` trae
 # todas las cuentas por cobrar y deja solo las de la empresa, en el mismo lugar. `ventas`
-# es la consulta del gestor y en Derivados cambia el id del pedido de la app por un NULL.
+# es la consulta del gestor y en Derivados cambia el id del pedido de la app por un NULL;
+# `pedidos` cambia ahí el id del pedido de la app y la familia.
 PARTES: dict[str, Parte] = {
     parte.nombre: parte
     for parte in (
@@ -284,12 +325,14 @@ PARTES: dict[str, Parte] = {
         Parte("cartera", "CARTERA", "cartera/cartera.sql", _CARTERA, (), "todo", False),
         Parte("ventas", "VENTAS", "ventas/ventas.sql", _VENTAS,
               ("tipo_objeto", "doc_entry", "linea"), "todo", False),
+        Parte("pedidos", "PEDIDOS", "pedidos/pedidos.sql", _PEDIDOS,
+              ("doc_entry", "linea"), "todo", False),
     )
 }
 
 PARTES_POR_CONJUNTO: dict[str, tuple[str, ...]] = {
     conjunto: tuple(p.nombre for p in PARTES.values() if p.conjunto == conjunto)
-    for conjunto in ("MAESTROS", "CARTERA", "VENTAS")
+    for conjunto in ("MAESTROS", "CARTERA", "VENTAS", "PEDIDOS")
 }
 
 SOCIOS = ("clientes", "proveedores")
@@ -299,6 +342,7 @@ HIJAS_DE_SOCIO = ("direcciones", "contactos")
 PARTES_POR_SOLICITUD: dict[tuple[str, str | None], tuple[str, ...]] = {
     ("CARTERA", None): ("cartera",),
     ("VENTAS", None): ("ventas",),
+    ("PEDIDOS", None): ("pedidos",),
     ("MAESTROS", None): PARTES_POR_CONJUNTO["MAESTROS"],
     ("MAESTROS", "clientes"): ("clientes", *HIJAS_DE_SOCIO),
     ("MAESTROS", "proveedores"): ("proveedores", *HIJAS_DE_SOCIO),

@@ -228,6 +228,21 @@ def test_pedidos_sin_un_solo_marcador_reconocible_de_cada_campo_falla(texto: str
         consultas.sql_pedidos(texto, empresa)
 
 
+@pytest.mark.parametrize("codigo", ["SGX", "SDC"])
+def test_leer_parte_de_pedidos_pone_lo_de_cada_empresa(monkeypatch, codigo: str):
+    monkeypatch.setattr(config, "QUERIES_DIR", PEDIDOS_REAL.parent.parent)
+    empresa = EmpresaHana(codigo, "usuario", "clave", "ESQUEMA")
+    sql = consultas.leer_parte(PARTES["pedidos"], empresa)
+    assert (ID_APP_SGX in sql) == (FAMILIA_SGX in sql) == (codigo == "SGX")
+    assert sql == consultas.sql_pedidos(_pedidos_real().rstrip(), codigo)
+
+
+def test_leer_parte_de_pedidos_sin_marcadores_no_corre():
+    _escribir(config.QUERIES_DIR / "pedidos" / "pedidos.sql", "SELECT 1 FROM DUMMY")
+    with pytest.raises(ConfigError, match="@id_pedido_app"):
+        consultas.leer_parte(PARTES["pedidos"], _empresa(None))
+
+
 def test_sql_contar():
     assert consultas.sql_contar(SQL) == f"SELECT COUNT(*) FROM (\n{SQL}\n) X"
 

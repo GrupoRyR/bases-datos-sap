@@ -404,13 +404,13 @@ class HanaFalsa:
             self.linea.append(("hana", "cerrar", empresa.codigo))
 
     def identificar(self, sql: str, esquema_db: str, empresa: str = "") -> str:
-        # Ventas cambia por empresa (consultas.sql_id_pedido_app): se busca su texto ya cambiado.
+        # Ventas y pedidos cambian por empresa (consultas.sql_de_empresa): se busca su texto ya cambiado.
         if (esquema_db, empresa) not in self._textos:
             textos_empresa: dict[str, str] = {}
             for nombre, parte in esquema.PARTES.items():
                 texto = consultas.leer(parte.consulta, esquema_db)
-                if parte.conjunto == "VENTAS" and empresa:
-                    texto = consultas.sql_id_pedido_app(texto, empresa)
+                if empresa:
+                    texto = consultas.sql_de_empresa(parte, texto, empresa)
                 textos_empresa[nombre] = texto
             self._textos[(esquema_db, empresa)] = textos_empresa
         textos = {**self.otras, **self._textos[(esquema_db, empresa)]}

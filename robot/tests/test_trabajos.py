@@ -46,6 +46,20 @@ def test_solicitud_de_ventas_es_una_corrida_de_ventas_de_su_empresa():
     )
 
 
+def test_solicitud_de_pedidos_es_una_corrida_de_pedidos_de_su_empresa():
+    # Contrato §7.1 y §11.3: PEDIDOS | null | pedidos, sin fecha de corte ni ventana.
+    [t] = trabajos_de_solicitudes([_sol(14, empresa="SGX", conjunto="PEDIDOS")], HOY)
+    assert t == Trabajo(
+        empresa="SGX", conjunto="PEDIDOS", tipo="solicitud", partes={"pedidos": "todo"},
+        desde={}, solicitudes=[14], fecha_corte=None,
+    )
+
+
+def test_solicitud_de_una_parte_de_pedidos_no_existe():
+    with pytest.raises(TrabajoInvalido, match="Solicitud 15"):
+        trabajos_de_solicitudes([_sol(15, conjunto="PEDIDOS", parte="pedidos")], HOY)
+
+
 def test_solicitud_de_todo_maestros_usa_el_modo_de_cada_parte():
     [t] = trabajos_de_solicitudes([_sol(7, parte=None, desde={
         "clientes": None, "proveedores": "2026-10-01T00:00:00-05:00", "articulos": None,
@@ -137,7 +151,9 @@ def test_completa_de_las_dos_empresas():
     trabajos = trabajos_completos(["SGX", "SDC"], HOY, [])
     assert [(t.empresa, t.conjunto, t.tipo) for t in trabajos] == [
         ("SGX", "MAESTROS", "completa"), ("SGX", "CARTERA", "completa"), ("SGX", "VENTAS", "completa"),
+        ("SGX", "PEDIDOS", "completa"),
         ("SDC", "MAESTROS", "completa"), ("SDC", "CARTERA", "completa"), ("SDC", "VENTAS", "completa"),
+        ("SDC", "PEDIDOS", "completa"),
     ]
     maestros = trabajos[0]
     assert list(maestros.partes) == list(esquema.PARTES_POR_CONJUNTO["MAESTROS"])
@@ -149,13 +165,16 @@ def test_completa_de_las_dos_empresas():
     # VENTAS: una parte en modo todo y sin fecha de corte (contrato §10.2).
     assert trabajos[2].partes == {"ventas": "todo"}
     assert trabajos[2].fecha_corte is None
+    # PEDIDOS: igual, una parte en modo todo y sin fecha de corte (contrato §11.3).
+    assert trabajos[3].partes == {"pedidos": "todo"}
+    assert trabajos[3].fecha_corte is None
 
 
 SIN_PRECIOS = frozenset({"SDC"})
 
 
 def test_completa_de_la_empresa_sin_lista_de_precios_no_lleva_precios():
-    sgx_m, _, _, sdc_m, sdc_c, _ = trabajos_completos(["SGX", "SDC"], HOY, [], SIN_PRECIOS)
+    sgx_m, _, _, _, sdc_m, sdc_c, _, _ = trabajos_completos(["SGX", "SDC"], HOY, [], SIN_PRECIOS)
     assert "precios" in sgx_m.partes
     assert "precios" not in sdc_m.partes
     assert list(sdc_m.partes) == [p for p in esquema.PARTES_POR_CONJUNTO["MAESTROS"] if p != "precios"]
@@ -202,14 +221,17 @@ def test_completa_adjunta_las_solicitudes_tomadas():
         _sol(11, empresa="SDC", conjunto="CARTERA"),
         _sol(12, parte="precios"),
         _sol(13, empresa="SDC", conjunto="VENTAS"),
+        _sol(16, empresa="SDC", conjunto="PEDIDOS"),
     ])
     assert [(t.empresa, t.conjunto, t.tipo, t.solicitudes) for t in trabajos] == [
         ("SGX", "MAESTROS", "completa", [10, 12]),
         ("SGX", "CARTERA", "completa", []),
         ("SGX", "VENTAS", "completa", []),
+        ("SGX", "PEDIDOS", "completa", []),
         ("SDC", "MAESTROS", "completa", []),
         ("SDC", "CARTERA", "completa", [11]),
         ("SDC", "VENTAS", "completa", [13]),
+        ("SDC", "PEDIDOS", "completa", [16]),
     ]
     assert set(trabajos[0].partes.values()) == {"todo"}
 
@@ -223,6 +245,7 @@ def test_completa_de_una_empresa_deja_las_solicitudes_de_la_otra_como_trabajos()
         ("SGX", "MAESTROS", "completa", []),
         ("SGX", "CARTERA", "completa", [21]),
         ("SGX", "VENTAS", "completa", []),
+        ("SGX", "PEDIDOS", "completa", []),
         ("SDC", "MAESTROS", "solicitud", [20]),
     ]
-    assert trabajos[3].partes["clientes"] == "cambios"
+    assert trabajos[4].partes["clientes"] == "cambios"
