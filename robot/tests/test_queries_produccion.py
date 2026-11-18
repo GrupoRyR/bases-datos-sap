@@ -31,6 +31,11 @@ COLUMNAS = {
         "nro_ot", "posicion", "operacion", "codigo_articulo", "nombre_articulo", "unidad",
         "unidades", "unidades_no_conformes", "horas", "almacen", "estado_ot",
     ],
+    "produccion_costos": [
+        "fecha", "concepto", "area", "linea_producto", "linea_negocio", "etapa",
+        "material_consumido", "grupo_material", "codigo_material", "nro_ot", "posicion",
+        "codigo_articulo", "nombre_articulo", "puesto_trabajo", "costo",
+    ],
     "produccion_despiece": ["padre", "hijo", "cantidad", "merma"],
     "produccion_rutas": [
         "codigo_articulo", "operacion", "area", "puesto", "tiempo", "cantidad_base",
@@ -41,7 +46,7 @@ COLUMNAS = {
         "fabricacion_soll", "total_soll", "total_ist",
     ],
 }
-MOVIMIENTO = ("produccion_terminado", "produccion_carga_planta")
+MOVIMIENTO = ("produccion_terminado", "produccion_carga_planta", "produccion_costos")
 MAESTROS = ("produccion_despiece", "produccion_rutas", "produccion_costeo_teorico")
 MONTOS = {
     "produccion_terminado": ("valor",),
@@ -114,9 +119,19 @@ def test_montos_redondeados_a_dos_decimales(parte: str, montos: tuple[str, ...])
         assert re.search(rf'ROUND\([^\n]*, 2\)\s+AS "{monto}"', codigo), monto
 
 
+def test_linea_producto_es_la_misma_regla_en_carga_de_planta_y_costos():
+    def regla(parte: str) -> str:
+        m = re.search(r"CASE\s+WHEN TRIM\(COALESCE\(I.*?END\s+AS \"linea_producto\"", _codigo(parte), re.DOTALL)
+        assert m, parte
+        return re.sub(r"\s+", " ", m.group(0))
+
+    assert regla("produccion_carga_planta") == regla("produccion_costos")
+    assert "'Componente comun'" in regla("produccion_costos")
+
+
 def test_lo_no_confirmado_esta_marcado():
-    for parte in ("produccion_terminado", "produccion_carga_planta", "produccion_despiece",
-                  "produccion_rutas"):
+    for parte in ("produccion_terminado", "produccion_carga_planta", "produccion_costos",
+                  "produccion_despiece", "produccion_rutas"):
         assert VALIDAR in _texto(parte), parte
 
 
@@ -201,3 +216,38 @@ def test_carga_de_planta_excluye_anulados_y_resuelve_la_linea():
         ("ENSAMBLE", "MEGA", "Sin etapa", 0.5), ("PRENSAS", "JUPITER", "PIEZAS EN NEGRO", 1.5),
     ]
     assert filas[1]["linea_negocio"] == "PIEZAS" and filas[0]["estado_ot"] == "J"
+
+
+def test_costos_trae_los_conceptos_redondeados_sin_ceros_y_con_nulos():
+    con, hoy = _conexion()
+    dia = hoy.isoformat()
+    con.executemany('INSERT INTO "BEAS_ARBZEIT" VALUES (?, ?, ?, ?, 10, 1, 0, 60, ?, ?, ?, ?, NULL)', [
+        (dia, "P1", 10, 1, 0, 100.004, 30.0, 80.0),  # MOD 100, variable 30, fijo 50
+        (dia, "P1", 10, 1, 0, 0.0, 0.0, 10.0),       # solo costo fijo: los ceros no salen
+        (dia, "P1", 10, 1, 1, 999.0, 1.0, 2.0),      # anulado
+    ])
+    con.execute('INSERT INTO "OIGE" VALUES (7, ?)', (dia,))
+    con.executemany('INSERT INTO "IGE1" VALUES (7, ?, ?, ?, ?, 1, ?)', [
+        (0, "MP1", "Lamina", 20, 400.126),  # comprado
+        (1, "PZ1", "Manija", 20, 250.0),    # la planta la fabrica: intermedio
+        (2, "MP1", "Lamina", 20, 0.0),      # costo cero: no sale
+        (3, "MP1", "Lamina", 99, 50.0),     # OT que no existe: no sale (INNER JOIN)
+    ])
+    filas = _filas(con, "produccion_costos")
+    por_concepto = {}
+    for f in filas:
+        por_concepto.setdefault(f["concepto"], []).append(f)
+    assert sorted((c, sorted(x["costo"] for x in fs)) for c, fs in por_concepto.items()) == [
+        ("Costo fijo", [10.0, 50.0]), ("Costo variable", [30.0]),
+        ("Mano de obra directa", [100.0]), ("Material comprado", [400.13]),
+        ("Material intermedio", [250.0]),
+    ]
+    transformacion = por_concepto["Mano de obra directa"][0]
+    assert (transformacion["grupo_material"], transformacion["codigo_material"]) == (None, None)
+    assert transformacion["material_consumido"] == "Transformacion (no es material)"
+    assert (transformacion["area"], transformacion["puesto_trabajo"]) == ("PRENSAS", "PRENSA 1")
+    comprado = por_concepto["Material comprado"][0]
+    assert (comprado["area"], comprado["puesto_trabajo"]) == ("Material comprado (sin area)", None)
+    assert (comprado["grupo_material"], comprado["codigo_material"]) == ("MATERIA PRIMA", "MP1")
+    # El artículo que se fabrica es el de la posición de la OT, no el material.
+    assert {(f["codigo_articulo"], f["linea_producto"]) for f in filas} == {("PZ1", "JUPITER"), ("PT1", "MEGA")}
