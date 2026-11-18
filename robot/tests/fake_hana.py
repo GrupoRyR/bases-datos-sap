@@ -280,7 +280,8 @@ class _Cursor:
             return
         # La carga inicial de PRODUCCION fija la ventana (consultas.sql_desde_fecha): se
         # reconoce el archivo con la expresión de vuelta en su lugar.
-        parte = h.identificar(_RE_VENTANA_FIJA.sub(consultas.EXPRESION_VENTANA, sql), self.esquema, self.empresa)
+        original = _RE_VENTANA_FIJA.sub(consultas.EXPRESION_VENTANA, sql)
+        parte = h.identificar(original, self.esquema, self.empresa)
         params = tuple(params or ())
         if parte not in esquema.PARTES:
             self._otra(sql, parte, params)
