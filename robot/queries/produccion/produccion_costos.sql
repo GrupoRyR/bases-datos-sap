@@ -87,6 +87,8 @@ FROM (
         CASE C."N" WHEN 1 THEN 'Mano de obra directa'
                    WHEN 2 THEN 'Costo variable'
                    ELSE        'Costo fijo' END             AS "Concepto",
+        -- VALIDAR CON DATOS REALES: que BEAS_APLATZ.GRUPPE venga siempre lleno. "area" es
+        -- obligatoria: una sola fila sin area hace fallar toda la corrida de PRODUCCION.
         A."GRUPPE"                                          AS "Area",
         'Transformacion (no es material)'                   AS "Material",
         CAST(NULL AS NVARCHAR(100))                         AS "GrupoMaterial",
