@@ -52,7 +52,7 @@ final class StartRun
         if ($company === null) {
             $this->fail('empresa', 'Empresa desconocida: solo SGX o SDC.');
         } elseif ($dataset !== null && ! in_array($company, $dataset->companies(), true)) {
-            $this->fail('empresa', "{$dataset->value} es solo de SGX.");
+            $this->fail('empresa', "{$dataset->value} es solo de ".implode(' y ', array_map(fn (Company $only): string => $only->value, $dataset->companies())).'.');
         }
 
         if ($type === null) {

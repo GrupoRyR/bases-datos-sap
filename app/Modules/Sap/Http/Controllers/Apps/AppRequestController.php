@@ -32,7 +32,7 @@ final class AppRequestController
         if ($company === null) {
             $errors['empresa'] = 'Empresa desconocida: solo SGX o SDC.';
         } elseif ($dataset !== null && ! in_array($company, $dataset->companies(), true)) {
-            $errors['empresa'] = "{$dataset->value} es solo de SGX.";
+            $errors['empresa'] = "{$dataset->value} es solo de ".implode(' y ', array_map(fn (Company $only): string => $only->value, $dataset->companies())).'.';
         }
 
         if ($dataset === null) {
