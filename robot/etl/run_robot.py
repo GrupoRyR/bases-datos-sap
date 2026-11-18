@@ -289,8 +289,8 @@ def _parser() -> argparse.ArgumentParser:
     modo.add_argument("--catalogo", action="store_true",
                       help="Catálogo de tablas y columnas de cada empresa (carpeta _CATALOGO).")
     modo.add_argument("--carga-produccion", action="store_true",
-                      help="Carga inicial de PRODUCCION de SGX desde la fecha de --desde, en vez de la "
-                           "ventana de HANA. Se corre una vez, a mano.")
+                      help="Carga inicial de PRODUCCION desde la fecha de --desde, en vez de la ventana de "
+                           "HANA. Solo SGX: PRODUCCION no existe en SDC. Se corre una vez, a mano.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
