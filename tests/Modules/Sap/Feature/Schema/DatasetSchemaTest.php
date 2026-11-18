@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Schema;
 
 /*
 | The tables and v_* views of MAESTROS (maestros_sap), CARTERA (cartera_sap),
-| VENTAS and PEDIDOS (both in ventas_sap): docs/plan-bases-sap.md, section 4,
-| docs/arquitectura.md, section 4, and docs/contrato-robot.md, section 11.
+| VENTAS, PEDIDOS and PRODUCCION (all in ventas_sap): docs/plan-bases-sap.md, section 4,
+| docs/arquitectura.md, section 4, and docs/contrato-robot.md, sections 11 and 12.
 */
 
 /** @return list<string> */
@@ -234,4 +234,46 @@ it('stores PEDIDOS quantities and rates with 6 decimals and reads them through v
         ->and((int) $row['dias_atraso'])->toBe(-12)
         ->and($row['empresa'])->toBe('SDC')
         ->and($row)->not->toHaveKeys(['id', 'corrida_id']);
+});
+
+it('keeps one PRODUCCION row per company and key in the keyed parts', function (Part $part, array $key) {
+    $table = DB::connection('ventas')->table($part->table());
+    $row = fn (string $company): array => [...inventedRow($part, $company), ...$key];
+
+    $table->insert([$row('SGX'), $row('SDC')]);
+
+    expect(fn () => $table->insert($row('SGX')))->toThrow(QueryException::class);
+})->with([
+    'produccion_terminado' => [Part::ProductionFinished, ['doc_entry' => 81, 'linea' => 2]],
+    'produccion_costeo_teorico' => [Part::StandardCosts, ['codigo_articulo' => 'PT-100']],
+]);
+
+it('keeps repeated rows in the PRODUCCION parts without a key', function (Part $part) {
+    $table = DB::connection('ventas')->table($part->table());
+
+    $table->insert([inventedRow($part, 'SGX'), inventedRow($part, 'SGX')]);
+
+    expect($table->count())->toBe(2);
+})->with([Part::PlantLoad, Part::ProductionCosts, Part::BillOfMaterials, Part::Routings]);
+
+it('stores PRODUCCION quantities with 6 decimals and amounts with 2, and reads them through the views', function () {
+    DB::connection('ventas')->table('produccion_carga_planta')->insert([
+        ...inventedRow(Part::PlantLoad, 'SGX'),
+        'unidades' => '1250.000000',
+        'horas' => '3.416667',
+        'corrida_id' => 42,
+    ]);
+    DB::connection('ventas')->table('produccion_costos')->insert([
+        ...inventedRow(Part::ProductionCosts, 'SGX'),
+        'costo' => '-1525367102.33',
+    ]);
+
+    $load = (array) DB::connection('ventas')->table('v_produccion_carga_planta')->sole();
+    $cost = (array) DB::connection('ventas')->table('v_produccion_costos')->sole();
+
+    expect((float) $load['unidades'])->toBe(1250.0)
+        ->and((string) $load['horas'])->toStartWith('3.416667')
+        ->and($load['empresa'])->toBe('SGX')
+        ->and($load)->not->toHaveKeys(['id', 'corrida_id'])
+        ->and((float) $cost['costo'])->toBe(-1525367102.33);
 });

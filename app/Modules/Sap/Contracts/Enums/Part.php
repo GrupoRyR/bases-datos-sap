@@ -7,7 +7,7 @@ use App\Modules\Sap\Domain\Columns\PartColumns;
 
 /**
  * A logical table inside a dataset (docs/contrato-robot.md, sections 1, 5,
- * 6, 10 and 11). The value is the contract name, which is also the MySQL table;
+ * 6, 10, 11 and 12). The value is the contract name, which is also the MySQL table;
  * apps read it through the view v_<value>.
  */
 enum Part: string
@@ -27,6 +27,12 @@ enum Part: string
     case Receivables = 'cartera';
     case Sales = 'ventas';
     case Orders = 'pedidos';
+    case ProductionFinished = 'produccion_terminado';
+    case PlantLoad = 'produccion_carga_planta';
+    case ProductionCosts = 'produccion_costos';
+    case BillOfMaterials = 'produccion_despiece';
+    case Routings = 'produccion_rutas';
+    case StandardCosts = 'produccion_costeo_teorico';
 
     /**
      * The parts of a dataset, in contract order.
@@ -44,6 +50,8 @@ enum Part: string
             self::Receivables => Dataset::Cartera,
             self::Sales => Dataset::Ventas,
             self::Orders => Dataset::Pedidos,
+            self::ProductionFinished, self::PlantLoad, self::ProductionCosts,
+            self::BillOfMaterials, self::Routings, self::StandardCosts => Dataset::Produccion,
             default => Dataset::Maestros,
         };
     }
@@ -65,7 +73,10 @@ enum Part: string
      * The columns that identify a row inside a company. CARTERA has none:
      * each close replaces the whole company (contract section 6). A VENTAS
      * line is its document type, document and line (contract section 10); a
-     * PEDIDOS line, its order and line (contract section 11.2).
+     * PEDIDOS line, its order and line (contract section 11.2). In PRODUCCION
+     * only the finished goods (entry and line) and the standard costs (item)
+     * have one; plant reports and cost facts repeat legitimately, and the bill
+     * of materials and routings wait for SAP to confirm theirs (section 12.2).
      *
      * @return list<string>
      */
@@ -77,8 +88,25 @@ enum Part: string
             self::Prices => ['articulo_codigo'],
             self::Receivables => [],
             self::Sales => ['tipo_objeto', 'doc_entry', 'linea'],
-            self::Orders => ['doc_entry', 'linea'],
+            self::Orders, self::ProductionFinished => ['doc_entry', 'linea'],
+            self::StandardCosts => ['codigo_articulo'],
+            self::PlantLoad, self::ProductionCosts, self::BillOfMaterials, self::Routings => [],
             default => ['codigo'],
+        };
+    }
+
+    /**
+     * The date column a window is measured on, or null for a part without
+     * one. Its batches refuse rows before the run's ventana_desde, its close
+     * replaces only the rows from that day on and its count covers just them
+     * (contract sections 10.1 and 12.3).
+     */
+    public function windowColumn(): ?string
+    {
+        return match ($this) {
+            self::Sales => 'fecha_contabilizacion',
+            self::ProductionFinished, self::PlantLoad, self::ProductionCosts => 'fecha',
+            default => null,
         };
     }
 

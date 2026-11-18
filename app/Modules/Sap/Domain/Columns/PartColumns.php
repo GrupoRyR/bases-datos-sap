@@ -21,6 +21,9 @@ final class PartColumns
     /** The ranges of an open order line by its days, exact ASCII texts (contract section 11.2). */
     private const ORDER_RANGES = ['Hasta 30 dias', 'De 31 a 60 dias', 'De 61 a 90 dias', 'Mas de 90 dias'];
 
+    /** The cost concepts of produccion_costos (contract section 12.2), exact ASCII texts. */
+    private const COST_CONCEPTS = ['Mano de obra directa', 'Costo variable', 'Costo fijo', 'Material comprado', 'Material intermedio'];
+
     /**
      * @return array<string, Column>
      */
@@ -108,6 +111,76 @@ final class PartColumns
             Part::Receivables => self::receivables(),
             Part::Sales => self::sales(),
             Part::Orders => self::orders(),
+            Part::ProductionFinished => [
+                Column::integer('doc_entry', required: true),          // OIGN.DocEntry
+                Column::integer('numero_documento', required: true),   // OIGN.DocNum
+                Column::integer('linea', required: true),              // IGN1.LineNum
+                Column::date('fecha', required: true),                 // OIGN.DocDate: the window
+                Column::text('grupo', required: true),                 // OITB.ItmsGrpNam
+                Column::text('familia', required: true),               // OITM.U_GSP_FAMILIA
+                Column::text('codigo_articulo', 50, required: true),   // IGN1.ItemCode
+                Column::text('articulo'),                              // IGN1.Dscription
+                Column::integer('nro_ot'),                             // IGN1.U_beas_belnrid
+                Column::integer('posicion'),                           // IGN1.U_beas_belposid
+                Column::quantity('cantidad', required: true),          // IGN1.Quantity
+                Column::decimal('valor', required: true),              // IGN1.LineTotal
+            ],
+            Part::PlantLoad => [
+                Column::date('fecha', required: true),                 // BEAS_ARBZEIT.DocDate: the window
+                ...self::productionArea(),
+                Column::text('puesto_trabajo'),                        // BEAS_APLATZ.BEZ
+                Column::integer('nro_ot', required: true),             // BEAS_ARBZEIT.BELNR_ID
+                Column::integer('posicion', required: true),           // BEAS_ARBZEIT.BELPOS_ID
+                Column::integer('operacion', required: true),          // BEAS_ARBZEIT.POS_ID
+                Column::text('codigo_articulo', 50, required: true),   // BEAS_FTPOS.ItemCode
+                Column::text('nombre_articulo'),                       // BEAS_FTPOS.ItemName
+                Column::text('unidad', 100),                           // BEAS_FTPOS.ME_VERBRAUCH
+                Column::quantity('unidades', required: true),          // BEAS_ARBZEIT.MENGE_GUT
+                Column::quantity('unidades_no_conformes'),             // BEAS_ARBZEIT.MENGE_SCHLECHT
+                Column::quantity('horas'),                             // BEAS_ARBZEIT.ZEIT / 60
+                Column::text('almacen', 50),                           // BEAS_FTPOS.WhsCode
+                Column::text('estado_ot', 10),                         // BEAS_FTPOS.ABGKZ, J or N
+            ],
+            Part::ProductionCosts => [
+                Column::date('fecha', required: true),                 // BEAS_ARBZEIT or OIGE DocDate: the window
+                Column::text('concepto', 30, required: true, values: self::COST_CONCEPTS),
+                ...self::productionArea(),
+                Column::text('material_consumido'),                    // IGE1.Dscription
+                Column::text('grupo_material'),                        // OITB.ItmsGrpNam of the material
+                Column::text('codigo_material', 50),                   // IGE1.ItemCode
+                Column::integer('nro_ot', required: true),             // BELNR_ID or IGE1.U_beas_belnrid
+                Column::integer('posicion', required: true),           // BELPOS_ID or IGE1.U_beas_belposid
+                Column::text('codigo_articulo', 50, required: true),   // BEAS_FTPOS.ItemCode, the item made
+                Column::text('nombre_articulo'),                       // BEAS_FTPOS.ItemName
+                Column::text('puesto_trabajo'),                        // BEAS_APLATZ.BEZ
+                Column::decimal('costo', required: true),
+            ],
+            Part::BillOfMaterials => [
+                Column::text('padre', 50, required: true),             // BEAS_STL.ItemCode
+                Column::text('hijo', 50, required: true),              // BEAS_STL.ART1_ID
+                Column::quantity('cantidad', required: true),          // BEAS_STL.MENGE_VERBRAUCH
+                Column::quantity('merma'),                             // BEAS_STL.AUSSCHUSS
+            ],
+            Part::Routings => [
+                Column::text('codigo_articulo', 50, required: true),   // BEAS_APL.ItemCode
+                Column::integer('operacion', required: true),          // BEAS_APL.POS_ID
+                Column::text('area'),                                  // BEAS_APLATZ.GRUPPE
+                Column::text('puesto'),                                // BEAS_APLATZ.BEZ
+                Column::quantity('tiempo'),                            // BEAS_APL.TEAPLATZ, for cantidad_base
+                Column::quantity('cantidad_base'),                     // BEAS_APL.MENGE_JE
+                Column::quantity('factor_merma'),                      // BEAS_APL.AUSSCHUSSFAKTOR
+            ],
+            Part::StandardCosts => [
+                Column::text('codigo_articulo', 50, required: true),   // BEAS_FTPOS.ItemCode
+                Column::text('articulo'),                              // MAX(ItemName)
+                Column::text('familia', required: true),               // U_GSP_FAMILIA
+                Column::integer('posiciones', required: true),         // COUNT(*)
+                Column::quantity('cantidad', required: true),          // SUM(MENGE)
+                Column::decimal('material_soll'),                      // SUM(MATERIAL_GK_SOLL)
+                Column::decimal('fabricacion_soll'),                   // SUM(FERTIGUNG_GK_SOLL)
+                Column::decimal('total_soll'),                         // SUM(SELBSTKOSTEN_GK_SOLL)
+                Column::decimal('total_ist'),                          // SUM(SELBSTKOSTEN_GK_IST)
+            ],
         };
 
         $byName = [];
@@ -145,6 +218,24 @@ final class PartColumns
             Column::boolean('activo', required: true),              // not validFor = N nor frozenFor = Y
             Column::dateTime('actualizado_en_sap', required: true), // UpdateDate + UpdateTS
             Column::date('creado_en_sap'),                          // CreateDate
+        ];
+    }
+
+    /**
+     * Where a PRODUCCION plant report or cost fact happened: the work center
+     * group, the product line by the query's two-step rule, the business line
+     * and the stage (contract section 12.2). In the material costs the area
+     * is "Material comprado (sin area)" or "Material intermedio (sin area)".
+     *
+     * @return list<Column>
+     */
+    private static function productionArea(): array
+    {
+        return [
+            Column::text('area', required: true),                      // BEAS_APLATZ.GRUPPE
+            Column::text('linea_producto', required: true),            // the board's "Linea"
+            Column::text('linea_negocio', required: true),             // OITB.ItmsGrpNam, "Sin grupo"
+            Column::text('etapa', required: true),                     // BEAS_FTPOS.GRUPPE, "Sin etapa"
         ];
     }
 

@@ -39,7 +39,8 @@ final class DatabaseDatasetStatuses implements DatasetStatuses
         $statuses = [];
 
         foreach (Company::cases() as $company) {
-            foreach (Dataset::cases() as $dataset) {
+            // PRODUCCION is SGX only: Derivados has no row for it.
+            foreach (array_filter(Dataset::cases(), fn (Dataset $dataset): bool => in_array($company, $dataset->companies(), true)) as $dataset) {
                 $key = "{$company->value}:{$dataset->value}";
                 $appliedAt = $applied->get($key);
                 $run = $lastRuns->get($key);

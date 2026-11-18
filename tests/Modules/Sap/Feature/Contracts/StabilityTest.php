@@ -27,11 +27,11 @@ function stabilityRun(string $day, Company $company, Dataset $dataset, string $s
     ]);
 }
 
-/** A day where every nightly run of every company and dataset closed and its count matched. */
+/** A day where every nightly run of every dataset and its companies closed and its count matched. */
 function stabilityStableDay(string $day): void
 {
-    foreach (Company::cases() as $company) {
-        foreach (Dataset::cases() as $dataset) {
+    foreach (Dataset::cases() as $dataset) {
+        foreach ($dataset->companies() as $company) {
             $run = stabilityRun($day, $company, $dataset);
             DB::table('daily_counts')->insert([
                 'fecha' => $day, 'empresa' => $company->value, 'conjunto' => $dataset->value,
@@ -80,6 +80,9 @@ it('skips today while it is in progress and counts back from yesterday', functio
         ->and($today->inProgress)->toBeTrue()
         ->and($stability->days[1]->inProgress)->toBeFalse()
         ->and($today->problems)->toContain('No hubo corrida nocturna cerrada de SGX MAESTROS.', 'Falta el conteo de SDC CARTERA.')
+        ->and($today->problems)->toContain('No hubo corrida nocturna cerrada de SGX PRODUCCION.')
+        // PRODUCCION is SGX only: Derivados never runs it.
+        ->and(implode(' ', $today->problems))->not->toContain('SDC PRODUCCION')
         ->and($stability->days[13]->date->toDateString())->toBe('2026-10-14');
 });
 

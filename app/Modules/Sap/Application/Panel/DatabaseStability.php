@@ -139,7 +139,8 @@ final class DatabaseStability implements Stability
         $requestProblems = [];
 
         foreach (Company::cases() as $company) {
-            foreach (Dataset::cases() as $dataset) {
+            // PRODUCCION is SGX only: Derivados never runs it.
+            foreach (array_filter(Dataset::cases(), fn (Dataset $dataset): bool => in_array($company, $dataset->companies(), true)) as $dataset) {
                 $label = "{$company->value} {$dataset->value}";
                 $mine = fn (stdClass $row): bool => $row->empresa === $company->value && $row->conjunto === $dataset->value;
                 $states = $runs->filter($mine)->pluck('estado');

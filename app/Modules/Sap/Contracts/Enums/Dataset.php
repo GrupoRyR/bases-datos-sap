@@ -21,6 +21,9 @@ enum Dataset: string
     /** Open customer order lines, replaced whole per company, in ventas_sap next to VENTAS. */
     case Pedidos = 'PEDIDOS';
 
+    /** Segurex production (BEAS): movement replaced inside a window, masters whole, in ventas_sap. */
+    case Produccion = 'PRODUCCION';
+
     /**
      * The database connection that holds the tables of the dataset
      * (config/database.php).
@@ -30,7 +33,19 @@ enum Dataset: string
         return match ($this) {
             self::Maestros => 'maestros',
             self::Cartera => 'cartera',
-            self::Ventas, self::Pedidos => 'ventas',
+            self::Ventas, self::Pedidos, self::Produccion => 'ventas',
         };
+    }
+
+    /**
+     * The companies that have the dataset. The BEAS production tables are
+     * Segurex only, so PRODUCCION never runs or is asked for Derivados
+     * (contract section 12).
+     *
+     * @return list<Company>
+     */
+    public function companies(): array
+    {
+        return $this === self::Produccion ? [Company::Sgx] : Company::cases();
     }
 }

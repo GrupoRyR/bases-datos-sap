@@ -41,6 +41,7 @@ final class AppRequestController
                 Dataset::Cartera => 'CARTERA se pide completa: parte debe ser null.',
                 Dataset::Ventas => 'VENTAS se pide completo: parte debe ser null.',
                 Dataset::Pedidos => 'PEDIDOS se pide completo: parte debe ser null.',
+                Dataset::Produccion => 'PRODUCCION se pide completo: parte debe ser null.',
             };
         }
 

@@ -27,17 +27,18 @@ function statusRun(Company $company, Dataset $dataset, array $attributes): Run
     ], $attributes));
 }
 
-it('lists every company and dataset in enum order', function () {
+it('lists every company and dataset in enum order, PRODUCCION only for SGX', function () {
     $statuses = app(DatasetStatuses::class)->all();
 
     expect(array_map(fn (DatasetStatusData $status): string => $status->company->value.' '.$status->dataset->value, $statuses))
-        ->toBe(['SGX MAESTROS', 'SGX CARTERA', 'SGX VENTAS', 'SGX PEDIDOS', 'SDC MAESTROS', 'SDC CARTERA', 'SDC VENTAS', 'SDC PEDIDOS'])
+        ->toBe(['SGX MAESTROS', 'SGX CARTERA', 'SGX VENTAS', 'SGX PEDIDOS', 'SGX PRODUCCION', 'SDC MAESTROS', 'SDC CARTERA', 'SDC VENTAS', 'SDC PEDIDOS'])
         ->and($statuses[0]->lastAppliedAt)->toBeNull()
         ->and($statuses[0]->lastRun)->toBeNull()
         ->and($statuses[0]->rows)->toHaveCount(count(Part::forDataset(Dataset::Maestros)))
         ->and($statuses[1]->rows)->toBe(['cartera' => 0])
         ->and($statuses[2]->rows)->toBe(['ventas' => 0])
-        ->and($statuses[3]->rows)->toBe(['pedidos' => 0]);
+        ->and($statuses[3]->rows)->toBe(['pedidos' => 0])
+        ->and(array_keys($statuses[4]->rows))->toBe(array_map(fn (Part $part): string => $part->value, Part::forDataset(Dataset::Produccion)));
 });
 
 it('tells the last applied time and the latest run in any state', function () {
@@ -95,8 +96,9 @@ it('counts the active master rows and every receivable, sales and order line of 
         ->and($statuses[1]->rows)->toBe(['cartera' => 3])
         ->and($statuses[2]->rows)->toBe(['ventas' => 0])
         ->and($statuses[3]->rows)->toBe(['pedidos' => 3])
-        ->and($statuses[4]->rows['clientes'])->toBe(1)
-        ->and($statuses[5]->rows)->toBe(['cartera' => 0])
-        ->and($statuses[6]->rows)->toBe(['ventas' => 2])
-        ->and($statuses[7]->rows)->toBe(['pedidos' => 0]);
+        ->and($statuses[4]->rows['produccion_despiece'])->toBe(0)
+        ->and($statuses[5]->rows['clientes'])->toBe(1)
+        ->and($statuses[6]->rows)->toBe(['cartera' => 0])
+        ->and($statuses[7]->rows)->toBe(['ventas' => 2])
+        ->and($statuses[8]->rows)->toBe(['pedidos' => 0]);
 });
