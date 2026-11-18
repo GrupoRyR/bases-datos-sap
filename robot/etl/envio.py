@@ -17,6 +17,7 @@ from datetime import date, datetime
 from typing import Any, Callable
 
 import config
+import esquema
 from api import ApiCliente, ApiError, ApiRechazo, CorridaAbierta, LotesFaltantes
 from carpeta import Carpeta
 from extraccion import Resultado, mensaje_seguro
@@ -70,8 +71,9 @@ def _iniciar(api: ApiCliente, trabajo: Trabajo, extraida_en: str, ventana_desde:
         "fecha_corte": trabajo.fecha_corte,
         "extraida_en": extraida_en,
     }
-    if trabajo.conjunto == "VENTAS":
-        # Obligatoria en VENTAS y solo la da HANA (contrato §10.1): sin ella no se abre.
+    if trabajo.conjunto in esquema.CONJUNTOS_CON_VENTANA:
+        # Obligatoria en VENTAS y PRODUCCION, y solo la da HANA (contrato §10.1 y §12):
+        # sin ella no se abre.
         if not ventana_desde:
             raise FalloEnvio(
                 "VALIDACION",

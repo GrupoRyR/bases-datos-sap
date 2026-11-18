@@ -1,10 +1,11 @@
 """Partes del contrato, sus columnas y la conversión de valores (docs/contrato-robot.md).
 
-Este archivo replica §5 (MAESTROS), §6 (CARTERA), §10 (VENTAS), §11 (PEDIDOS)
-y §7.1 (qué trae cada solicitud) del contrato. El contrato manda: si cambia, se cambia aquí
-también.
+Este archivo replica §5 (MAESTROS), §6 (CARTERA), §10 (VENTAS), §11 (PEDIDOS),
+§12 (PRODUCCION) y §7.1 (qué trae cada solicitud) del contrato. El contrato
+manda: si cambia, se cambia aquí también.
 
-- En MAESTROS y PEDIDOS los alias del SQL ya son los nombres del contrato (`hana == nombre`).
+- En MAESTROS, PEDIDOS y PRODUCCION los alias del SQL ya son los nombres del contrato
+  (`hana == nombre`).
 - En CARTERA y VENTAS la consulta es la del gestor de cartera, con sus etiquetas
   ("Código SN", "Tipo objeto"...), y `hana` es esa etiqueta.
 - `indices()` falla ruidosamente si alguien edita el SQL y desaparece una
@@ -52,7 +53,7 @@ class Columna:
 @dataclass(frozen=True)
 class Parte:
     nombre: str
-    conjunto: str                   # MAESTROS, CARTERA, VENTAS o PEDIDOS
+    conjunto: str                   # MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION
     consulta: str                   # archivo relativo a robot/queries
     columnas: tuple[Columna, ...]   # el ORDEN define el orden del CSV y del lote
     llave: tuple[str, ...]          # nombres del contrato; vacía = sin llave (cartera)
@@ -60,6 +61,8 @@ class Parte:
     # "socio" sigue a los socios enviados en la corrida, "todo" trae todo.
     modo_solicitud: Modo
     incremental: bool               # la consulta trae actualizado_en_sap
+    # Columna de fecha que filtra la ventana (contrato §10.1 y §12); vacía = sin ventana.
+    columna_ventana: str = ""
 
     @property
     def nombres(self) -> list[str]:
@@ -285,8 +288,95 @@ _PEDIDOS = (
     _m("trm", CANTIDAD),
 )
 
-# Columna que define la ventana de VENTAS (contrato §10.1): la que filtra la consulta.
-COLUMNA_VENTANA = "fecha_contabilizacion"
+# PRODUCCION (contrato §12), solo de Segurex. Orden del contrato; el alias del SQL es el
+# nombre del contrato (consultas propias, copiadas del tablero "Produccion mes a mes").
+_PRODUCCION_TERMINADO = (
+    _m("doc_entry", ENTERO, requerida=True),
+    _m("numero_documento", ENTERO, requerida=True),
+    _m("linea", ENTERO, requerida=True),
+    _m("fecha", FECHA, requerida=True),
+    _m("grupo", requerida=True),
+    _m("familia", requerida=True),
+    _m("codigo_articulo", requerida=True),
+    _m("articulo"),
+    _m("nro_ot", ENTERO),
+    _m("posicion", ENTERO),
+    _m("cantidad", CANTIDAD, requerida=True),
+    _m("valor", MONTO, requerida=True),
+)
+
+_PRODUCCION_CARGA_PLANTA = (
+    _m("fecha", FECHA, requerida=True),
+    _m("area", requerida=True),
+    _m("linea_producto", requerida=True),
+    _m("linea_negocio", requerida=True),
+    _m("etapa", requerida=True),
+    _m("puesto_trabajo"),
+    _m("nro_ot", ENTERO, requerida=True),
+    _m("posicion", ENTERO, requerida=True),
+    _m("operacion", ENTERO, requerida=True),
+    _m("codigo_articulo", requerida=True),
+    _m("nombre_articulo"),
+    _m("unidad"),
+    _m("unidades", CANTIDAD, requerida=True),
+    _m("unidades_no_conformes", CANTIDAD),
+    _m("horas", CANTIDAD),
+    _m("almacen"),
+    _m("estado_ot"),
+)
+
+_PRODUCCION_COSTOS = (
+    _m("fecha", FECHA, requerida=True),
+    _m("concepto", requerida=True),
+    _m("area", requerida=True),
+    _m("linea_producto", requerida=True),
+    _m("linea_negocio", requerida=True),
+    _m("etapa", requerida=True),
+    _m("material_consumido"),
+    _m("grupo_material"),
+    _m("codigo_material"),
+    _m("nro_ot", ENTERO, requerida=True),
+    _m("posicion", ENTERO, requerida=True),
+    _m("codigo_articulo", requerida=True),
+    _m("nombre_articulo"),
+    _m("puesto_trabajo"),
+    _m("costo", MONTO, requerida=True),
+)
+
+_PRODUCCION_DESPIECE = (
+    _m("padre", requerida=True),
+    _m("hijo", requerida=True),
+    _m("cantidad", CANTIDAD, requerida=True),
+    _m("merma", CANTIDAD),
+)
+
+_PRODUCCION_RUTAS = (
+    _m("codigo_articulo", requerida=True),
+    _m("operacion", ENTERO, requerida=True),
+    _m("area"),
+    _m("puesto"),
+    _m("tiempo", CANTIDAD),
+    _m("cantidad_base", CANTIDAD),
+    _m("factor_merma", CANTIDAD),
+)
+
+_PRODUCCION_COSTEO_TEORICO = (
+    _m("codigo_articulo", requerida=True),
+    _m("articulo"),
+    _m("familia", requerida=True),
+    _m("posiciones", ENTERO, requerida=True),
+    _m("cantidad", CANTIDAD, requerida=True),
+    _m("material_soll", MONTO),
+    _m("fabricacion_soll", MONTO),
+    _m("total_soll", MONTO),
+    _m("total_ist", MONTO),
+)
+
+
+def _produccion(
+    nombre: str, columnas: tuple[Columna, ...], llave: tuple[str, ...] = (), ventana: str = ""
+) -> Parte:
+    return Parte(nombre, "PRODUCCION", f"produccion/{nombre}.sql", columnas, llave, "todo", False, ventana)
 
 
 def _maestro(
@@ -324,16 +414,37 @@ PARTES: dict[str, Parte] = {
         _maestro("municipios", _catalogo(TEXTO)),
         Parte("cartera", "CARTERA", "cartera/cartera.sql", _CARTERA, (), "todo", False),
         Parte("ventas", "VENTAS", "ventas/ventas.sql", _VENTAS,
-              ("tipo_objeto", "doc_entry", "linea"), "todo", False),
+              ("tipo_objeto", "doc_entry", "linea"), "todo", False, "fecha_contabilizacion"),
         Parte("pedidos", "PEDIDOS", "pedidos/pedidos.sql", _PEDIDOS,
               ("doc_entry", "linea"), "todo", False),
+        # Movimiento por ventana; maestros completos. Despiece y rutas van sin llave
+        # hasta validarla con SAP (contrato §12).
+        _produccion("produccion_terminado", _PRODUCCION_TERMINADO, ("doc_entry", "linea"), "fecha"),
+        _produccion("produccion_carga_planta", _PRODUCCION_CARGA_PLANTA, ventana="fecha"),
+        _produccion("produccion_costos", _PRODUCCION_COSTOS, ventana="fecha"),
+        _produccion("produccion_despiece", _PRODUCCION_DESPIECE),
+        _produccion("produccion_rutas", _PRODUCCION_RUTAS),
+        _produccion("produccion_costeo_teorico", _PRODUCCION_COSTEO_TEORICO, ("codigo_articulo",)),
     )
 }
 
 PARTES_POR_CONJUNTO: dict[str, tuple[str, ...]] = {
     conjunto: tuple(p.nombre for p in PARTES.values() if p.conjunto == conjunto)
-    for conjunto in ("MAESTROS", "CARTERA", "VENTAS", "PEDIDOS")
+    for conjunto in ("MAESTROS", "CARTERA", "VENTAS", "PEDIDOS", "PRODUCCION")
 }
+
+# Conjuntos con ventana_desde, calculada en HANA antes y después de extraer (§10.1 y §12).
+CONJUNTOS_CON_VENTANA = ("VENTAS", "PRODUCCION")
+
+# Conjuntos que no son de todas las empresas: PRODUCCION sale de las tablas BEAS, que solo
+# tiene Segurex (contrato §12). Los demás son de todas.
+EMPRESAS_POR_CONJUNTO: dict[str, tuple[str, ...]] = {"PRODUCCION": ("SGX",)}
+
+
+def es_de_la_empresa(conjunto: str, empresa: str) -> bool:
+    """Si la empresa tiene ese conjunto (la nocturna, las solicitudes y el diagnóstico)."""
+    return empresa in EMPRESAS_POR_CONJUNTO.get(conjunto, (empresa,))
+
 
 SOCIOS = ("clientes", "proveedores")
 HIJAS_DE_SOCIO = ("direcciones", "contactos")
@@ -343,6 +454,7 @@ PARTES_POR_SOLICITUD: dict[tuple[str, str | None], tuple[str, ...]] = {
     ("CARTERA", None): ("cartera",),
     ("VENTAS", None): ("ventas",),
     ("PEDIDOS", None): ("pedidos",),
+    ("PRODUCCION", None): PARTES_POR_CONJUNTO["PRODUCCION"],
     ("MAESTROS", None): PARTES_POR_CONJUNTO["MAESTROS"],
     ("MAESTROS", "clientes"): ("clientes", *HIJAS_DE_SOCIO),
     ("MAESTROS", "proveedores"): ("proveedores", *HIJAS_DE_SOCIO),

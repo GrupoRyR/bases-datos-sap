@@ -35,9 +35,17 @@ def test_resumen_con_filas_conteos_y_activos(escenario):
     resumen = _resumen(e)
     assert list(resumen[0]) == diagnostico.COLUMNAS_RESUMEN
     partes = [*esquema.PARTES, "listas_precios"]
+    # PRODUCCION es solo de SGX (contrato §12): Derivados no la consulta.
     assert [(f["empresa"], f["parte"]) for f in resumen] == [
         (emp, p) for emp in ("SGX", "SDC") for p in partes
+        if emp == "SGX" or not p.startswith("produccion_")
     ]
+    for parte in esquema.PARTES_POR_CONJUNTO["PRODUCCION"]:
+        f = _fila(resumen, "SGX", parte)
+        assert (f["conjunto"], f["filas"], f["conteo_sap"], f["error"]) == ("PRODUCCION", "2", "2", "")
+        # Solo las partes de movimiento llevan ventana; la piden a HANA antes y después.
+        assert f["ventana_desde"] == ("2026-09-24" if esquema.PARTES[parte].columna_ventana else "")
+    assert not e.hana.de("SDC", parte="produccion_terminado")
     clientes = _fila(resumen, "SGX", "clientes")
     assert clientes == {"empresa": "SGX", "conjunto": "MAESTROS", "parte": "clientes", "filas": "3",
                         "conteo_sap": "3", "activos": "2", "inactivos": "1", "ventana_desde": "",

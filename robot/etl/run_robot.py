@@ -17,13 +17,15 @@ siguen las mismas dos fases y nunca llaman a la API.
 
 Uso:
     python run_robot.py --completa                 # nocturna: MAESTROS, CARTERA, VENTAS y PEDIDOS de SGX y SDC,
+                                                   # PRODUCCION solo de SGX,
                                                    # más los registros del archivo (AUDITORIA, ORTT)
     python run_robot.py --completa --empresa SGX   # solo una empresa (se puede repetir)
     python run_robot.py --completa --sin-vpn       # asume la VPN ya conectada a mano
     python run_robot.py --archivo fotos            # domingo 03:00: fotos del archivo y catálogo
     python run_robot.py --archivo registros        # solo los registros del archivo
     python run_robot.py --catalogo                 # solo el catálogo
-    python run_robot.py --diagnostico              # cifras de MAESTROS, CARTERA, VENTAS y PEDIDOS, sin enviar
+    python run_robot.py --diagnostico              # cifras de MAESTROS, CARTERA, VENTAS, PEDIDOS y
+                                                   # PRODUCCION (solo SGX), sin enviar
     python run_robot.py --completa --forzar        # no espera la franja bloqueada
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
@@ -268,7 +270,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Robot de Bases de datos SAP")
     modo = parser.add_mutually_exclusive_group(required=True)
     modo.add_argument("--completa", action="store_true",
-                      help="Corrida nocturna: MAESTROS, CARTERA, VENTAS y PEDIDOS completos, con la foto de cartera "
+                      help="Corrida nocturna: MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) completos, "
+                           "con la foto de cartera "
                            "y los registros del archivo.")
     modo.add_argument("--archivo", choices=("fotos", "registros"),
                       help="Tablas que solo van a la carpeta: fotos (domingo, con el catálogo) "
@@ -276,7 +279,8 @@ def _parser() -> argparse.ArgumentParser:
     modo.add_argument("--catalogo", action="store_true",
                       help="Catálogo de tablas y columnas de cada empresa (carpeta _CATALOGO).")
     modo.add_argument("--diagnostico", action="store_true",
-                      help="Extrae MAESTROS, CARTERA, VENTAS y PEDIDOS con sus conteos a _DIAGNOSTICO; no envía nada.")
+                      help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
+                           "a _DIAGNOSTICO; no envía nada.")
     parser.add_argument("--empresa", action="append", choices=EMPRESAS,
                         help="Empresa a procesar (se puede repetir). Por defecto, todas.")
     parser.add_argument("--sin-vpn", action="store_true",
