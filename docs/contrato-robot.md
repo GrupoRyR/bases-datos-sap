@@ -7,8 +7,8 @@ Versión 1. Lo implementan dos sesiones en paralelo: «Datos y API» (el servido
 | Término | Qué es | Valores |
 |---|---|---|
 | Empresa | Empresa de SAP | `SGX` (esquema `SEGUREX`), `SDC` (esquema `HBT_SDERIVADOS`) |
-| Conjunto | Grupo de datos con su propia base MySQL | `MAESTROS` (`maestros_sap`), `CARTERA` (`cartera_sap`), `VENTAS` (`ventas_sap`), `PEDIDOS` (también en `ventas_sap`, §11) |
-| Parte | Tabla lógica dentro de un conjunto (§5, §6, §10 y §11) | `clientes`, `proveedores`, `direcciones`, `contactos`, `articulos`, `grupos_articulos`, `marcas`, `precios`, `vendedores`, `grupos_clientes`, `condiciones_pago`, `municipios`, `cartera`, `ventas`, `pedidos` |
+| Conjunto | Grupo de datos con su propia base MySQL | `MAESTROS` (`maestros_sap`), `CARTERA` (`cartera_sap`), `VENTAS` (`ventas_sap`), `PEDIDOS` (también en `ventas_sap`, §11), `PRODUCCION` (también en `ventas_sap`, solo `SGX`, §12) |
+| Parte | Tabla lógica dentro de un conjunto (§5, §6, §10, §11 y §12) | `clientes`, `proveedores`, `direcciones`, `contactos`, `articulos`, `grupos_articulos`, `marcas`, `precios`, `vendedores`, `grupos_clientes`, `condiciones_pago`, `municipios`, `cartera`, `ventas`, `pedidos`, `produccion_terminado`, `produccion_carga_planta`, `produccion_costos`, `produccion_despiece`, `produccion_rutas`, `produccion_costeo_teorico` |
 | Corrida | Un envío completo del robot: iniciar, lotes y cerrar (§4) | Tipo `completa` o `solicitud` |
 | Lote | Hasta 1.000 filas de una sola parte | Numerados desde 1 en cada corrida |
 | Solicitud | Pedido de actualización de una app o del panel (§7) | Estados en §7.2 |
@@ -87,9 +87,10 @@ Una corrida lleva un conjunto de una empresa. Los datos de una corrida no se ven
   - `todo`: llegan todas las filas que hay en SAP. Al cerrar, las filas de esa parte y empresa que no llegaron quedan inactivas (`activo = false`). Nunca se borran.
   - `cambios`: llegan solo las filas que cambiaron (§5.1). Al cerrar, no se inactiva nada por ausencia.
 - En una corrida `completa` todas las partes del conjunto van, y van en modo `todo`. Única excepción: `SDC` (Derivados) todavía no tiene una lista de precios pública, así que su corrida `completa` de `MAESTROS` puede omitir `precios`; al cerrar no se inactiva nada por esa ausencia. `SGX` siempre la envía.
+- `empresa`: `SGX` o `SDC`. `PRODUCCION` es solo de `SGX`: una corrida de `SDC` da 422 (§12).
 - `solicitudes`: ids de las solicitudes que atiende (§7). Vacío en una corrida `completa` sin solicitudes. Cada id debe estar `tomada`, ser de la misma empresa y conjunto, y pedir partes incluidas en `partes`; si no, 422.
-- `fecha_corte`: solo en `CARTERA`; en los demás conjuntos, 422 (también en `PEDIDOS`, §11). En la `completa` nocturna, el día anterior; en una `solicitud`, hoy.
-- `ventana_desde`: solo en `VENTAS`, donde es obligatoria; en los demás conjuntos, 422 (también en `PEDIDOS`, §11). El primer día de la ventana que trajo la consulta, calculado en HANA (§10.1).
+- `fecha_corte`: solo en `CARTERA`; en los demás conjuntos, 422 (también en `PEDIDOS` y `PRODUCCION`, §11 y §12). En la `completa` nocturna, el día anterior; en una `solicitud`, hoy.
+- `ventana_desde`: solo en `VENTAS` y `PRODUCCION`, donde es obligatoria; en los demás conjuntos, 422 (también en `PEDIDOS`, §11). El primer día de la ventana que trajo la consulta, calculado en HANA (§10.1). En `VENTAS` va entre hoy menos 40 días y mañana (§10.1); en `PRODUCCION`, entre `2026-01-01` y mañana (§12.3).
 - `extraida_en`: cuándo terminó la consulta a SAP.
 
 Respuesta 201: `{"run_id": 42, "estado": "abierta", "abierta_hasta": "2026-10-23T11:11:30-05:00"}`.
@@ -110,9 +111,9 @@ Una corrida abierta que pasa **30 minutos sin recibir lotes** queda `vencida`, s
 ```
 
 - `batch`: entero desde 1, consecutivo en la corrida (no por parte). Hasta **1.000 filas** por lote y una sola parte.
-- `columns`: exactamente las columnas de la parte (§5, §6, §10 o §11), en cualquier orden y sin repetir. Cada fila de `rows` es una lista con un valor por columna, en ese orden. **Única excepción:** un lote de `VENTAS` puede omitir `ganancia_bruta`; la API acepta ambos encabezados, con y sin esa columna, y guarda `null` cuando falta. Cualquier otra columna que falte o sobre sigue dando 422. Existe porque el robot del PC de TI se actualiza después del servidor y la corrida de las 02:00 no debe fallar entre los dos.
-- Valores: enteros como número JSON; montos como texto decimal con punto, hasta 2 decimales y sin separador de miles (`"1234567.89"`), con `-` si son negativos; cantidades y tasas (solo en `VENTAS` y `PEDIDOS`, §10 y §11) igual que los montos pero con hasta 6 decimales (`"2.500000"`); booleanos como `true`/`false`; fechas `"AAAA-MM-DD"`; horas ISO 8601 con zona; texto hasta 4.000 caracteres, recortado; `null` si falta. Las columnas obligatorias no pueden llegar nulas ni vacías.
-- Una llave (§5, §6, §10 y §11) no puede repetirse en la corrida, ni dentro del lote ni entre lotes.
+- `columns`: exactamente las columnas de la parte (§5, §6, §10, §11 o §12), en cualquier orden y sin repetir. Cada fila de `rows` es una lista con un valor por columna, en ese orden. **Única excepción:** un lote de `VENTAS` puede omitir `ganancia_bruta`; la API acepta ambos encabezados, con y sin esa columna, y guarda `null` cuando falta. Cualquier otra columna que falte o sobre sigue dando 422. Existe porque el robot del PC de TI se actualiza después del servidor y la corrida de las 02:00 no debe fallar entre los dos.
+- Valores: enteros como número JSON; montos como texto decimal con punto, hasta 2 decimales y sin separador de miles (`"1234567.89"`), con `-` si son negativos; cantidades y tasas (solo en `VENTAS`, `PEDIDOS` y `PRODUCCION`, §10, §11 y §12) igual que los montos pero con hasta 6 decimales (`"2.500000"`); booleanos como `true`/`false`; fechas `"AAAA-MM-DD"`; horas ISO 8601 con zona; texto hasta 4.000 caracteres, recortado; `null` si falta. Las columnas obligatorias no pueden llegar nulas ni vacías.
+- Una llave (§5, §6, §10, §11 y §12) no puede repetirse en la corrida, ni dentro del lote ni entre lotes.
 
 Respuestas:
 
@@ -121,7 +122,7 @@ Respuestas:
 | 201 | Lote nuevo aceptado | `{"batch": 3, "rows": 1000}` |
 | 200 | Mismo `batch` reenviado con el mismo cuerpo (mismo SHA-256) | `{"batch": 3, "rows": 1000, "duplicate": true}` |
 | 409 | Mismo `batch` con otro cuerpo, o corrida que ya no está abierta | `{"message": ..., "estado": "cerrada"}` |
-| 422 | Parte que no está en `partes`, columnas o valores inválidos, llave repetida | `{"message": ..., "errors": {"rows.12.codigo": [...]}}`, máximo 50 llaves |
+| 422 | Parte que no está en `partes`, columnas o valores inválidos, llave repetida, fila anterior a `ventana_desde` (§10.1 y §12.3) | `{"message": ..., "errors": {"rows.12.codigo": [...]}}`, máximo 50 llaves |
 
 Un 422 no cierra la corrida: el robot corrige o la marca fallida (§4.4). Ante un error de red o un 5xx, el robot reenvía el mismo lote tal cual (mismo cuerpo, firma nueva) hasta 3 veces con espera creciente.
 
@@ -136,9 +137,9 @@ Un 422 no cierra la corrida: el robot corrige o la marca fallida (§4.4). Ante u
 ```
 
 - `batches` y `filas`: lo que el robot envió. Si la API no tiene todos los lotes del 1 al `batches` o las filas no cuadran, responde 409 con `{"faltan": [4, 5]}` y la corrida sigue abierta para que el robot los reenvíe.
-- `conteo_sap`: **obligatorio en una corrida `completa`** y prohibido en las demás. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y arma con él el conteo diario del plan §6. Por cada parte calcula cuatro números: `sap` (el `conteo_sap` que envió el robot), `recibidas` (todas las filas que llegaron en los lotes), `activas_recibidas` (las recibidas con `activo = true`; en una parte sin columna `activo`, como `direcciones`, `cartera`, `ventas` o `pedidos`, todas las recibidas cuentan como activas) y `activas_mysql` (las filas de la empresa en MySQL después de aplicar: las de `activo = true` en MAESTROS, todas las líneas en CARTERA, en VENTAS las de la ventana (§10.2) y todas las líneas en PEDIDOS (§11.3)). SAP envía también las filas inactivas, que quedan en MySQL con `activo = false`: por eso `activas_mysql` se compara con `activas_recibidas` y no con `recibidas`.
-- `cuadra` es verdadero cuando `sap == recibidas` **y** `activas_mysql == activas_recibidas`. En CARTERA, VENTAS y PEDIDOS `activas_recibidas == recibidas`, así que la regla no cambia.
-- Al cerrar, la API aplica en una transacción: inserta o actualiza por llave, pone `sincronizado_en` y, en las partes `todo`, inactiva lo que no llegó. En `CARTERA` reemplaza la cartera actual de la empresa y, en la corrida `completa`, guarda además la foto del día con `fecha_corte` (§6). En `VENTAS` reemplaza solo la ventana de la empresa (§10.2). En `PEDIDOS` reemplaza todos los pedidos de la empresa (§11.3).
+- `conteo_sap`: **obligatorio en una corrida `completa`** y prohibido en las demás. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y arma con él el conteo diario del plan §6. Por cada parte calcula cuatro números: `sap` (el `conteo_sap` que envió el robot), `recibidas` (todas las filas que llegaron en los lotes), `activas_recibidas` (las recibidas con `activo = true`; en una parte sin columna `activo`, como `direcciones`, `cartera`, `ventas`, `pedidos` o las de `PRODUCCION`, todas las recibidas cuentan como activas) y `activas_mysql` (las filas de la empresa en MySQL después de aplicar: las de `activo = true` en MAESTROS, todas las líneas en CARTERA, en VENTAS las de la ventana (§10.2) todas las líneas en PEDIDOS (§11.3) y, en PRODUCCION, las de la ventana en las partes de movimiento y todas en los maestros (§12.3)). SAP envía también las filas inactivas, que quedan en MySQL con `activo = false`: por eso `activas_mysql` se compara con `activas_recibidas` y no con `recibidas`.
+- `cuadra` es verdadero cuando `sap == recibidas` **y** `activas_mysql == activas_recibidas`. En CARTERA, VENTAS, PEDIDOS y PRODUCCION `activas_recibidas == recibidas`, así que la regla no cambia.
+- Al cerrar, la API aplica en una transacción: inserta o actualiza por llave, pone `sincronizado_en` y, en las partes `todo`, inactiva lo que no llegó. En `CARTERA` reemplaza la cartera actual de la empresa y, en la corrida `completa`, guarda además la foto del día con `fecha_corte` (§6). En `VENTAS` reemplaza solo la ventana de la empresa (§10.2). En `PEDIDOS` reemplaza todos los pedidos de la empresa (§11.3). En `PRODUCCION` reemplaza la ventana en las partes de movimiento y todas las filas en los maestros (§12.3).
 - Una parte `todo` con 0 filas no se aplica y la corrida falla (422): una lectura vacía de SAP nunca vacía una tabla.
 
 Respuesta 200:
@@ -230,6 +231,7 @@ Tipos: `slp_code`, `total_plazos`, `no_plazo` y `dias`, enteros; las `fecha_*`, 
 | `CARTERA` | `null` | `cartera` |
 | `VENTAS` | `null` | `ventas` |
 | `PEDIDOS` | `null` | `pedidos` |
+| `PRODUCCION` | `null` | `produccion_terminado`, `produccion_carga_planta`, `produccion_costos`, `produccion_despiece`, `produccion_rutas`, `produccion_costeo_teorico` |
 | `MAESTROS` | `null` | Todas, cada una en su modo de §5.1 |
 | `MAESTROS` | `clientes` | `clientes`, `direcciones`, `contactos` |
 | `MAESTROS` | `proveedores` | `proveedores`, `direcciones`, `contactos` |
@@ -238,7 +240,7 @@ Tipos: `slp_code`, `total_plazos`, `no_plazo` y `dias`, enteros; las `fecha_*`, 
 | `MAESTROS` | `vendedores` | `vendedores` |
 | `MAESTROS` | `catalogos` | `grupos_clientes`, `condiciones_pago`, `municipios` |
 
-Cada solicitud es de una empresa (`SGX` o `SDC`). Una solicitud de `MAESTROS` completo de `SDC` se atiende sin `precios` en la corrida (§4.1); una solicitud de solo `precios` sí los necesita en `partes`, y el robot la falla si la empresa no tiene lista.
+Cada solicitud es de una empresa (`SGX` o `SDC`). `PRODUCCION` solo se pide para `SGX`: una solicitud de `SDC` da 422 (§12). Una solicitud de `MAESTROS` completo de `SDC` se atiende sin `precios` en la corrida (§4.1); una solicitud de solo `precios` sí los necesita en `partes`, y el robot la falla si la empresa no tiene lista.
 
 ### 7.2 Estados
 
@@ -432,3 +434,173 @@ Formatos del §4.2: montos con hasta 2 decimales; cantidades y tasas con hasta 6
 - El `conteo_sap` nocturno solo prueba que no se pierden filas, no que la lógica esté bien.
 - Los archivos `ia_Pendientes por facturar` que hoy lee el panel solo sirven para explicar las diferencias en la transición: bodegas distintas de PT, descuento, monedas y líneas repetidas.
 - **Por validar con datos reales:** que `U_SGX_IdPedidoApp` exista en `ORDR` de SGX; que `U_GSP_FAMILIA` exista en `OITM` de SGX; que `LineTotal` y `GrssProfit` de `RDR1` vengan en pesos en un pedido en otra moneda; que `unitMsr` venga lleno en las dos empresas.
+
+## 12. PRODUCCION
+
+Los datos del tablero «Producción mes a mes» de Segurex: órdenes de producción de BEAS, costos y maestros de fabricación. Es **solo de `SGX`**: las tablas BEAS son de Segurex, así que la API responde 422 a una corrida o solicitud de `SDC`. Se guarda en `ventas_sap` (conexión `ventas`, sin base nueva ni variables de entorno nuevas). Cada parte tiene su tabla y su vista `v_<parte>`, con `empresa`, sus columnas y `sincronizado_en`. Primera app que las lee: Panel Consolidado.
+
+Origen: las seis consultas del tablero (`automatizacion-hana\tablero-produccion-sgx\consultas\`), copiadas con los cambios de esta sección y nada más.
+
+### 12.1 Partes
+
+Seis partes, todas siempre en modo `todo`:
+
+| Parte | Consulta de origen | Tipo | Cómo se carga (§12.3) |
+|---|---|---|---|
+| `produccion_terminado` | `PT_FAMILIA_SGX` | Movimiento | Ventana |
+| `produccion_carga_planta` | `CARGA_PLANTA_SGX` | Movimiento | Ventana |
+| `produccion_costos` | `COSTOS_PRODUCCION_SGX_MATERIAL` | Movimiento | Ventana |
+| `produccion_despiece` | `DESPIECE_MAESTRO_SGX` | Maestro | Reemplazo total |
+| `produccion_rutas` | `RUTAS_MAESTRAS_SGX` | Maestro | Reemplazo total |
+| `produccion_costeo_teorico` | `COSTEO_TEORICO_SGX` | Maestro | Reemplazo total |
+
+### 12.2 Columnas
+
+Obligatorias en **negrita**. En este orden. Formatos del §4.2: montos con hasta 2 decimales; cantidades y tasas con hasta 6. Los textos vacíos (`''`) de las consultas originales llegan `null`.
+
+**`produccion_terminado`.** Producto terminado que entra a bodega desde una OT (`OIGN`/`IGN1`). Filtro: `IGN1.U_beas_belnrid > 0` y grupo del artículo que empieza por `PRODUCTO TERMINADO`. **Cambio frente al original:** una fila por línea de la entrada, sin `GROUP BY`; la suma por día y artículo da lo mismo que la consulta original.
+
+| Columna | Tipo | Origen |
+|---|---|---|
+| **`doc_entry`** | entero | `OIGN.DocEntry` |
+| **`numero_documento`** | entero | `OIGN.DocNum` |
+| **`linea`** | entero | `IGN1.LineNum` |
+| **`fecha`** | fecha | `OIGN.DocDate` |
+| **`grupo`** | texto | `OITB.ItmsGrpNam`, `Sin grupo` si viene vacío |
+| **`familia`** | texto | `OITM.U_GSP_FAMILIA`, `Sin familia` si viene vacío |
+| **`codigo_articulo`** | texto | `IGN1.ItemCode` |
+| `articulo` | texto | `IGN1.Dscription` |
+| `nro_ot` | entero | `IGN1.U_beas_belnrid` |
+| `posicion` | entero | `IGN1.U_beas_belposid` |
+| **`cantidad`** | cantidad | `IGN1.Quantity` |
+| **`valor`** | monto | `ROUND(IGN1.LineTotal, 2)` |
+
+Llave: `doc_entry` + `linea`, única por empresa. No puede repetirse en la corrida (§4.2).
+
+**`produccion_carga_planta`.** Una fila por reporte de producción de BEAS (`BEAS_ARBZEIT`) con su puesto (`BEAS_APLATZ`) y su posición de OT (`BEAS_FTPOS`). Filtro: `BEAS_ARBZEIT.CANCEL = 0`.
+
+| Columna | Tipo | Origen |
+|---|---|---|
+| **`fecha`** | fecha | `CAST(BEAS_ARBZEIT.DocDate AS DATE)` |
+| **`area`** | texto | `BEAS_APLATZ.GRUPPE` |
+| **`linea_producto`** | texto | La regla de dos pasos de la consulta original («Linea»), copiada tal cual |
+| **`linea_negocio`** | texto | `OITB.ItmsGrpNam`, `Sin grupo` si viene vacío |
+| **`etapa`** | texto | `BEAS_FTPOS.GRUPPE`, `Sin etapa` si viene vacío |
+| `puesto_trabajo` | texto | `BEAS_APLATZ.BEZ` |
+| **`nro_ot`** | entero | `BEAS_ARBZEIT.BELNR_ID` |
+| **`posicion`** | entero | `BEAS_ARBZEIT.BELPOS_ID` |
+| **`operacion`** | entero | `BEAS_ARBZEIT.POS_ID` |
+| **`codigo_articulo`** | texto | `BEAS_FTPOS.ItemCode` |
+| `nombre_articulo` | texto | `BEAS_FTPOS.ItemName` |
+| `unidad` | texto | `BEAS_FTPOS.ME_VERBRAUCH` |
+| **`unidades`** | cantidad | `BEAS_ARBZEIT.MENGE_GUT` |
+| `unidades_no_conformes` | cantidad | `BEAS_ARBZEIT.MENGE_SCHLECHT` |
+| `horas` | cantidad | `BEAS_ARBZEIT.ZEIT / 60` (`ZEIT` viene en minutos) |
+| `almacen` | texto | `BEAS_FTPOS.WhsCode` |
+| `estado_ot` | texto | `BEAS_FTPOS.ABGKZ` (`J`/`N`) |
+
+- Sin llave: dos reportes iguales del mismo día son legítimos. No se valida llave repetida.
+- No lleva la columna «Reporto» de la consulta original (`DisplayName`, el nombre de quien reportó): el tablero no la usa y es un dato de una persona.
+
+**`produccion_costos`.** Una fila por hecho de costo, con los conceptos de la consulta original: tres de transformación desde `BEAS_ARBZEIT` (con `CANCEL = 0`) y el material desde `OIGE`/`IGE1` ligado a una OT. Se descartan las filas de costo cero.
+
+| Columna | Tipo | Origen |
+|---|---|---|
+| **`fecha`** | fecha | `BEAS_ARBZEIT.DocDate` o `OIGE.DocDate` |
+| **`concepto`** | texto | `Mano de obra directa`, `Costo variable`, `Costo fijo`, `Material comprado` o `Material intermedio`. Textos exactos: cualquier otro da 422 |
+| **`area`** | texto | `BEAS_APLATZ.GRUPPE`; en el material, `Material comprado (sin area)` o `Material intermedio (sin area)` |
+| **`linea_producto`** | texto | La misma regla de `produccion_carga_planta` |
+| **`linea_negocio`** | texto | Como en `produccion_carga_planta` |
+| **`etapa`** | texto | Como en `produccion_carga_planta` |
+| `material_consumido` | texto | `IGE1.Dscription`; en transformación, `Transformacion (no es material)` |
+| `grupo_material` | texto | `OITB.ItmsGrpNam` del material consumido; `null` en transformación |
+| `codigo_material` | texto | `IGE1.ItemCode`; `null` en transformación |
+| **`nro_ot`** | entero | `BEAS_ARBZEIT.BELNR_ID` o `IGE1.U_beas_belnrid` |
+| **`posicion`** | entero | `BEAS_ARBZEIT.BELPOS_ID` o `IGE1.U_beas_belposid` |
+| **`codigo_articulo`** | texto | El artículo que se fabrica (`BEAS_FTPOS.ItemCode`) |
+| `nombre_articulo` | texto | `BEAS_FTPOS.ItemName` |
+| `puesto_trabajo` | texto | `BEAS_APLATZ.BEZ`; `null` en material |
+| **`costo`** | monto | `ROUND(…, 2)` del costo de la consulta original |
+
+- Sin llave (la consulta saca tres filas por reporte). No se valida llave repetida.
+- **Recirculación interna.** Las filas `Material intermedio` **sí se envían**: son el material que la propia planta fabricó y vuelve a entrar como insumo. El panel las excluye al sumar el costo; con ellas puede mostrar el material que fluyó por producción y cuadrar contra SAP.
+
+**`produccion_despiece`.** Todas las líneas de `BEAS_STL`.
+
+| Columna | Tipo | Origen |
+|---|---|---|
+| **`padre`** | texto | `BEAS_STL.ItemCode` |
+| **`hijo`** | texto | `BEAS_STL.ART1_ID` |
+| **`cantidad`** | cantidad | `BEAS_STL.MENGE_VERBRAUCH` |
+| `merma` | cantidad | `BEAS_STL.AUSSCHUSS` |
+
+Sin llave hasta confirmar con SAP que `padre` + `hijo` no se repite (§12.5).
+
+**`produccion_rutas`.** Todas las operaciones de `BEAS_APL`, con su puesto en `BEAS_APLATZ`.
+
+| Columna | Tipo | Origen |
+|---|---|---|
+| **`codigo_articulo`** | texto | `BEAS_APL.ItemCode` |
+| **`operacion`** | entero | `BEAS_APL.POS_ID` |
+| `area` | texto | `BEAS_APLATZ.GRUPPE` |
+| `puesto` | texto | `BEAS_APLATZ.BEZ` |
+| `tiempo` | cantidad | `BEAS_APL.TEAPLATZ`, el tiempo de la operación para `cantidad_base` |
+| `cantidad_base` | cantidad | `BEAS_APL.MENGE_JE`. El tiempo unitario es `tiempo / cantidad_base` |
+| `factor_merma` | cantidad | `BEAS_APL.AUSSCHUSSFAKTOR` |
+
+Sin llave hasta confirmar con SAP que `codigo_articulo` + `operacion` no se repite (§12.5).
+
+**`produccion_costeo_teorico`.** Costo estándar (SOLL) por artículo de producto terminado, sumado sobre todas las posiciones de OT (`BEAS_FTPOS`) con `MENGE > 0` y grupo `PRODUCTO TERMINADO SEGUREX` o `PRODUCTO TERMINADO INAFER`. Sin filtro de fecha: es propiedad del artículo.
+
+| Columna | Tipo | Origen |
+|---|---|---|
+| **`codigo_articulo`** | texto | `BEAS_FTPOS.ItemCode` |
+| `articulo` | texto | `MAX(ItemName)` |
+| **`familia`** | texto | `U_GSP_FAMILIA`, `Sin familia` si viene vacío |
+| **`posiciones`** | entero | `COUNT(*)` |
+| **`cantidad`** | cantidad | `SUM(MENGE)` |
+| `material_soll` | monto | `SUM(MATERIAL_GK_SOLL)` |
+| `fabricacion_soll` | monto | `SUM(FERTIGUNG_GK_SOLL)` |
+| `total_soll` | monto | `SUM(SELBSTKOSTEN_GK_SOLL)` |
+| `total_ist` | monto | `SUM(SELBSTKOSTEN_GK_IST)` |
+
+Llave: `codigo_articulo`, única por empresa. No puede repetirse en la corrida (§4.2). Los montos van con `ROUND(…, 2)`.
+
+**Nombres.**
+
+- En VENTAS y PEDIDOS `linea` es el número de línea del documento. Aquí también (`produccion_terminado`); por eso la «Linea» del tablero, la línea de producto, se llama `linea_producto`.
+- `familia` es `U_GSP_FAMILIA`, como en PEDIDOS. La guía de apps lo aclara.
+- La lista de líneas de producto de `linea_producto` está escrita en la consulta. Una línea nueva en la planta cae en `Componente comun` hasta que se cambie la consulta.
+
+### 12.3 Corridas y cierre
+
+- **Ventana de movimiento.** Las tres partes de movimiento traen las filas con `fecha` desde el mismo día que VENTAS: `ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE))` hasta hoy. Reemplaza el `BETWEEN` fijo de las consultas originales. El robot calcula ese día en HANA, en la misma conexión, antes y después de extraer, como en §10.1, y lo envía como `ventana_desde`.
+- **Carga inicial.** Una vez, a mano, el robot corre `PRODUCCION` con `ventana_desde` = `2026-08-01`, para que el panel tenga desde el primer día los tres meses que usa hoy. Por eso en `PRODUCCION` la API acepta `ventana_desde` entre `2026-01-01` y mañana (no el límite de 40 días de VENTAS): aquí no hay histórico congelado que proteger, porque todo sale otra vez de SAP.
+- `ventana_desde` es obligatoria; si falta, no es una fecha o queda fuera de ese rango, 422. `fecha_corte` no aplica: si llega, 422. En un lote de una parte de movimiento, una fila con `fecha` anterior a `ventana_desde` da 422.
+- **Cierre**, en una transacción:
+  - Partes de movimiento: borra las filas de esa parte y empresa con `fecha` desde `ventana_desde` y escribe las recibidas. Lo anterior a `ventana_desde` no se toca.
+  - Maestros: reemplaza todas las filas de la parte y empresa.
+  - Todas llevan `sincronizado_en`. Sin columna `activo` ni foto diaria.
+- **Nunca vacía.** Una parte con 0 filas hace fallar la corrida (§4.3) y no cambia nada. Riesgo aceptado: si la planta para del todo durante toda la ventana (por ejemplo, vacaciones colectivas de fin de año), la corrida falla y avisa hasta que haya movimiento.
+- **Corrida nocturna.** Va en la `completa` de las 02:00, solo para `SGX`, con las seis partes.
+- **Conteo nocturno.** `conteo_sap.<parte>` es el `COUNT(*)` de la misma consulta, en la misma conexión, justo después de extraer. `activas_recibidas` = `recibidas`. `activas_mysql` son las filas de la parte y empresa en MySQL después de aplicar: en movimiento, las que tienen `fecha` desde `ventana_desde`; en maestros, todas.
+- **Solicitudes (§7.1).** `PRODUCCION` | `null` | las seis partes. Solo de `SGX`.
+- **Volumen esperado.** Por ventana, hasta unas 14 mil filas de costos, 2.500 de carga de planta y pocas centenas de producto terminado; 5 mil filas de maestros. La carga inicial, unas 50 mil filas en total.
+
+### 12.4 Carpeta
+
+`PRODUCCION\SGX\<parte>\aaaa-mm-dd_hhmm.csv` dentro de `BASES_SAP_CSV_DIR`, uno por parte y corrida. Se borran a los 90 días.
+
+### 12.5 Validación con SAP (antes de dar el conjunto por bueno)
+
+- Después de la carga inicial, el usuario corre las tres consultas originales de movimiento con `BETWEEN '2026-08-01' AND '2026-10-31'`, como hoy, y se comparan por mes:
+  - `produccion_terminado`: suma de `cantidad` y `valor` (las filas no se comparan, porque aquí van sin agrupar).
+  - `produccion_carga_planta`: filas, `unidades` y `horas`.
+  - `produccion_costos`: filas y `costo` por `concepto`. Octubre sin `Material intermedio` debe dar el total del tablero, 1.525.367.102,33, con diferencias de centavos por el redondeo por fila.
+- Maestros: filas contra las consultas originales del mismo día (al hacer el tablero eran 3.486, 1.264 y 153).
+- El `conteo_sap` nocturno solo prueba que no se pierden filas, no que la lógica esté bien.
+- **Por validar con datos reales:**
+  - que `BELNR_ID`, `BELPOS_ID` y `POS_ID` sean enteros;
+  - que `padre` + `hijo` en `BEAS_STL` y `codigo_articulo` + `operacion` en `BEAS_APL` no se repitan; si no se repiten, pasan a ser llave;
+  - si una entrada de producto terminado (`OIGN`) anulada deja dos filas que se anulan entre sí o una sola: la consulta original no filtra `CANCELED`;
+  - cuánto tarda la consulta de costos en la ventana y en la carga inicial, por las franjas bloqueadas de la noche.
