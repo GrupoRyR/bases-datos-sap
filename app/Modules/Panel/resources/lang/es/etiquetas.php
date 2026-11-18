@@ -14,6 +14,7 @@ return [
         'CARTERA' => 'Cartera',
         'VENTAS' => 'Ventas',
         'PEDIDOS' => 'Pedidos',
+        'PRODUCCION' => 'Producción',
     ],
 
     'partes' => [
@@ -32,6 +33,12 @@ return [
         'cartera' => 'Cartera',
         'ventas' => 'Ventas',
         'pedidos' => 'Pedidos',
+        'produccion_terminado' => 'Producto terminado',
+        'produccion_carga_planta' => 'Carga de planta',
+        'produccion_costos' => 'Costos de producción',
+        'produccion_despiece' => 'Despiece',
+        'produccion_rutas' => 'Rutas',
+        'produccion_costeo_teorico' => 'Costeo teórico',
     ],
 
     // What a request asks for (RequestScope); the parts it brings go in parentheses.

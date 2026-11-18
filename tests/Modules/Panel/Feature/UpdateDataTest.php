@@ -125,6 +125,22 @@ it('rejects what is not an option without asking Sap', function (array $input, s
     'missing company' => [['datos' => 'CARTERA'], 'empresa'],
 ]);
 
+it('asks for PRODUCCION only for Segurex, since Derivados does not have it', function () {
+    $this->actingAs($this->admin)
+        ->from('/panel/actualizar')
+        ->post('/panel/actualizar', ['empresa' => 'SDC', 'datos' => 'PRODUCCION'])
+        ->assertRedirect('/panel/actualizar')
+        ->assertSessionHasErrors(['datos' => 'Producción solo existe para Segurex.']);
+
+    expect($this->fake->calls)->toBe([]);
+
+    $this->actingAs($this->admin)
+        ->post('/panel/actualizar', ['empresa' => 'SGX', 'datos' => 'PRODUCCION'])
+        ->assertSessionHasNoErrors();
+
+    expect($this->fake->calls[0]['dataset'])->toBe(Dataset::Produccion);
+});
+
 it('shows the validation message next to the group and keeps the choice', function () {
     $html = $this->actingAs($this->admin)
         ->followingRedirects()
