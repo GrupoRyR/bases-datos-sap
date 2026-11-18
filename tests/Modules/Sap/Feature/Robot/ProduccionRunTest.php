@@ -129,7 +129,8 @@ it('opens a PRODUCCION run with its window and the six parts in mode todo', func
 
     expect($run->ventana_desde?->toDateString())->toBe('2026-10-25')
         ->and($run->fecha_corte)->toBeNull()
-        ->and($run->partes)->toBe(produccionParts());
+        // MySQL reorders the keys of a JSON object, so compare parts and modes, not their order.
+        ->and($run->partes)->toEqual(produccionParts());
 });
 
 it('accepts a window from 2026-01-01 to tomorrow, so the initial load can reach back months', function (string $from) {
