@@ -185,7 +185,9 @@ def resultado_fallido(trabajo: Trabajo, exc: BaseException) -> Resultado:
 
 def _extraer_trabajo(conn: Any, empresa_cfg: EmpresaHana, r: Resultado, ahora: Callable[[], datetime]) -> None:
     t = r.trabajo
-    if t.conjunto in esquema.CONJUNTOS_CON_VENTANA:
+    if t.ventana_fija:
+        _extraer_con_ventana_fija(conn, empresa_cfg, r)
+    elif t.conjunto in esquema.CONJUNTOS_CON_VENTANA:
         _extraer_en_ventana(conn, empresa_cfg, r)
     else:
         _extraer_partes(conn, empresa_cfg, r)
@@ -226,6 +228,19 @@ def _extraer_en_ventana(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> No
         revisar_ventana(esquema.PARTES[nombre], r.filas[nombre], despues)
 
 
+def _extraer_con_ventana_fija(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
+    """Carga inicial de PRODUCCION: la ventana es la pedida (--desde), no la de HANA.
+
+    Las consultas llevan esa fecha en vez de la expresión de la ventana
+    (consultas.sql_desde_fecha), así que no hay nada que pedir antes ni después.
+    """
+    t = r.trabajo
+    r.ventana_desde = t.ventana_fija
+    _extraer_partes(conn, empresa_cfg, r)
+    for nombre in t.partes:
+        revisar_ventana(esquema.PARTES[nombre], r.filas[nombre], t.ventana_fija or "")
+
+
 def _extraer_partes(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
     t = r.trabajo
     esquema_db = empresa_cfg.esquema
@@ -237,6 +252,8 @@ def _extraer_partes(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
     for nombre, modo in t.partes.items():
         parte = esquema.PARTES[nombre]
         sql = consultas.leer_parte(parte, empresa_cfg)
+        if t.ventana_fija and parte.columna_ventana:
+            sql = consultas.sql_desde_fecha(sql, t.ventana_fija)
         if nombre in esquema.HIJAS_DE_SOCIO:
             columnas, datos = _hijas(conn, esquema_db, t, parte, sql, codigos)
         elif modo == "cambios" and t.desde.get(nombre) is not None:

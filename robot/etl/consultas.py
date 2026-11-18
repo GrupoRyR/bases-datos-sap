@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 
 import config
@@ -63,9 +63,27 @@ CAMPOS_SGX_PEDIDOS = (
     _campo_de_pedidos("@familia", "familia", "CAST(NULL AS NVARCHAR(100))"),
 )
 
-# Primer día de la ventana de VENTAS (contrato §10.1): la misma expresión de la consulta,
-# calculada por HANA. Nunca con el reloj del PC.
-SQL_VENTANA = "SELECT ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE)) FROM DUMMY"
+# Primer día de la ventana de VENTAS y PRODUCCION (contrato §10.1 y §12): la misma
+# expresión de las consultas, calculada por HANA. Nunca con el reloj del PC.
+EXPRESION_VENTANA = "ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE))"
+SQL_VENTANA = f"SELECT {EXPRESION_VENTANA} FROM DUMMY"
+
+
+def sql_desde_fecha(sql: str, dia: str) -> str:
+    """La consulta con el primer día de su ventana fijado en `dia` (AAAA-MM-DD).
+
+    Para la carga inicial de PRODUCCION (contrato §12): cambia cada aparición de la
+    expresión de la ventana por esa fecha. La fecha se valida antes de escribirla en el
+    SQL; si la consulta no tiene la expresión, falla en vez de traer otra ventana.
+    """
+    fecha = date.fromisoformat(dia)
+    if fecha.isoformat() != dia:
+        raise ValueError(f"La fecha de la ventana debe ser AAAA-MM-DD: {dia!r}.")
+    if EXPRESION_VENTANA not in sql:
+        raise config.ConfigError(
+            f"La consulta no tiene la expresión de la ventana ({EXPRESION_VENTANA}); no se corre."
+        )
+    return sql.replace(EXPRESION_VENTANA, f"TO_DATE('{dia}', 'YYYY-MM-DD')")
 
 
 def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
