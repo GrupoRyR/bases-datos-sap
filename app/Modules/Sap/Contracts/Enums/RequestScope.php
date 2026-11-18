@@ -5,7 +5,7 @@ namespace App\Modules\Sap\Contracts\Enums;
 /**
  * The part of MAESTROS a request can ask for (docs/contrato-robot.md,
  * section 7.1). A request without scope asks for the whole dataset; CARTERA,
- * VENTAS and PEDIDOS are always asked whole.
+ * VENTAS, PEDIDOS and PRODUCCION are always asked whole.
  */
 enum RequestScope: string
 {
