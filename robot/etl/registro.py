@@ -40,6 +40,11 @@ def _redactar(texto: str) -> str:
     return re.sub(r"(-p|--password)\s+\S+", r"\1 ***", texto)
 
 
+def redactar(texto: str) -> str:
+    """El texto sin los secretos registrados, para lo que no pasa por el filtro del log."""
+    return _redactar(texto)
+
+
 def registrar_secreto(valor: str | None) -> None:
     """Marca un valor para que nunca aparezca en los logs."""
     if valor and len(valor) >= 4 and valor not in _SECRETOS:
@@ -57,6 +62,7 @@ def registrar_secretos(cfg: config.Config) -> None:
         registrar_secreto(empresa.password)
     registrar_secreto(cfg.api.secret)
     registrar_secreto(cfg.alertas.smtp_password)
+    registrar_secreto(cfg.alertas.graph_client_secret)
 
 
 def configurar(nivel: int = logging.INFO) -> logging.Logger:

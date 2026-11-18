@@ -210,6 +210,14 @@ class ApiConfig:
     secret: str
 
 
+GRAPH_VARIABLES = (
+    "ALERTA_GRAPH_TENANT_ID",
+    "ALERTA_GRAPH_CLIENT_ID",
+    "ALERTA_GRAPH_CLIENT_SECRET",
+    "ALERTA_GRAPH_REMITENTE",
+)
+
+
 @dataclass(frozen=True)
 class AlertaConfig:
     smtp_host: str
@@ -217,10 +225,49 @@ class AlertaConfig:
     smtp_user: str
     smtp_password: str
     destinatarios: list[str] = field(default_factory=list)
+    # Microsoft Graph (client credentials, Mail.Send). Takes priority over SMTP.
+    graph_tenant_id: str = ""
+    graph_client_id: str = ""
+    graph_client_secret: str = ""
+    graph_remitente: str = ""
+
+    @property
+    def graph_in_use(self) -> bool:
+        """True as soon as one of the four Graph variables is filled in."""
+        return any((self.graph_tenant_id, self.graph_client_id, self.graph_client_secret,
+                    self.graph_remitente))
+
+    @property
+    def graph_missing(self) -> list[str]:
+        """Names (never values) of what Graph still needs; [] if it is untouched or complete."""
+        if not self.graph_in_use:
+            return []
+        valores = (
+            self.graph_tenant_id, self.graph_client_id, self.graph_client_secret, self.graph_remitente
+        )
+        faltan = [nombre for nombre, valor in zip(GRAPH_VARIABLES, valores) if not valor]
+        if not self.destinatarios:
+            faltan.append("ALERTA_DESTINATARIOS")
+        return faltan
+
+    @property
+    def graph_complete(self) -> bool:
+        return self.graph_in_use and not self.graph_missing
+
+    @property
+    def smtp_complete(self) -> bool:
+        return bool(self.smtp_host and self.destinatarios)
+
+    @property
+    def channel(self) -> str:
+        """"graph", "smtp" or "" (alerts off): Graph if complete, else SMTP if complete."""
+        if self.graph_complete:
+            return "graph"
+        return "smtp" if self.smtp_complete else ""
 
     @property
     def habilitada(self) -> bool:
-        return bool(self.smtp_host and self.destinatarios)
+        return self.channel != ""
 
 
 @dataclass(frozen=True)
@@ -368,6 +415,10 @@ def cargar_config(env_path: Path | None = None) -> Config:
             smtp_user=_texto("ALERTA_SMTP_USER"),
             smtp_password=os.getenv("ALERTA_SMTP_PASSWORD", ""),
             destinatarios=destinatarios,
+            graph_tenant_id=_texto("ALERTA_GRAPH_TENANT_ID"),
+            graph_client_id=_texto("ALERTA_GRAPH_CLIENT_ID"),
+            graph_client_secret=_texto("ALERTA_GRAPH_CLIENT_SECRET"),
+            graph_remitente=_texto("ALERTA_GRAPH_REMITENTE"),
         ),
         numeros_invalidos=tuple(invalidos),
     )
