@@ -145,6 +145,7 @@ it('refuses a PRODUCCION run without a valid window, with a cut-off date, in cha
 })->with([
     'without window' => [['ventana_desde' => null], 'ventana_desde'],
     'window not a date' => [['ventana_desde' => '2026-8-01'], 'ventana_desde'],
+    'impossible window' => [['ventana_desde' => '2026-02-30'], 'ventana_desde'],
     'window after tomorrow' => [['ventana_desde' => '2026-11-20'], 'ventana_desde'],
     'window before 2026' => [['ventana_desde' => '2025-12-31'], 'ventana_desde'],
     'cut-off date' => [['fecha_corte' => '2026-11-17'], 'fecha_corte'],
@@ -241,6 +242,21 @@ it('replaces only the window of the movement parts and every row of the masters'
         ->and($synced)->not->toBeNull()
         // Other datasets on the same connection stay as they were.
         ->and(DB::connection('ventas')->table('pedidos')->count())->toBe(1);
+});
+
+it('never touches the rows of another company', function () {
+    // PRODUCCION is SGX only, but the close still filters by company.
+    $other = fn (Part $part, string $item): array => [...storedProduction($part, ['codigo_articulo' => $item]), 'empresa' => 'SDC'];
+    DB::connection('ventas')->table('produccion_costos')->insert($other(Part::ProductionCosts, 'SDC-1'));
+    DB::connection('ventas')->table('produccion_rutas')->insert($other(Part::Routings, 'SDC-R'));
+
+    [$run, $batches, $sent] = sendProduccion($this, produccionRows());
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => $batches, 'filas' => $sent])->assertOk();
+
+    expect(DB::connection('ventas')->table('produccion_costos')->where('empresa', 'SDC')->pluck('codigo_articulo')->all())->toBe(['SDC-1'])
+        ->and(DB::connection('ventas')->table('produccion_rutas')->where('empresa', 'SDC')->pluck('codigo_articulo')->all())->toBe(['SDC-R'])
+        ->and(DB::connection('ventas')->table('produccion_rutas')->where('empresa', 'SGX')->count())->toBe(1);
 });
 
 it('fails a close with an empty part and changes nothing', function () {
