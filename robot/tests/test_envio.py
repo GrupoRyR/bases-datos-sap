@@ -106,6 +106,9 @@ def test_completa_escribe_los_csv_y_la_foto_de_cartera(escenario):
     clientes = raiz / "MAESTROS" / "SGX" / "clientes" / "2026-10-26_0200.csv"
     filas = _leer_csv(clientes)
     assert filas[0] == esquema.PARTES["clientes"].nombres
+    assert filas[0][-1] == "contacto_principal"
+    contactos = _leer_csv(raiz / "MAESTROS" / "SGX" / "contactos" / "2026-10-26_0200.csv")
+    assert contactos[0][-1] == "telefono_2"
     assert len(filas) == 4
     primera = dict(zip(filas[0], filas[1]))
     assert primera["codigo"] == "CSGX001"

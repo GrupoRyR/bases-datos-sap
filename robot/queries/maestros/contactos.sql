@@ -18,7 +18,8 @@ SELECT
     T0."Tel1"                                       AS "telefono",
     T0."Cellolar"                                   AS "celular",
     T0."E_MailL"                                    AS "correo",
-    CASE WHEN T0."Active" = 'Y' THEN 'Y' ELSE 'N' END AS "activo"
+    CASE WHEN T0."Active" = 'Y' THEN 'Y' ELSE 'N' END AS "activo",
+    T0."Tel2"                                       AS "telefono_2"
 FROM "OCPR" T0
 INNER JOIN "OCRD" T1 ON T1."CardCode" = T0."CardCode"
 WHERE T1."CardType" IN ('C', 'S')

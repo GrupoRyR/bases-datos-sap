@@ -31,7 +31,7 @@ SOCIO = [
     "codigo", "nombre", "nombre_extranjero", "nit", "grupo_codigo", "vendedor_codigo",
     "condicion_pago_codigo", "lista_precios_codigo", "telefono", "telefono_2", "celular",
     "correo", "ciudad", "limite_credito", "socio_vinculado", "activo",
-    "actualizado_en_sap", "creado_en_sap",
+    "actualizado_en_sap", "creado_en_sap", "contacto_principal",
 ]
 COLUMNAS = {
     "clientes": SOCIO,
@@ -42,7 +42,7 @@ COLUMNAS = {
     ],
     "contactos": [
         "contacto_id", "codigo_socio", "nombre", "nombres", "apellidos", "cargo", "telefono",
-        "celular", "correo", "activo",
+        "celular", "correo", "activo", "telefono_2",
     ],
     "articulos": [
         "codigo", "nombre", "nombre_extranjero", "grupo_codigo", "marca_codigo",
