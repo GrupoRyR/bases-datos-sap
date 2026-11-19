@@ -27,9 +27,9 @@ final readonly class Column
     /**
      * @param  list<string>|null  $values  The only texts accepted, exactly.
      */
-    public static function text(string $name, int $length = 255, bool $required = false, ?array $values = null): self
+    public static function text(string $name, int $length = 255, bool $required = false, ?array $values = null, bool $omittable = false): self
     {
-        return new self($name, ColumnType::Text, $required, length: $length, values: $values);
+        return new self($name, ColumnType::Text, $required, length: $length, omittable: $omittable, values: $values);
     }
 
     public static function integer(string $name, bool $required = false, ?int $min = null): self

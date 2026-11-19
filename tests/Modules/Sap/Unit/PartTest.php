@@ -101,6 +101,7 @@ it('lists exactly the columns of the contract', function (Part $part, array $col
         'codigo', 'nombre', 'nombre_extranjero', 'nit', 'grupo_codigo', 'vendedor_codigo',
         'condicion_pago_codigo', 'lista_precios_codigo', 'telefono', 'telefono_2', 'celular', 'correo',
         'ciudad', 'limite_credito', 'socio_vinculado', 'activo', 'actualizado_en_sap', 'creado_en_sap',
+        'contacto_principal',
     ]],
     'direcciones' => [Part::Addresses, [
         'codigo_socio', 'tipo', 'nombre', 'calle', 'barrio', 'ciudad', 'municipio_codigo',
@@ -108,7 +109,7 @@ it('lists exactly the columns of the contract', function (Part $part, array $col
     ]],
     'contactos' => [Part::Contacts, [
         'contacto_id', 'codigo_socio', 'nombre', 'nombres', 'apellidos', 'cargo', 'telefono',
-        'celular', 'correo', 'activo',
+        'celular', 'correo', 'activo', 'telefono_2',
     ]],
     'articulos' => [Part::Items, [
         'codigo', 'nombre', 'nombre_extranjero', 'grupo_codigo', 'marca_codigo', 'unidad_venta',

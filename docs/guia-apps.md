@@ -119,6 +119,7 @@ Las columnas son las de `contrato-robot.md` (§5.2, §6, §10, §11 y §12), con
 
 - **`empresa`** es `SGX` o `SDC`. Filtra siempre por empresa: un mismo código puede existir en las dos.
 - **`activo`** (maestros): nunca se borran filas. Lo que se inactiva en SAP, o deja de llegar en la corrida completa, queda con `activo = 0`. Muestra solo los activos salvo que la pantalla necesite el histórico (por ejemplo, el cliente de una factura vieja).
+- **Columnas nuevas al final.** `v_clientes` y `v_proveedores` traen `contacto_principal` (`OCRD.CntctPrsn`): el **nombre** del contacto principal, no su id; para hallarlo, compáralo con `nombre` de `v_contactos` del mismo socio. `v_contactos` trae `telefono_2` (`OCPR.Tel2`). Las dos van después de `sincronizado_en` y quedan `null` hasta que el robot las envíe.
 - **`actualizado_en_sap`** es la última modificación en SAP (solo en clientes, proveedores y artículos); **`sincronizado_en`**, cuándo lo escribió el robot. Horas de Bogotá.
 - **`v_cartera_fotos`**: la foto de cada día con `dias` contados a la `fecha_corte`. Úsala para la circularización y el histórico.
 - Una vista solo crece: se agregan columnas al final, nunca se renombra ni se quita una. Lista tus columnas (`get([...])`), no uses `select *`.

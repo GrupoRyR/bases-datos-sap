@@ -277,3 +277,34 @@ it('stores PRODUCCION quantities with 6 decimals and amounts with 2, and reads t
         ->and($load)->not->toHaveKeys(['id', 'corrida_id'])
         ->and((float) $cost['costo'])->toBe(-1525367102.33);
 });
+
+it('adds contacto_principal and telefono_2 at the end of their views, after every older column', function (string $view, string $column) {
+    $columns = Schema::connection('maestros')->getColumnListing($view);
+
+    expect(end($columns))->toBe($column)
+        ->and(array_slice($columns, -2, 1))->toBe(['sincronizado_en']);
+})->with([
+    'v_clientes' => ['v_clientes', 'contacto_principal'],
+    'v_proveedores' => ['v_proveedores', 'contacto_principal'],
+    'v_contactos' => ['v_contactos', 'telefono_2'],
+]);
+
+it('rolls contacto_principal and telefono_2 back, leaving the tables and views as they were', function () {
+    $migration = require base_path('app/Modules/Sap/database/migrations/2026_11_02_000014_add_contacto_principal_and_telefono_2_to_maestros.php');
+    $listing = fn (string $name): array => Schema::connection('maestros')->getColumnListing($name);
+    $before = ['v_clientes' => $listing('v_clientes'), 'v_contactos' => $listing('v_contactos')];
+
+    // The migrator runs a migration with its connection as the default one.
+    DB::usingConnection('maestros', fn () => $migration->down());
+
+    expect($listing('clientes'))->not->toContain('contacto_principal')
+        ->and($listing('proveedores'))->not->toContain('contacto_principal')
+        ->and($listing('contactos'))->not->toContain('telefono_2')
+        ->and($listing('v_clientes'))->toBe(array_slice($before['v_clientes'], 0, -1))
+        ->and($listing('v_contactos'))->toBe(array_slice($before['v_contactos'], 0, -1));
+
+    DB::usingConnection('maestros', fn () => $migration->up());
+
+    expect($listing('v_clientes'))->toBe($before['v_clientes'])
+        ->and($listing('v_contactos'))->toBe($before['v_contactos']);
+});
