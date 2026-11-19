@@ -219,6 +219,7 @@ Tipos: `slp_code`, `total_plazos`, `no_plazo` y `dias`, enteros; las `fecha_*`, 
 
 - **Llave.** La consulta no trae un id único de línea, así que la cartera no tiene llave natural: la llave es la corrida. Cada cierre bueno reemplaza **toda** la cartera de esa empresa en una transacción. No se valida llave repetida.
 - **Nunca vacía.** Un cierre con 0 filas falla (§4.3) y la cartera anterior se queda.
+- **`fecha_corte` de la cartera actual.** `v_cartera` trae al final `fecha_corte`: el día contra el que la consulta cuenta los `dias`, que es la fecha en Bogotá de `extraida_en` (§4.1). Es hoy tanto en la `completa` como en una `solicitud`; **no** es la `fecha_corte` de la corrida, que en la `completa` es el día anterior y solo la lleva la foto. Así, en las dos vistas, `dias` = `fecha_corte` − `fecha_vencimiento`. Las líneas guardadas antes de esta columna la tienen `null` hasta el siguiente cierre.
 - **Foto diaria.** En la corrida `completa` de las 02:00 la API guarda además una copia con `fecha_corte` (el día anterior). Hay una foto por empresa y día; si llega otra del mismo día, reemplaza a la anterior. Las fotos no se borran.
 - Las demás corridas de cartera (por solicitud) solo reemplazan la cartera actual.
 

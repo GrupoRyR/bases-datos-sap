@@ -245,6 +245,29 @@ it('keeps the daily photo of the nightly run, with overdue days counted to the c
         ->and((int) DB::connection('cartera')->table('cartera')->value('dias'))->toBe(6);
 });
 
+it('dates the current CARTERA with the day its overdue days are counted to', function (string $type, string $cutOff, string $extractedAt, string $day) {
+    $rows = ['cartera' => [RobotClient::row(Part::Receivables, ['documento' => 'FV-1', 'fecha_vencimiento' => '2026-10-20', 'dias' => 6])]];
+    $run = sendRun($this, ['cartera' => 'todo'], $rows, ['conjunto' => 'CARTERA', 'tipo' => $type, 'fecha_corte' => $cutOff, 'extraida_en' => $extractedAt]);
+    $close = $type === 'completa' ? closeBody($rows, ['conteo_sap' => ['cartera' => 1]]) : closeBody($rows);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", $close)->assertOk();
+
+    $current = DB::connection('cartera')->table('v_cartera')->sole();
+
+    // The query counts days to the day it runs, the day of extraida_en in Bogota (contract section 6).
+    expect($current->fecha_corte)->toStartWith($day)
+        ->and((int) $current->dias)->toBe(6);
+
+    if ($type === 'completa') {
+        // The photo keeps the cut-off date of the run, the day before.
+        expect(DB::connection('cartera')->table('v_cartera_fotos')->value('fecha_corte'))->toStartWith($cutOff);
+    }
+})->with([
+    'nightly full run' => ['completa', '2026-10-25', '2026-10-26T02:10:00-05:00', '2026-10-26'],
+    'run on request' => ['solicitud', '2026-10-26', '2026-10-26T10:41:30-05:00', '2026-10-26'],
+    'extraction time in UTC, still the 26th in Bogota' => ['solicitud', '2026-10-26', '2026-10-27T03:00:00Z', '2026-10-26'],
+]);
+
 it('replaces a photo of the same company and day', function () {
     foreach (['FV-1', 'FV-2'] as $document) {
         $rows = ['cartera' => [RobotClient::row(Part::Receivables, ['documento' => $document])]];
