@@ -95,6 +95,7 @@ _SOCIO = (
     _m("activo", BOOL, requerida=True),
     _m("actualizado_en_sap", HORA, requerida=True),
     _m("creado_en_sap", FECHA),
+    _m("contacto_principal"),  # al final (§5.2)
 )
 
 _DIRECCIONES = (
@@ -121,6 +122,7 @@ _CONTACTOS = (
     _m("celular"),
     _m("correo"),
     _m("activo", BOOL, requerida=True),
+    _m("telefono_2"),  # al final (§5.2)
 )
 
 _ARTICULOS = (

@@ -35,7 +35,9 @@ SELECT
                   + MOD(FLOOR(T0."UpdateTS" / 100), 100) * 60
                   + MOD(T0."UpdateTS", 100)
         END)                                        AS "actualizado_en_sap",
-    T0."CreateDate"                                 AS "creado_en_sap"
+    T0."CreateDate"                                 AS "creado_en_sap",
+    -- El nombre del contacto principal, no su id: cuadra con "nombre" de contactos.
+    T0."CntctPrsn"                                  AS "contacto_principal"
 FROM "OCRD" T0
 WHERE T0."CardType" = 'C'
 ORDER BY T0."CardCode"

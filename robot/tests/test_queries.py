@@ -69,6 +69,18 @@ def test_alias_de_maestros_son_las_columnas_del_contrato(ruta: Path):
     assert set(alias) == set(parte.nombres)
 
 
+@pytest.mark.parametrize("parte, origen, alias", [
+    ("clientes", 'T0."CntctPrsn"', "contacto_principal"),
+    ("proveedores", 'T0."CntctPrsn"', "contacto_principal"),
+    ("contactos", 'T0."Tel2"', "telefono_2"),
+])
+def test_columnas_nuevas_de_maestros_van_al_final(parte, origen, alias):
+    # Contrato §5.2: van al final, para no correr las posiciones de las demás.
+    sql = _sin_comentarios(_texto(QUERIES / "maestros" / f"{parte}.sql"))
+    assert _alias(sql)[-1] == alias
+    assert re.search(rf'{re.escape(origen)}\s+AS\s+"{alias}"', sql)
+
+
 def test_cada_parte_de_maestros_tiene_consulta_en_cada_esquema(monkeypatch):
     monkeypatch.setattr(config, "QUERIES_DIR", QUERIES)
     for nombre in PARTES_POR_CONJUNTO["MAESTROS"]:
