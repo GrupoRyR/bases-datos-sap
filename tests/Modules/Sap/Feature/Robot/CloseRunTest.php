@@ -245,6 +245,29 @@ it('keeps the daily photo of the nightly run, with overdue days counted to the c
         ->and((int) DB::connection('cartera')->table('cartera')->value('dias'))->toBe(6);
 });
 
+it('dates the current CARTERA with the day its overdue days are counted to', function (string $type, string $cutOff, string $extractedAt, string $day) {
+    $rows = ['cartera' => [RobotClient::row(Part::Receivables, ['documento' => 'FV-1', 'fecha_vencimiento' => '2026-10-20', 'dias' => 6])]];
+    $run = sendRun($this, ['cartera' => 'todo'], $rows, ['conjunto' => 'CARTERA', 'tipo' => $type, 'fecha_corte' => $cutOff, 'extraida_en' => $extractedAt]);
+    $close = $type === 'completa' ? closeBody($rows, ['conteo_sap' => ['cartera' => 1]]) : closeBody($rows);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", $close)->assertOk();
+
+    $current = DB::connection('cartera')->table('v_cartera')->sole();
+
+    // The query counts days to the day it runs, the day of extraida_en in Bogota (contract section 6).
+    expect($current->fecha_corte)->toStartWith($day)
+        ->and((int) $current->dias)->toBe(6);
+
+    if ($type === 'completa') {
+        // The photo keeps the cut-off date of the run, the day before.
+        expect(DB::connection('cartera')->table('v_cartera_fotos')->value('fecha_corte'))->toStartWith($cutOff);
+    }
+})->with([
+    'nightly full run' => ['completa', '2026-10-25', '2026-10-26T02:10:00-05:00', '2026-10-26'],
+    'run on request' => ['solicitud', '2026-10-26', '2026-10-26T10:41:30-05:00', '2026-10-26'],
+    'extraction time in UTC, still the 26th in Bogota' => ['solicitud', '2026-10-26', '2026-10-27T03:00:00Z', '2026-10-26'],
+]);
+
 it('replaces a photo of the same company and day', function () {
     foreach (['FV-1', 'FV-2'] as $document) {
         $rows = ['cartera' => [RobotClient::row(Part::Receivables, ['documento' => $document])]];
@@ -253,4 +276,59 @@ it('replaces a photo of the same company and day', function () {
     }
 
     expect(DB::connection('cartera')->table('cartera_fotos')->pluck('documento')->all())->toBe(['FV-2']);
+});
+
+/**
+ * A batch body whose header leaves out the given columns, as the robot sends
+ * it before it knows them (contract section 4.2).
+ *
+ * @param  list<array<string, mixed>>  $rows
+ * @param  list<string>  $without
+ * @return array<string, mixed>
+ */
+function maestrosBatchWithout(int $number, Part $part, array $rows, array $without): array
+{
+    $body = RobotClient::batch($number, $part, $rows);
+    $keep = array_keys(array_filter($body['columns'], fn (string $column): bool => ! in_array($column, $without, true)));
+
+    return [
+        ...$body,
+        'columns' => array_values(array_intersect_key($body['columns'], array_flip($keep))),
+        'rows' => array_map(fn (array $row): array => array_values(array_intersect_key($row, array_flip($keep))), $body['rows']),
+    ];
+}
+
+it('stores the main contact of a partner and the second phone of a contact', function () {
+    $rows = [
+        'clientes' => [customer('C1', ['contacto_principal' => 'Ana Pérez'])],
+        'proveedores' => [RobotClient::row(Part::Suppliers, ['codigo' => 'P1', 'contacto_principal' => 'Luis Gómez'])],
+        'contactos' => [RobotClient::row(Part::Contacts, ['contacto_id' => 51, 'codigo_socio' => 'C1', 'nombre' => 'Ana Pérez', 'telefono_2' => '6041234567'])],
+    ];
+    $run = sendRun($this, ['clientes' => 'cambios', 'proveedores' => 'cambios', 'contactos' => 'cambios'], $rows);
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", closeBody($rows))->assertOk();
+
+    expect(DB::connection('maestros')->table('v_clientes')->value('contacto_principal'))->toBe('Ana Pérez')
+        ->and(DB::connection('maestros')->table('v_proveedores')->value('contacto_principal'))->toBe('Luis Gómez')
+        ->and(DB::connection('maestros')->table('v_contactos')->value('telefono_2'))->toBe('6041234567');
+});
+
+it('accepts batches without contacto_principal and telefono_2 while the robot does not send them, and stores null', function () {
+    $run = RobotClient::openRun($this, ['partes' => ['clientes' => 'cambios', 'proveedores' => 'cambios', 'contactos' => 'cambios']]);
+    $batches = [
+        maestrosBatchWithout(1, Part::Customers, [customer('C1')], ['contacto_principal']),
+        maestrosBatchWithout(2, Part::Suppliers, [RobotClient::row(Part::Suppliers, ['codigo' => 'P1'])], ['contacto_principal']),
+        maestrosBatchWithout(3, Part::Contacts, [RobotClient::row(Part::Contacts, ['contacto_id' => 51, 'codigo_socio' => 'C1'])], ['telefono_2']),
+    ];
+
+    foreach ($batches as $batch) {
+        RobotClient::post($this, "/api/robot/v1/corridas/{$run}/lotes", $batch)->assertCreated();
+    }
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 3, 'filas' => ['clientes' => 1, 'proveedores' => 1, 'contactos' => 1]])
+        ->assertOk();
+
+    expect(soleCustomer('SGX', 'C1')['contacto_principal'])->toBeNull()
+        ->and(DB::connection('maestros')->table('proveedores')->value('contacto_principal'))->toBeNull()
+        ->and(DB::connection('maestros')->table('contactos')->sole()->telefono_2)->toBeNull();
 });

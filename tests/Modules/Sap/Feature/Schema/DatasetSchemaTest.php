@@ -35,6 +35,11 @@ function expectedViewColumns(Part $part): array
         $columns = [...$columns, 'activo', 'actualizado_en_sap'];
     }
 
+    if ($part === Part::Receivables) {
+        // The day the overdue days are counted to (contract section 6).
+        $columns[] = 'fecha_corte';
+    }
+
     $columns = array_values(array_unique($columns));
     sort($columns);
 
@@ -145,7 +150,7 @@ it('stores the daily photo of CARTERA by cut-off date and exposes it in a view',
     $columns = sortedColumns('cartera', 'v_cartera_fotos');
     $row = (array) DB::connection('cartera')->table('v_cartera_fotos')->sole();
 
-    expect($columns)->toBe(collect([...expectedViewColumns(Part::Receivables), 'fecha_corte'])->sort()->values()->all())
+    expect($columns)->toBe(expectedViewColumns(Part::Receivables))
         ->and($row['fecha_corte'])->toStartWith('2026-10-25')
         ->and($row['empresa'])->toBe('SDC');
 });
@@ -276,4 +281,57 @@ it('stores PRODUCCION quantities with 6 decimals and amounts with 2, and reads t
         ->and($load['empresa'])->toBe('SGX')
         ->and($load)->not->toHaveKeys(['id', 'corrida_id'])
         ->and((float) $cost['costo'])->toBe(-1525367102.33);
+});
+
+it('adds contacto_principal and telefono_2 at the end of their views, after every older column', function (string $view, string $column) {
+    $columns = Schema::connection('maestros')->getColumnListing($view);
+
+    expect(end($columns))->toBe($column)
+        ->and(array_slice($columns, -2, 1))->toBe(['sincronizado_en']);
+})->with([
+    'v_clientes' => ['v_clientes', 'contacto_principal'],
+    'v_proveedores' => ['v_proveedores', 'contacto_principal'],
+    'v_contactos' => ['v_contactos', 'telefono_2'],
+]);
+
+it('rolls contacto_principal and telefono_2 back, leaving the tables and views as they were', function () {
+    $migration = require base_path('app/Modules/Sap/database/migrations/2026_11_02_000014_add_contacto_principal_and_telefono_2_to_maestros.php');
+    $listing = fn (string $name): array => Schema::connection('maestros')->getColumnListing($name);
+    $before = ['v_clientes' => $listing('v_clientes'), 'v_contactos' => $listing('v_contactos')];
+
+    // The migrator runs a migration with its connection as the default one.
+    DB::usingConnection('maestros', fn () => $migration->down());
+
+    expect($listing('clientes'))->not->toContain('contacto_principal')
+        ->and($listing('proveedores'))->not->toContain('contacto_principal')
+        ->and($listing('contactos'))->not->toContain('telefono_2')
+        ->and($listing('v_clientes'))->toBe(array_slice($before['v_clientes'], 0, -1))
+        ->and($listing('v_contactos'))->toBe(array_slice($before['v_contactos'], 0, -1));
+
+    DB::usingConnection('maestros', fn () => $migration->up());
+
+    expect($listing('v_clientes'))->toBe($before['v_clientes'])
+        ->and($listing('v_contactos'))->toBe($before['v_contactos']);
+});
+
+it('adds fecha_corte at the end of v_cartera, after every older column', function () {
+    $columns = Schema::connection('cartera')->getColumnListing('v_cartera');
+
+    expect(end($columns))->toBe('fecha_corte')
+        ->and(array_slice($columns, -2, 1))->toBe(['sincronizado_en']);
+});
+
+it('rolls fecha_corte of v_cartera back, leaving the table and view as they were', function () {
+    $migration = require base_path('app/Modules/Sap/database/migrations/2026_11_02_000015_add_fecha_corte_to_cartera.php');
+    $listing = fn (string $name): array => Schema::connection('cartera')->getColumnListing($name);
+    $before = $listing('v_cartera');
+
+    DB::usingConnection('cartera', fn () => $migration->down());
+
+    expect($listing('cartera'))->not->toContain('fecha_corte')
+        ->and($listing('v_cartera'))->toBe(array_slice($before, 0, -1));
+
+    DB::usingConnection('cartera', fn () => $migration->up());
+
+    expect($listing('v_cartera'))->toBe($before);
 });

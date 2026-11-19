@@ -62,6 +62,8 @@ final class PartColumns
                 Column::text('celular', 50),                        // Cellolar
                 Column::text('correo'),                             // E_MailL
                 Column::boolean('activo', required: true),          // Active = Y
+                // Tel2. Omittable until the robot sends it (contract section 4.2).
+                Column::text('telefono_2', 50, omittable: true),
             ],
             Part::Items => [
                 Column::text('codigo', 50, required: true),         // OITM.ItemCode
@@ -218,6 +220,9 @@ final class PartColumns
             Column::boolean('activo', required: true),              // not validFor = N nor frozenFor = Y
             Column::dateTime('actualizado_en_sap', required: true), // UpdateDate + UpdateTS
             Column::date('creado_en_sap'),                          // CreateDate
+            // CntctPrsn: the name of the main contact, not its id (it matches
+            // contactos.nombre). Omittable until the robot sends it (section 4.2).
+            Column::text('contacto_principal', omittable: true),
         ];
     }
 

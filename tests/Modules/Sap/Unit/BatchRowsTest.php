@@ -154,18 +154,43 @@ it('lets a VENTAS header leave out ganancia_bruta and fills it with null', funct
         ->and($row['total'])->toBe('1000.50');
 });
 
-it('only lets VENTAS leave out ganancia_bruta', function () {
-    // The one exception of contract section 4.2. If this fails, widening it is a contract change: the user approves it first.
+it('only lets the transition columns be left out', function () {
+    // The exceptions of contract section 4.2. If this fails, widening it is a contract change: the user approves it first.
     $omittable = [];
 
     foreach (Part::cases() as $part) {
         $omittable[$part->value] = array_keys(array_filter($part->columns(), fn (Column $column): bool => $column->omittable));
     }
 
-    expect(array_filter($omittable))->toBe(['ventas' => ['ganancia_bruta']]);
+    expect(array_filter($omittable))->toBe([
+        'clientes' => ['contacto_principal'],
+        'proveedores' => ['contacto_principal'],
+        'contactos' => ['telefono_2'],
+        'ventas' => ['ganancia_bruta'],
+    ]);
 });
 
 it('keeps amounts of VENTAS to 2 decimals', function () {
     expect(checkOneSale(['total' => '10.505'])['errors'])
         ->toBe(['rows.0.total' => 'Debe ser un monto como texto, con punto y hasta 2 decimales.']);
 });
+
+it('lets a partner header leave out contacto_principal and a contact header leave out telefono_2', function (Part $part, string $column) {
+    $body = RobotClient::batch(1, $part, [RobotClient::row($part, [$column => 'Kept'])]);
+    $position = array_search($column, $body['columns'], true);
+    $columns = array_values(array_diff($body['columns'], [$column]));
+    $values = $body['rows'][0];
+    unset($values[$position]);
+
+    $without = BatchRows::check($part, $columns, [array_values($values)]);
+    $with = BatchRows::check($part, $body['columns'], $body['rows']);
+
+    expect($without['errors'])->toBe([])
+        ->and(array_combine(array_keys($part->columns()), $without['rows'][0])[$column])->toBeNull()
+        ->and($with['errors'])->toBe([])
+        ->and(array_combine(array_keys($part->columns()), $with['rows'][0])[$column])->toBe('Kept');
+})->with([
+    'clientes' => [Part::Customers, 'contacto_principal'],
+    'proveedores' => [Part::Suppliers, 'contacto_principal'],
+    'contactos' => [Part::Contacts, 'telefono_2'],
+]);

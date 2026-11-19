@@ -14,10 +14,12 @@ use Illuminate\Support\Facades\DB;
  * caller wraps it in one transaction on the cartera connection, so the
  * company's receivables are replaced at once and never seen empty.
  *
- * The nightly full run also keeps the photo of its cut-off date, replacing
- * an earlier photo of the same company and day. As the query counts overdue
- * days to the day it runs, the photo counts them to the cut-off date
- * (docs/plan-bases-sap.md, section 4).
+ * The query counts overdue days to the day it runs, so the current lines
+ * carry that day as fecha_corte: the Bogota date of extraida_en, in any
+ * run. The nightly full run also keeps the photo of its own cut-off date
+ * (the day before), replacing an earlier photo of the same company and
+ * day, with the overdue days counted to that date (docs/plan-bases-sap.md,
+ * section 4).
  */
 final class ApplyCartera
 {
@@ -29,6 +31,7 @@ final class ApplyCartera
         $company = $run->empresa->value;
         $cutOff = $run->fecha_corte === null ? null : CarbonImmutable::parse($run->fecha_corte->toDateString());
         $photo = $run->tipo === RunType::Full && $cutOff !== null;
+        $countedTo = $run->extraida_en->setTimezone((string) config('app.timezone'))->toDateString();
 
         DB::connection('cartera')->table('cartera')->where('empresa', $company)->delete();
 
@@ -37,7 +40,7 @@ final class ApplyCartera
                 ->where('empresa', $company)->where('fecha_corte', $cutOff->toDateString())->delete();
         }
 
-        $run->rowsOf(Part::Receivables)->chunk(self::CHUNK)->each(function ($lines) use ($run, $company, $appliedAt, $photo, $cutOff) {
+        $run->rowsOf(Part::Receivables)->chunk(self::CHUNK)->each(function ($lines) use ($run, $company, $appliedAt, $photo, $cutOff, $countedTo) {
             $lines = $lines->map(fn (array $line): array => [
                 'empresa' => $company,
                 ...$line,
@@ -45,7 +48,10 @@ final class ApplyCartera
                 'corrida_id' => $run->id,
             ])->values()->all();
 
-            DB::connection('cartera')->table('cartera')->insert($lines);
+            DB::connection('cartera')->table('cartera')->insert(array_map(
+                fn (array $line): array => [...$line, 'fecha_corte' => $countedTo],
+                $lines,
+            ));
 
             if ($photo) {
                 DB::connection('cartera')->table('cartera_fotos')->insert(array_map(fn (array $line): array => [
