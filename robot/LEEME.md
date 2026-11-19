@@ -196,7 +196,7 @@ Cada CSV se escribe primero en un temporal que luego se renombra, así que nunca
 
 Las categorías del archivo (`AUDITORIA`, `CONTABILIDAD`, `USUARIOS_Y_PERMISOS`, `CONFIGURACION`, …) solo van a esta carpeta: nunca se envían a la app.
 
-Las tablas `@HBT_*` de `CONFIGURACION` se leen columna por columna y el robot salta las que parecen claves: las que tienen `PASS`, `PWD`, `CLAVE`, `CONTRASE`, `TOKEN` o `SECRET` en el nombre, y las que tienen `KEY`, `APIKEY` o `PIN` como una parte entera del nombre (`U_PIN`, `U_API_KEY`, no `U_SHIPPING` ni `U_KEYWORD`). Cada columna saltada queda en el log.
+Las tablas `@HBT_*` de `CONFIGURACION` se leen columna por columna y el robot salta las que parecen guardar credenciales, es decir, las que tienen `PASS`, `PWD`, `CLAVE`, `CONTRASE`, `TOKEN` o `SECRET` en el nombre, y las que tienen `KEY`, `APIKEY` o `PIN` como una parte entera del nombre (`U_PIN`, `U_API_KEY`, no `U_SHIPPING` ni `U_KEYWORD`). Cada columna saltada queda en el log.
 
 ## Registro y estado
 
