@@ -149,7 +149,7 @@ Cuatro bases en el mismo servidor MySQL (§3 del plan), una conexión por base:
 | `app` (por defecto) | `bases_sap` | Solicitudes, corridas, lotes, usuarios del panel, apps conectadas, auditoría |
 | `maestros` | `maestros_sap` | Tablas del conjunto MAESTROS |
 | `cartera` | `cartera_sap` | Tablas del conjunto CARTERA |
-| `ventas` | `ventas_sap` | Tablas del conjunto VENTAS |
+| `ventas` | `ventas_sap` | Tablas de los conjuntos VENTAS, PEDIDOS y PRODUCCION |
 
 - Una migración de un conjunto declara su conexión; el migrador la usa en `up()` y `down()`:
 
