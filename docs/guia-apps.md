@@ -18,7 +18,7 @@ El detalle de la API está en [`contrato-robot.md`](contrato-robot.md) §7; el a
 | Qué | Para qué |
 |---|---|
 | Usuario MySQL de solo lectura, uno por app | Leer las vistas. Si se corta uno, las demás apps siguen. |
-| Permiso solo en las bases que usa la app | `maestros_sap` (clientes, artículos, catálogos…), `cartera_sap` (cartera y fotos diarias), `ventas_sap` (líneas de facturas y notas crédito). |
+| Permiso solo en las bases que usa la app | `maestros_sap` (clientes, artículos, catálogos…), `cartera_sap` (cartera y fotos diarias), `ventas_sap` (líneas de facturas y notas crédito, pedidos abiertos y producción de Segurex). |
 | Si la app no está en GoDaddy: su IP fija | TI abre MySQL remoto solo para esa IP, con conexión cifrada (SSL). |
 
 cPanel da permisos por base, no por tabla, así que el usuario también podría ver las tablas. **Lee siempre las vistas**, nunca las tablas: las tablas pueden cambiar y las vistas no.
@@ -109,11 +109,16 @@ Nunca escribas en estas bases: el usuario es de solo lectura y los datos los pon
 | `cartera_sap` | `v_cartera` (la actual) | — |
 | | `v_cartera_fotos` (una por empresa y `fecha_corte`) | — |
 | `ventas_sap` | `v_ventas` (una fila por línea de factura o nota crédito) | `tipo_objeto`, `doc_entry`, `linea` |
+| | `v_pedidos` (una fila por línea abierta de pedido de clientes) | `doc_entry`, `linea` |
+| | `v_produccion_terminado` (solo SGX) | `doc_entry`, `linea` |
+| | `v_produccion_carga_planta`, `v_produccion_costos` (solo SGX) | sin llave |
+| | `v_produccion_despiece`, `v_produccion_rutas` (solo SGX) | sin llave |
+| | `v_produccion_costeo_teorico` (solo SGX) | `codigo_articulo` |
 
-Las columnas son las de `contrato-robot.md` (§5.2, §6 y §10), con estas reglas:
+Las columnas son las de `contrato-robot.md` (§5.2, §6, §10, §11 y §12), con estas reglas:
 
 - **`empresa`** es `SGX` o `SDC`. Filtra siempre por empresa: un mismo código puede existir en las dos.
-- **`activo`**: nunca se borran filas. Lo que se inactiva en SAP, o deja de llegar en la corrida completa, queda con `activo = 0`. Muestra solo los activos salvo que la pantalla necesite el histórico (por ejemplo, el cliente de una factura vieja).
+- **`activo`** (maestros): nunca se borran filas. Lo que se inactiva en SAP, o deja de llegar en la corrida completa, queda con `activo = 0`. Muestra solo los activos salvo que la pantalla necesite el histórico (por ejemplo, el cliente de una factura vieja).
 - **`actualizado_en_sap`** es la última modificación en SAP (solo en clientes, proveedores y artículos); **`sincronizado_en`**, cuándo lo escribió el robot. Horas de Bogotá.
 - **`v_cartera_fotos`**: la foto de cada día con `dias` contados a la `fecha_corte`. Úsala para la circularización y el histórico.
 - Una vista solo crece: se agregan columnas al final, nunca se renombra ni se quita una. Lista tus columnas (`get([...])`), no uses `select *`.
@@ -129,6 +134,39 @@ Una fila por línea de factura de clientes (incluidas las notas débito) o de no
 - **`costo_total` nunca se usa para márgenes**: es el costo de inventario y no cuadra con la ganancia bruta de SAP (plan §4).
 - **Historia**: empieza en la primera carga (ventana desde el 2026-10-25). Cada corrida nocturna reemplaza solo la ventana actual, que es el mes en curso más los últimos 7 días del mes anterior; lo anterior queda congelado y no se toca.
 - `id_pedido_app` solo existe en `SGX`; en `SDC` siempre es `null`.
+
+#### `v_pedidos` (`ventas_sap`)
+
+Una fila por línea abierta de pedido de clientes. Es una **foto del estado abierto** en el momento de la extracción, no un acumulado de un período: cada cierre bueno reemplaza todas las líneas de la empresa, así que lo que ya se facturó o se cerró en SAP desaparece. Llave: `empresa`, `doc_entry` y `linea`. Además de `empresa` y `sincronizado_en`, trae estas columnas de `contrato-robot.md` §11.2, en este orden: `doc_entry`, `numero_pedido`, `linea`, `fecha_pedido`, `fecha_compromiso`, `fecha_entrega_linea`, `dias`, `rango`, `dias_atraso`, `slp_code`, `vendedor`, `canal`, `codigo_cliente`, `cliente`, `nit`, `ciudad`, `id_pedido_app`, `oc_cliente`, `direccion_envio`, `comentarios`, `codigo_articulo`, `descripcion`, `linea_articulo`, `familia`, `marca`, `bodega`, `unidad`, `cantidad_pedida`, `cantidad_pendiente`, `precio_lista`, `precio_unitario`, `descuento_documento`, `total_pendiente`, `ganancia_bruta_pendiente`, `moneda`, `trm`.
+
+- **Valor pendiente** = `SUM(total_pendiente)`, en pesos. **Margen** = `SUM(ganancia_bruta_pendiente) / SUM(total_pendiente)`, como en VENTAS. No hay columnas de costo.
+- `cantidad_pedida` y `cantidad_pendiente` van en unidades de venta (las del precio); `precio_lista` y `precio_unitario`, en la moneda de la línea.
+- `dias` cuenta desde `fecha_pedido` y `rango` lo agrupa: `Hasta 30 dias`, `De 31 a 60 dias`, `De 61 a 90 dias` o `Mas de 90 dias`. `dias_atraso` cuenta desde `fecha_compromiso`: es negativo si aún no vence.
+- `id_pedido_app` y `familia` solo existen en `SGX`; en `SDC` siempre son `null`.
+
+#### `v_produccion_*` (`ventas_sap`)
+
+Los datos del tablero «Producción mes a mes»: órdenes de producción de BEAS, costos y maestros de fabricación. Son **solo de `SGX`**, pero filtra siempre por `empresa` igual que en las demás vistas. Además de `empresa` y `sincronizado_en`, cada vista trae estas columnas de `contrato-robot.md` §12.2, en este orden:
+
+| Vista | Columnas | Llave (con `empresa`) |
+|---|---|---|
+| `v_produccion_terminado` | `doc_entry`, `numero_documento`, `linea`, `fecha`, `grupo`, `familia`, `codigo_articulo`, `articulo`, `nro_ot`, `posicion`, `cantidad`, `valor` | `doc_entry`, `linea` |
+| `v_produccion_carga_planta` | `fecha`, `area`, `linea_producto`, `linea_negocio`, `etapa`, `puesto_trabajo`, `nro_ot`, `posicion`, `operacion`, `codigo_articulo`, `nombre_articulo`, `unidad`, `unidades`, `unidades_no_conformes`, `horas`, `almacen`, `estado_ot` | Sin llave: dos reportes iguales del mismo día son legítimos |
+| `v_produccion_costos` | `fecha`, `concepto`, `area`, `linea_producto`, `linea_negocio`, `etapa`, `material_consumido`, `grupo_material`, `codigo_material`, `nro_ot`, `posicion`, `codigo_articulo`, `nombre_articulo`, `puesto_trabajo`, `costo` | Sin llave: un reporte da varias filas |
+| `v_produccion_despiece` | `padre`, `hijo`, `cantidad`, `merma` | Sin llave: un mismo par `padre`-`hijo` puede repetirse |
+| `v_produccion_rutas` | `codigo_articulo`, `operacion`, `area`, `puesto`, `tiempo`, `cantidad_base`, `factor_merma` | Sin llave |
+| `v_produccion_costeo_teorico` | `codigo_articulo`, `articulo`, `familia`, `posiciones`, `cantidad`, `material_soll`, `fabricacion_soll`, `total_soll`, `total_ist` | `codigo_articulo` |
+
+- **Cómo se cargan** (§12.3). Las tres de movimiento (`terminado`, `carga_planta` y `costos`) reemplazan en cada cierre solo las filas con `fecha` desde la `ventana_desde` de la corrida, que es la misma de VENTAS (el mes en curso más los últimos 7 días del mes anterior); lo anterior se queda. La historia empieza en la carga inicial, desde el 2026-08-01. Los tres maestros (`despiece`, `rutas` y `costeo_teorico`) se reemplazan completos.
+- **Costo de producción** = `SUM(costo)` de `v_produccion_costos` **sin las filas `concepto = 'Material intermedio'`**: son material que la propia planta fabricó y vuelve a entrar como insumo (recirculación interna); el tablero las excluye del total. Los conceptos son exactamente `Mano de obra directa`, `Costo variable`, `Costo fijo`, `Material comprado` y `Material intermedio`.
+- `v_produccion_terminado` trae una fila por línea de la entrada a bodega, sin agrupar: suma `cantidad` y `valor` por día y artículo.
+- En `v_produccion_rutas`, el tiempo unitario de una operación es `tiempo / cantidad_base`. En `v_produccion_carga_planta`, `horas` ya viene en horas y `estado_ot` es `J` o `N`.
+- `v_produccion_despiece` y `v_produccion_rutas` no tienen llave: agrupa o suma, no supongas una fila por par.
+
+#### Nombres que cambian entre vistas
+
+- **`familia`** es `OITM.U_GSP_FAMILIA` en `v_pedidos`, `v_produccion_terminado` y `v_produccion_costeo_teorico`. En `v_ventas`, `familia` es otro dato (el grupo del artículo, `OITB.ItmsGrpNam`); en `v_pedidos` ese grupo es `linea_articulo`.
+- **`linea`** es siempre el número de línea del documento (`v_ventas`, `v_pedidos`, `v_produccion_terminado`). La «Linea» del tablero de producción, la línea de producto, es **`linea_producto`**, no `linea`.
 
 ## 2. El botón «Actualizar datos»
 
@@ -146,6 +184,8 @@ Cada pantalla pide **solo lo que muestra**. Ejemplos:
 | Canales, condiciones de pago, municipios | `MAESTROS` | `catalogos` |
 | Todo MAESTROS | `MAESTROS` | `null` |
 | Ventas y margen (mini panel de gerencia) | `VENTAS` | `null` (trae la parte `ventas`) |
+| Pedidos pendientes | `PEDIDOS` | `null` (trae la parte `pedidos`) |
+| Producción mes a mes (solo Segurex) | `PRODUCCION` | `null` (trae las seis partes) |
 
 El botón dice qué actualiza: «Actualizar cartera», «Actualizar clientes», no un «Actualizar» genérico.
 
