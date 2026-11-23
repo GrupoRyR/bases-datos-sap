@@ -11,6 +11,7 @@ import config
 import run_robot
 import vigilante
 from fake_hana import VpnFalsa
+from vpn import VpnError
 
 HOY = date(2026, 10, 26)  # el día de AHORA (conftest)
 
@@ -380,3 +381,125 @@ def test_vigilar_no_va_con_empresa(entorno):
     with pytest.raises(SystemExit) as exc:
         _main(entorno, "--vigilar", "--empresa", "SGX", probar=Red())
     assert exc.value.code == 2
+
+
+# --- VPN pegada (T3) ---------------------------------------------------------------------
+
+SIN_SALIDA = "HTTPS de bases.prueba.test: timed out"
+
+
+class RedTrasLaVpn(Red):
+    """Sin salida a internet mientras la VPN (falsa) siga arriba: túnel completo pegado."""
+
+    def __init__(self, vpn: VpnFalsa) -> None:
+        super().__init__()
+        self.vpn = vpn
+
+    def __call__(self, url: str) -> str | None:
+        self.probadas.append(url)
+        return SIN_SALIDA if self.vpn.arriba else None
+
+
+class VpnQueNoBaja(VpnFalsa):
+    def forzar_desconexion(self) -> None:
+        self.linea.append(("vpn", "forzada"))
+        raise VpnError("El comando sccli no respondió en 60s.")
+
+
+class VpnSinEstado(VpnFalsa):
+    def esta_conectado(self) -> bool:
+        raise VpnError("No se encontró el CLI de Sophos.")
+
+
+@pytest.fixture
+def reiniciar_vpn(monkeypatch):
+    monkeypatch.setenv("VIGILANTE_REINICIAR_VPN", "true")
+
+
+def test_con_la_vpn_pegada_la_baja_y_sigue_con_la_completa(entorno, correos, reiniciar_vpn):
+    e = entorno
+    e.vpn.arriba = True  # quedó conectada (desconexión sucia)
+    red = RedTrasLaVpn(e.vpn)
+    esperas: list[float] = []
+    assert _vigilar(e, red, dormir=esperas.append) == 0
+    assert e.linea[0] == ("vpn", "forzada")
+    assert esperas[:3] == [60, 60, vigilante.ESPERA_VPN_S]
+    assert len(red.probadas) == 4  # 3 sin salida, y la que sí, después de bajarla
+    assert e.vpn.conexiones == 1  # luego corrió la completa de reparación
+    assert vigilante.completa_buena_de_hoy(HOY)
+    assert correos == []
+
+
+def test_si_la_red_no_vuelve_tras_bajar_la_vpn_avisa(entorno, correos, reiniciar_vpn):
+    e = entorno
+    e.vpn.arriba = True
+    red = Red(SIN_SALIDA)  # la falla no era la VPN
+    assert _vigilar(e, red) == 1
+    assert e.linea == [("vpn", "forzada")]
+    assert len(red.probadas) == 6
+    assert e.vpn.conexiones == 0
+    assert [etapa for etapa, _ in correos[0]] == ["RED"]
+    assert "se bajó la VPN y la red no volvió" in correos[0][0][1]
+
+
+def test_sin_la_variable_no_toca_la_vpn(entorno, correos):
+    e = entorno
+    e.vpn.arriba = True
+
+    def no_llamar(*args):
+        raise AssertionError("no debía usar la VPN")
+
+    assert _vigilar(e, RedTrasLaVpn(e.vpn), fabrica_vpn=no_llamar) == 1
+    assert e.linea == []
+    assert correos == [[("RED", f"Sin salida a internet: {SIN_SALIDA}")]]
+
+
+def test_con_sin_vpn_no_toca_la_vpn(entorno, correos, reiniciar_vpn):
+    e = entorno
+    e.vpn.arriba = True
+
+    def no_llamar(*args):
+        raise AssertionError("no debía usar la VPN")
+
+    red = RedTrasLaVpn(e.vpn)
+    assert _main(e, "--vigilar", "--sin-vpn", probar=red, fabrica_vpn=no_llamar, dormir=lambda s: None) == 1
+    assert [etapa for etapa, _ in correos[0]] == ["RED"]
+
+
+def test_si_la_vpn_no_esta_conectada_no_la_baja(entorno, correos, reiniciar_vpn):
+    e = entorno
+    red = Red(SIN_SALIDA)
+    assert _vigilar(e, red) == 1
+    assert e.linea == []
+    assert len(red.probadas) == 3
+    assert correos == [[("RED", f"Sin salida a internet: {SIN_SALIDA}")]]
+
+
+def test_si_no_se_sabe_el_estado_de_la_vpn_no_la_baja(entorno, correos, reiniciar_vpn):
+    e = entorno
+    vpn = VpnSinEstado(e.linea)
+    assert _vigilar(e, Red(SIN_SALIDA), vpn=vpn) == 1
+    assert e.linea == []
+    assert [etapa for etapa, _ in correos[0]] == ["RED"]
+
+
+def test_dentro_de_una_franja_no_baja_la_vpn(entorno, correos, reiniciar_vpn):
+    e = entorno
+    e.vpn.arriba = True
+    a_las_0555 = lambda: datetime(2026, 10, 26, 5, 55, tzinfo=config.BOGOTA)  # noqa: E731
+    assert _vigilar(e, RedTrasLaVpn(e.vpn), ahora=a_las_0555) == 1
+    assert e.linea == []
+    assert e.vpn.arriba is True
+    assert [etapa for etapa, _ in correos[0]] == ["RED"]
+    assert "franja" in correos[0][0][1]
+
+
+def test_si_no_puede_bajar_la_vpn_avisa(entorno, correos, reiniciar_vpn):
+    e = entorno
+    vpn = VpnQueNoBaja(e.linea)
+    vpn.arriba = True
+    assert _vigilar(e, RedTrasLaVpn(vpn), vpn=vpn) == 1
+    assert e.linea == [("vpn", "forzada")]
+    assert vpn.conexiones == 0
+    assert [etapa for etapa, _ in correos[0]] == ["RED"]
+    assert "no se pudo bajar la VPN" in correos[0][0][1]

@@ -97,6 +97,25 @@ def test_no_desconecta_si_se_pidio_dejarla_arriba(sccli: SccliFalso) -> None:
     assert sccli.conectado is True
 
 
+def test_forzar_desconexion_baja_un_tunel_que_no_subimos(sccli: SccliFalso) -> None:
+    sccli.conectado = True  # lo dejó arriba otro proceso (o una desconexión sucia)
+
+    RobotVPN(_cfg(desconectar=False)).forzar_desconexion()
+
+    assert sccli.llamadas == [["disable", "-n", "vpn-de-prueba"]]
+    assert sccli.conectado is False
+
+
+def test_forzar_desconexion_sin_sccli_lanza_vpn_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def sin_cli(cmd, **_):
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr(vpn.subprocess, "run", sin_cli)
+
+    with pytest.raises(VpnError, match="SOPHOS_CLI"):
+        RobotVPN(_cfg()).forzar_desconexion()
+
+
 def test_la_clave_no_sale_en_el_log(sccli: SccliFalso, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level("DEBUG", logger="bases_sap")
 

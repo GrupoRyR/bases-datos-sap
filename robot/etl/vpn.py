@@ -158,6 +158,21 @@ class RobotVPN:
         self._sccli("disable", "-n", self.cfg.conexion)
         self._la_conectamos_nosotros = False
 
+    def forzar_desconexion(self) -> None:
+        """Baja el túnel aunque no lo haya subido este proceso.
+
+        A diferencia de `desconectar()`, no mira quién lo subió ni
+        SOPHOS_DISCONNECT_AL_FINAL: es para el vigilante, cuando un túnel completo
+        quedó pegado y deja al PC sin salida a internet. Un VpnError se propaga.
+        """
+        log.warning("Bajando a la fuerza la VPN '%s'...", self.cfg.conexion)
+        res = self._sccli("disable", "-n", self.cfg.conexion)
+        if res.returncode != 0:
+            # No se lanza: quien llama vuelve a probar la red, que es la prueba de verdad.
+            salida = f"{res.stdout or ''} {res.stderr or ''}".strip()
+            log.warning("sccli disable terminó con código %s: %s", res.returncode, salida or "sin detalle")
+        self._la_conectamos_nosotros = False
+
     # ------------------------------------------------- gestor de contexto
     def __enter__(self) -> "RobotVPN":
         self.conectar()

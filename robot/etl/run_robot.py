@@ -485,6 +485,7 @@ def _ejecutar(
 
             fallos = vigilante.vigilar(
                 cfg, correr_completa=correr_completa, ahora=ahora, dormir=dormir, probar=probar,
+                fabrica_vpn=None if args.sin_vpn else fabrica_vpn,
             )
         else:
             fallos = _solo_carpeta(

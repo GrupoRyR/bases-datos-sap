@@ -196,6 +196,21 @@ VIGILANTE_PANEL_URL=https://<subdominio-del-panel>
 
 Esa línea la agregas tú: el robot no edita esos archivos. Sin la variable, el vigilante solo prueba la app. Con una dirección que no empiece por `https://`, el vigilante sale con error de configuración (código 2).
 
+### VPN pegada
+
+El perfil de Sophos es de túnel completo: si una desconexión sucia deja la VPN conectada, el PC se queda sin salida a internet. Con `VIGILANTE_REINICIAR_VPN=true`, cuando la prueba de red falla el vigilante pregunta a `sccli` si la VPN sigue conectada y, si lo está:
+
+- Dentro de una franja bloqueada no la toca (puede ser de otro robot): avisa con la etapa `RED` diciendo que la dejó arriba.
+- Fuera de las franjas, la baja con `sccli disable` aunque no la haya subido el robot, espera 30 segundos y vuelve a probar la red (otros 3 intentos). Si la red volvió, sigue con la completa de hoy; si no, avisa con la etapa `RED` diciendo que bajó la VPN y la red no volvió.
+
+Si la VPN no está conectada, o con `--sin-vpn`, no toca nada y avisa con `RED` como siempre. Todo esto pasa con el candado del robot tomado, así que el propio robot no está usando la VPN.
+
+Queda apagado hasta que lo pruebes. Agrega esta línea a `robot\.env` y a `robot\.env.example`, y cámbiala a `true` cuando lo quieras probar:
+
+```
+VIGILANTE_REINICIAR_VPN=false
+```
+
 ## Carpeta de CSV
 
 Todo queda en `BASES_SAP_CSV_DIR` (UTF-8 con BOM, separador `;`):
