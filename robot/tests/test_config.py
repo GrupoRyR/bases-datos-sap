@@ -290,3 +290,29 @@ def test_un_valor_raro_deja_el_cifrado_encendido(monkeypatch: pytest.MonkeyPatch
 
     assert hana.encrypt is True
     assert hana.validar_certificado is True
+
+
+# --- Vigilante ------------------------------------------------------------------------
+
+
+def test_el_vigilante_sin_panel_por_defecto() -> None:
+    assert cargar_config().vigilante.panel_url == ""
+
+
+def test_url_del_panel_del_vigilante_sin_barra_final(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VIGILANTE_PANEL_URL", " https://panel.prueba.test/ ")
+
+    assert cargar_config().vigilante.panel_url == "https://panel.prueba.test"
+
+
+def test_el_panel_del_vigilante_debe_ser_https(entorno_completo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VIGILANTE_PANEL_URL", "http://panel.prueba.test")
+    cfg = cargar_config()
+
+    cfg.validar()  # solo el vigilante lo usa
+    with pytest.raises(ConfigError, match="VIGILANTE_PANEL_URL debe empezar por https://"):
+        cfg.validar(requiere_vigilante=True)
+
+
+def test_el_vigilante_sin_panel_es_valido(entorno_completo: Path) -> None:
+    cargar_config().validar(requiere_vigilante=True)
