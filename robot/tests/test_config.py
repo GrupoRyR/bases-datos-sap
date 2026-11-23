@@ -322,6 +322,67 @@ def test_el_vigilante_no_reinicia_la_vpn_por_defecto() -> None:
     assert cargar_config().vigilante.reiniciar_vpn is False
 
 
+def test_la_cadena_del_vigilante_esta_apagada_por_defecto() -> None:
+    vigilante = cargar_config().vigilante
+
+    assert (vigilante.ia_carpeta, vigilante.ia_tarea) == (None, "")
+    assert (vigilante.publicador_archivo, vigilante.publicador_tarea) == (None, "")
+    assert vigilante.limite_tarea_min == 60
+    assert vigilante.ia_configurado is False
+    assert vigilante.publicador_configurado is False
+    assert vigilante.cadena_configurada is False
+
+
+def test_la_cadena_del_vigilante_se_lee_del_env(
+    entorno_completo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("VIGILANTE_IA_CARPETA", f" {tmp_path / 'ia'} ")
+    monkeypatch.setenv("VIGILANTE_IA_TAREA", " SAP HANA - todo ")
+    monkeypatch.setenv("VIGILANTE_PUBLICADOR_ARCHIVO", str(tmp_path / "publicador.log"))
+    monkeypatch.setenv("VIGILANTE_PUBLICADOR_TAREA", "Publicador panel")
+    monkeypatch.setenv("VIGILANTE_LIMITE_TAREA_MIN", "45")
+    cfg = cargar_config()
+
+    vigilante = cfg.vigilante
+    assert (vigilante.ia_carpeta, vigilante.ia_tarea) == (tmp_path / "ia", "SAP HANA - todo")
+    assert (vigilante.publicador_archivo, vigilante.publicador_tarea) == (
+        tmp_path / "publicador.log", "Publicador panel",
+    )
+    assert vigilante.limite_tarea_min == 45
+    assert vigilante.ia_configurado and vigilante.publicador_configurado and vigilante.cadena_configurada
+    cfg.validar(requiere_vigilante=True)
+
+
+@pytest.mark.parametrize("variable, falta", [
+    ("VIGILANTE_IA_CARPETA", "VIGILANTE_IA_TAREA"),
+    ("VIGILANTE_IA_TAREA", "VIGILANTE_IA_CARPETA"),
+    ("VIGILANTE_PUBLICADOR_ARCHIVO", "VIGILANTE_PUBLICADOR_TAREA"),
+    ("VIGILANTE_PUBLICADOR_TAREA", "VIGILANTE_PUBLICADOR_ARCHIVO"),
+])
+def test_un_robot_de_la_cadena_a_medias_es_error(
+    entorno_completo: Path, monkeypatch: pytest.MonkeyPatch, variable: str, falta: str
+) -> None:
+    monkeypatch.setenv(variable, "algo")
+    cfg = cargar_config()
+
+    cfg.validar()  # solo el vigilante la usa
+    with pytest.raises(ConfigError, match=f"falta {falta}"):
+        cfg.validar(requiere_vigilante=True)
+
+
+@pytest.mark.parametrize("valor, mensaje", [
+    ("0", "VIGILANTE_LIMITE_TAREA_MIN debe ser mayor que cero"),
+    ("una hora", "VIGILANTE_LIMITE_TAREA_MIN=una hora"),
+])
+def test_limite_de_las_tareas_invalido(
+    entorno_completo: Path, monkeypatch: pytest.MonkeyPatch, valor: str, mensaje: str
+) -> None:
+    monkeypatch.setenv("VIGILANTE_LIMITE_TAREA_MIN", valor)
+
+    with pytest.raises(ConfigError, match=mensaje):
+        cargar_config().validar(requiere_vigilante=True)
+
+
 @pytest.mark.parametrize("valor, esperado", [("true", True), ("1", True), ("false", False), ("", False)])
 def test_reiniciar_vpn_del_vigilante(monkeypatch: pytest.MonkeyPatch, valor: str, esperado: bool) -> None:
     monkeypatch.setenv("VIGILANTE_REINICIAR_VPN", valor)

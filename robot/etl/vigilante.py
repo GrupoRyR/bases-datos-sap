@@ -11,8 +11,16 @@ Lo corre la tarea BasesSAP-Vigilante a las 03:45 y a las 07:00, en este orden:
 2. Completa de hoy: si ya hay una completa buena de hoy (registro propio,
    robot/state/ultima_completa.json), no hace nada. Si no, corre la completa
    una vez, dentro del mismo candado.
-3. Aviso: si la completa de reparación falla, avisa una sola vez (etapa
-   COMPLETA); run_robot guarda el estado y manda el correo.
+3. Cadena de los otros robots (apagada hasta que se configuren sus variables
+   VIGILANTE_IA_* y VIGILANTE_PUBLICADOR_*): con Bases SAP al día, lanza por
+   nombre la tarea de «SAP HANA - todo» si sus archivos ia_* no son de hoy, y
+   luego la del publicador del panel si su archivo no es de hoy o si se acaba de
+   relanzar «SAP HANA - todo». Una a la vez, esperando a que termine cada una,
+   nunca dentro de una franja bloqueada y con el candado del robot tomado. Si una
+   falla, no lanza la siguiente (etapa CADENA). Si la completa de reparación
+   falló, no corre la cadena: depende de los datos de Bases SAP.
+4. Aviso: si algo falla, avisa una sola vez (etapas RED, COMPLETA o CADENA);
+   run_robot guarda el estado y manda el correo.
 
 - `guardar_completa()` / `completa_buena_de_hoy()`: registro propio de la última
   completa. `ultima_ejecucion.json` no sirve para esto: lo sobrescribe cada
@@ -28,9 +36,9 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Protocol
 from urllib.parse import urlsplit
 
 import bloqueo
@@ -233,6 +241,141 @@ def _reiniciar_vpn(
     return None
 
 
+# --- Cadena de los otros robots -----------------------------------------------------------
+
+
+class Tareas(Protocol):
+    """Lo que la cadena necesita de tareas.TareasWindows."""
+
+    def correr(self, nombre: str, limite: timedelta) -> str | None: ...
+
+
+def _fecha_de(momento: float) -> date:
+    return datetime.fromtimestamp(momento, config.BOGOTA).date()
+
+
+def fecha_ia(carpeta: Path) -> date | None:
+    """Día (Bogotá) del archivo ia_* más nuevo de `carpeta`, o None si no hay ninguno."""
+    momentos: list[float] = []
+    try:
+        for ruta in carpeta.glob("ia_*"):
+            try:
+                momentos.append(ruta.stat().st_mtime)
+            except OSError:
+                continue  # lo borraron mientras tanto
+    except OSError:
+        return None
+    return _fecha_de(max(momentos)) if momentos else None
+
+
+def fecha_archivo(ruta: Path) -> date | None:
+    """Día (Bogotá) en que se modificó `ruta`, o None si no existe o no se puede leer."""
+    try:
+        return _fecha_de(ruta.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _vieja(fecha: date | None, hoy: date) -> bool:
+    return fecha is None or fecha < hoy
+
+
+def _texto_fecha(fecha: date | None) -> str:
+    return fecha.isoformat() if fecha is not None else "ninguna"
+
+
+def _lanzar(
+    cfg: Config,
+    nombre: str,
+    *,
+    tareas: Tareas,
+    ahora: Callable[[], datetime],
+    dormir: Callable[[float], None],
+) -> str | None:
+    """Lanza la tarea `nombre` y espera a que termine; None si terminó bien.
+
+    Nunca dentro de una franja bloqueada: los otros robots usan la VPN y estos
+    también. Si es hora de una, se espera a que pase.
+    """
+    momento = ahora()
+    franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
+    if franja:
+        try:
+            fin = bloqueo.fin_de_franja(momento, cfg.franjas, cfg.margen_franja_min)
+        except ValueError as exc:
+            return str(exc)
+        log.warning("Es la franja de las %s: espero hasta las %s para lanzar la tarea %s.",
+                    franja, f"{fin:%H:%M}", nombre)
+        dormir((fin - momento).total_seconds())
+    log.info("Lanzo la tarea %s.", nombre)
+    return tareas.correr(nombre, timedelta(minutes=cfg.vigilante.limite_tarea_min))
+
+
+def correr_cadena(
+    cfg: Config,
+    *,
+    tareas: Tareas,
+    ahora: Callable[[], datetime],
+    dormir: Callable[[float], None],
+) -> list[tuple[str, str]]:
+    """«SAP HANA - todo» y luego el publicador, si están viejos. Devuelve los fallos (CADENA).
+
+    Bases SAP (el paso 1 de la cadena) ya está al día: es la completa del
+    vigilante. Se corre una tarea a la vez, esperando a que termine la anterior,
+    y si una falla no se lanza la siguiente. El candado del robot sigue tomado
+    todo el tiempo, así que este robot no usa la VPN mientras tanto.
+    """
+    vig = cfg.vigilante
+    hoy = ahora().date()
+    ia_relanzada = False
+
+    if vig.ia_carpeta is not None and vig.ia_tarea:
+        fecha = fecha_ia(vig.ia_carpeta)
+        if _vieja(fecha, hoy):
+            log.warning("Los archivos ia_* no son de hoy (el más nuevo: %s): corro la tarea %s.",
+                        _texto_fecha(fecha), vig.ia_tarea)
+            fallo = _lanzar(cfg, vig.ia_tarea, tareas=tareas, ahora=ahora, dormir=dormir)
+            if fallo is not None:
+                return _fallo_cadena(fallo, siguiente=vig.publicador_tarea if vig.publicador_configurado else "")
+            fecha = fecha_ia(vig.ia_carpeta)
+            if _vieja(fecha, ahora().date()):
+                return _fallo_cadena(
+                    f"La tarea {vig.ia_tarea} terminó, pero no renovó los archivos ia_* "
+                    f"(el más nuevo: {_texto_fecha(fecha)})",
+                    siguiente=vig.publicador_tarea if vig.publicador_configurado else "",
+                )
+            ia_relanzada = True
+        else:
+            log.info("Los archivos ia_* están al día (%s).", _texto_fecha(fecha))
+
+    if vig.publicador_archivo is not None and vig.publicador_tarea:
+        fecha = fecha_archivo(vig.publicador_archivo)
+        if ia_relanzada or _vieja(fecha, hoy):
+            motivo = "se renovaron los archivos ia_*" if ia_relanzada else f"su archivo no es de hoy ({_texto_fecha(fecha)})"
+            log.warning("Corro la tarea %s: %s.", vig.publicador_tarea, motivo)
+            fallo = _lanzar(cfg, vig.publicador_tarea, tareas=tareas, ahora=ahora, dormir=dormir)
+            if fallo is not None:
+                return _fallo_cadena(fallo)
+            fecha = fecha_archivo(vig.publicador_archivo)
+            if _vieja(fecha, ahora().date()):
+                return _fallo_cadena(
+                    f"La tarea {vig.publicador_tarea} terminó, pero no renovó su archivo "
+                    f"(fecha: {_texto_fecha(fecha)})"
+                )
+        else:
+            log.info("El publicador está al día (%s).", _texto_fecha(fecha))
+
+    log.info("La cadena de los otros robots quedó al día.")
+    return []
+
+
+def _fallo_cadena(motivo: str, *, siguiente: str = "") -> list[tuple[str, str]]:
+    log.error("%s.", motivo)
+    if siguiente:
+        log.warning("No lanzo la tarea %s.", siguiente)
+    return [("CADENA", motivo)]
+
+
 # --- Vigilante ------------------------------------------------------------------------------
 
 
@@ -244,8 +387,9 @@ def vigilar(
     dormir: Callable[[float], None],
     probar: Callable[[str], str | None] = probar_url,
     fabrica_vpn: Callable[[Any], Any] | None = None,
+    tareas: Tareas | None = None,
 ) -> list[tuple[str, str]]:
-    """Red (-> VPN pegada) -> completa de hoy -> aviso. Devuelve los fallos (etapa, mensaje).
+    """Red (-> VPN pegada) -> completa de hoy -> cadena -> aviso. Devuelve los fallos (etapa, mensaje).
 
     `correr_completa()` corre la completa de las dos empresas, sin avisar, y
     devuelve su código de salida. Nunca se corre si ya hay una completa buena de
@@ -253,6 +397,9 @@ def vigilar(
 
     `fabrica_vpn(cfg.vpn)` da el RobotVPN con que se baja un túnel pegado (solo con
     VIGILANTE_REINICIAR_VPN); None cuando el robot corre con --sin-vpn.
+
+    `tareas` (tareas.TareasWindows) lanza las tareas de la cadena de los otros
+    robots; solo se usa si la cadena está configurada y Bases SAP quedó al día.
     """
     urls = [cfg.api.url]
     if cfg.vigilante.panel_url:
@@ -270,19 +417,26 @@ def vigilar(
     hoy = ahora().date()
     if completa_buena_de_hoy(hoy):
         log.info("Bases SAP está al día: la completa de hoy (%s) terminó bien.", hoy.isoformat())
-        return []
+    else:
+        log.warning("Bases SAP no tiene una completa buena de hoy (%s): corro la completa.",
+                    _por_que_no_hay_completa(leer_completa(), hoy))
+        codigo = correr_completa()
+        if codigo == 130:
+            raise KeyboardInterrupt  # Ctrl+C durante la completa: se cancela todo, sin aviso
+        if codigo != 0:
+            datos = leer_completa() or {}
+            etapas = datos.get("etapas") if datos.get("fecha") == hoy.isoformat() else None
+            detalle = ", ".join(str(e) for e in etapas) if isinstance(etapas, list) and etapas else "sin detalle"
+            mensaje = f"La completa de reparación terminó con fallos ({detalle}); el detalle está en el log."
+            log.error(mensaje)
+            if cfg.vigilante.cadena_configurada:
+                log.warning("No corro la cadena de los otros robots: dependen de los datos de Bases SAP.")
+            return [("COMPLETA", mensaje)]
+        log.info("La completa de reparación terminó bien: Bases SAP quedó al día.")
 
-    log.warning("Bases SAP no tiene una completa buena de hoy (%s): corro la completa.",
-                _por_que_no_hay_completa(leer_completa(), hoy))
-    codigo = correr_completa()
-    if codigo == 130:
-        raise KeyboardInterrupt  # Ctrl+C durante la completa: se cancela todo, sin aviso
-    if codigo != 0:
-        datos = leer_completa() or {}
-        etapas = datos.get("etapas") if datos.get("fecha") == hoy.isoformat() else None
-        detalle = ", ".join(str(e) for e in etapas) if isinstance(etapas, list) and etapas else "sin detalle"
-        mensaje = f"La completa de reparación terminó con fallos ({detalle}); el detalle está en el log."
-        log.error(mensaje)
-        return [("COMPLETA", mensaje)]
-    log.info("La completa de reparación terminó bien: Bases SAP quedó al día.")
-    return []
+    if not cfg.vigilante.cadena_configurada:
+        return []
+    if tareas is None:
+        log.warning("La cadena de los otros robots está configurada, pero no hay con qué lanzar sus tareas.")
+        return []
+    return correr_cadena(cfg, tareas=tareas, ahora=ahora, dormir=dormir)

@@ -130,6 +130,12 @@ def _texto(nombre: str, por_defecto: str = "") -> str:
     return (os.getenv(nombre) or "").strip() or por_defecto
 
 
+def _ruta_o_nada(nombre: str) -> Path | None:
+    """Ruta de la variable, o None si falta o está vacía."""
+    valor = _texto(nombre)
+    return Path(valor) if valor else None
+
+
 def _franjas(valor: str) -> list[str]:
     """Convierte "6:00, 12:30" en ["06:00", "12:30"].
 
@@ -231,6 +237,29 @@ class VigilanteConfig:
     # Si no hay salida a internet y la VPN Sophos sigue conectada (túnel completo pegado
     # tras una desconexión sucia), la baja con sccli y vuelve a probar. Apagado por defecto.
     reiniciar_vpn: bool = False
+    # Cadena de los otros robots (apagada mientras no se configure). Un robot de la cadena
+    # cuenta solo con las dos variables: la ruta con que se mide si está al día y el nombre
+    # de su tarea programada.
+    # «SAP HANA - todo»: carpeta de sus archivos ia_*.
+    ia_carpeta: Path | None = None
+    ia_tarea: str = ""
+    # Publicador del panel: archivo que toca en cada corrida (su log o su estado).
+    publicador_archivo: Path | None = None
+    publicador_tarea: str = ""
+    # Minutos que se espera a que termine cada tarea lanzada.
+    limite_tarea_min: int = 60
+
+    @property
+    def ia_configurado(self) -> bool:
+        return self.ia_carpeta is not None and bool(self.ia_tarea)
+
+    @property
+    def publicador_configurado(self) -> bool:
+        return self.publicador_archivo is not None and bool(self.publicador_tarea)
+
+    @property
+    def cadena_configurada(self) -> bool:
+        return self.ia_configurado or self.publicador_configurado
 
 
 @dataclass(frozen=True)
@@ -300,6 +329,23 @@ class Config:
             panel = self.vigilante.panel_url
             if panel and not panel.lower().startswith("https://"):
                 faltantes.append(f"VIGILANTE_PANEL_URL debe empezar por https:// (solo HTTPS): {panel}")
+            vig = self.vigilante
+            for ruta, tarea, var_ruta, var_tarea, robot in (
+                (vig.ia_carpeta, vig.ia_tarea, "VIGILANTE_IA_CARPETA", "VIGILANTE_IA_TAREA",
+                 "«SAP HANA - todo»"),
+                (vig.publicador_archivo, vig.publicador_tarea, "VIGILANTE_PUBLICADOR_ARCHIVO",
+                 "VIGILANTE_PUBLICADOR_TAREA", "el publicador del panel"),
+            ):
+                if (ruta is None) != (not tarea):
+                    falta = var_tarea if ruta is not None else var_ruta
+                    faltantes.append(
+                        f"{var_ruta} y {var_tarea} van juntas (cadena del vigilante, {robot}): "
+                        f"falta {falta}"
+                    )
+            if vig.limite_tarea_min <= 0:
+                faltantes.append(
+                    f"VIGILANTE_LIMITE_TAREA_MIN debe ser mayor que cero: {vig.limite_tarea_min}"
+                )
 
         invalidas = [f for f in self.franjas if not _RE_FRANJA.match(f)]
         if invalidas:
@@ -335,6 +381,16 @@ def cargar_config(env_path: Path | None = None) -> Config:
         for c in os.getenv("ALERTA_DESTINATARIOS", "").split(",")
         if c.strip()
     ]
+
+    vigilante = VigilanteConfig(
+        panel_url=_texto("VIGILANTE_PANEL_URL").rstrip("/"),
+        reiniciar_vpn=_bool(os.getenv("VIGILANTE_REINICIAR_VPN"), False),
+        ia_carpeta=_ruta_o_nada("VIGILANTE_IA_CARPETA"),
+        ia_tarea=_texto("VIGILANTE_IA_TAREA"),
+        publicador_archivo=_ruta_o_nada("VIGILANTE_PUBLICADOR_ARCHIVO"),
+        publicador_tarea=_texto("VIGILANTE_PUBLICADOR_TAREA"),
+        limite_tarea_min=_int("VIGILANTE_LIMITE_TAREA_MIN", 60, invalidos),
+    )
 
     # Los secretos los registra registro.registrar_secretos(cfg) en cada punto de entrada
     # (run_robot.py, revisar_solicitudes.py) apenas carga la configuración, y cada módulo
@@ -386,11 +442,9 @@ def cargar_config(env_path: Path | None = None) -> Config:
             smtp_password=os.getenv("ALERTA_SMTP_PASSWORD", ""),
             destinatarios=destinatarios,
         ),
+        # Después de leer todas las variables numéricas (el vigilante también tiene una).
         numeros_invalidos=tuple(invalidos),
-        vigilante=VigilanteConfig(
-            panel_url=_texto("VIGILANTE_PANEL_URL").rstrip("/"),
-            reiniciar_vpn=_bool(os.getenv("VIGILANTE_REINICIAR_VPN"), False),
-        ),
+        vigilante=vigilante,
     )
 
 

@@ -31,7 +31,8 @@ Uso:
                                                    # una vez, a mano: PRODUCCION de SGX desde esa
                                                    # fecha en vez de la ventana de HANA (contrato §12)
     python run_robot.py --vigilar                  # 03:45 y 07:00: red -> completa de hoy (si
-                                                   # falta o falló) -> aviso (vigilante.py)
+                                                   # falta o falló) -> cadena de los otros robots
+                                                   # (si está configurada) -> aviso (vigilante.py)
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa, el archivo y el vigilante esperan hasta 20 minutos a que lo suelte otro
@@ -69,6 +70,7 @@ import vigilante
 from api import ApiCliente
 from carpeta import Carpeta
 from config import EMPRESAS, Config, ConfigError, HanaConfig, cargar_config
+from tareas import TareasWindows
 from trabajos import (
     Trabajo,
     TrabajoInvalido,
@@ -323,7 +325,9 @@ def main(
     ahora: Callable[[], datetime] = config.ahora,
     dormir: Callable[[float], None] = time.sleep,
     probar: Callable[[str], str | None] = vigilante.probar_url,
+    tareas: vigilante.Tareas | None = None,
 ) -> int:
+    """`tareas` lanza las tareas de la cadena del vigilante; por defecto, TareasWindows."""
     parser = _parser()
     args = parser.parse_args(argv)
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
@@ -427,7 +431,7 @@ def main(
         return _ejecutar(
             cfg, args, modo, empresas, inicio, avisar=avisar, fabrica_api=fabrica_api,
             fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora, carga=carga,
-            dormir=dormir, probar=probar,
+            dormir=dormir, probar=probar, tareas=tareas,
         )
     finally:
         candado.soltar()
@@ -448,6 +452,7 @@ def _ejecutar(
     carga: Trabajo | None = None,
     dormir: Callable[[float], None] = time.sleep,
     probar: Callable[[str], str | None] = vigilante.probar_url,
+    tareas: vigilante.Tareas | None = None,
 ) -> int:
     """El modo pedido, con el candado ya tomado.
 
@@ -486,6 +491,7 @@ def _ejecutar(
             fallos = vigilante.vigilar(
                 cfg, correr_completa=correr_completa, ahora=ahora, dormir=dormir, probar=probar,
                 fabrica_vpn=None if args.sin_vpn else fabrica_vpn,
+                tareas=tareas if tareas is not None else TareasWindows(dormir=dormir),
             )
         else:
             fallos = _solo_carpeta(
