@@ -228,6 +228,9 @@ class VigilanteConfig:
     # Base del panel (sin barra final). Opcional: si está, el vigilante también prueba
     # que responda antes de dar por buena la salida a internet.
     panel_url: str = ""
+    # Si no hay salida a internet y la VPN Sophos sigue conectada (túnel completo pegado
+    # tras una desconexión sucia), la baja con sccli y vuelve a probar. Apagado por defecto.
+    reiniciar_vpn: bool = False
 
 
 @dataclass(frozen=True)
@@ -384,7 +387,10 @@ def cargar_config(env_path: Path | None = None) -> Config:
             destinatarios=destinatarios,
         ),
         numeros_invalidos=tuple(invalidos),
-        vigilante=VigilanteConfig(panel_url=_texto("VIGILANTE_PANEL_URL").rstrip("/")),
+        vigilante=VigilanteConfig(
+            panel_url=_texto("VIGILANTE_PANEL_URL").rstrip("/"),
+            reiniciar_vpn=_bool(os.getenv("VIGILANTE_REINICIAR_VPN"), False),
+        ),
     )
 
 

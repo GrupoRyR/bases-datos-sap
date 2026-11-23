@@ -316,3 +316,14 @@ def test_el_panel_del_vigilante_debe_ser_https(entorno_completo: Path, monkeypat
 
 def test_el_vigilante_sin_panel_es_valido(entorno_completo: Path) -> None:
     cargar_config().validar(requiere_vigilante=True)
+
+
+def test_el_vigilante_no_reinicia_la_vpn_por_defecto() -> None:
+    assert cargar_config().vigilante.reiniciar_vpn is False
+
+
+@pytest.mark.parametrize("valor, esperado", [("true", True), ("1", True), ("false", False), ("", False)])
+def test_reiniciar_vpn_del_vigilante(monkeypatch: pytest.MonkeyPatch, valor: str, esperado: bool) -> None:
+    monkeypatch.setenv("VIGILANTE_REINICIAR_VPN", valor)
+
+    assert cargar_config().vigilante.reiniciar_vpn is esperado

@@ -5,6 +5,9 @@ Lo corre la tarea BasesSAP-Vigilante a las 03:45 y a las 07:00, en este orden:
 1. Red: prueba que la API (y el panel, si está VIGILANTE_PANEL_URL) respondan por
    HTTPS, hasta 3 veces con un minuto entre intentos. Sin salida a internet no
    corre nada más: avisa (etapa RED).
+   - VPN pegada (solo con VIGILANTE_REINICIAR_VPN, apagado por defecto): si no hay
+     red y la VPN Sophos sigue conectada, fuera de las franjas bloqueadas, la baja
+     con sccli, espera 30 segundos y vuelve a probar la red.
 2. Completa de hoy: si ya hay una completa buena de hoy (registro propio,
    robot/state/ultima_completa.json), no hace nada. Si no, corre la completa
    una vez, dentro del mismo candado.
@@ -30,13 +33,16 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit
 
+import bloqueo
 import config
 from config import Config
 from registro import obtener
+from vpn import VpnError
 
 ARCHIVO_COMPLETA = "ultima_completa.json"
 INTENTOS_RED = 3
 ESPERA_RED_S = 60
+ESPERA_VPN_S = 30  # tras bajar la VPN, antes de volver a probar la red
 TIMEOUT_RED_S = 15
 AGENTE = "bases-sap-robot/1"
 
@@ -175,6 +181,58 @@ def probar_red(
     return errores
 
 
+# --- VPN pegada -----------------------------------------------------------------------------
+
+
+def _reiniciar_vpn(
+    cfg: Config,
+    errores: list[str],
+    urls: list[str],
+    *,
+    fabrica_vpn: Callable[[Any], Any] | None,
+    ahora: Callable[[], datetime],
+    dormir: Callable[[float], None],
+    probar: Callable[[str], str | None],
+) -> str | None:
+    """Sin salida a internet: si la VPN quedó conectada, la baja y vuelve a probar.
+
+    None si la red volvió; si no, el mensaje del fallo RED. Solo con
+    VIGILANTE_REINICIAR_VPN y con la VPN gestionada por el robot (sin --sin-vpn).
+    Nunca dentro de una franja bloqueada: ahí el túnel puede ser de otro robot.
+    El candado del robot ya está tomado (corre dentro de run_robot._ejecutar).
+    """
+    mensaje = "Sin salida a internet: " + "; ".join(errores)
+    if not cfg.vigilante.reiniciar_vpn or fabrica_vpn is None:
+        return mensaje
+
+    robot_vpn = fabrica_vpn(cfg.vpn)
+    try:
+        conectada = robot_vpn.esta_conectado()
+    except VpnError as exc:
+        log.warning("No se pudo saber si la VPN está conectada; no se toca: %s", exc)
+        conectada = False
+    if not conectada:
+        log.info("La VPN no está conectada: la falta de red no es por ella.")
+        return mensaje
+
+    franja = bloqueo.en_franja(ahora(), cfg.franjas, cfg.margen_franja_min)
+    if franja:
+        return (f"{mensaje}; la VPN quedó arriba porque estamos en la franja de las {franja}, "
+                "en que la pueden estar usando los otros robots")
+
+    log.warning("La VPN sigue conectada y no hay salida a internet: la bajo y vuelvo a probar.")
+    try:
+        robot_vpn.forzar_desconexion()
+    except VpnError as exc:
+        return f"{mensaje}; no se pudo bajar la VPN: {exc}"
+    dormir(ESPERA_VPN_S)
+    errores = probar_red(urls, probar=probar, dormir=dormir)
+    if errores:
+        return "Sin salida a internet: " + "; ".join(errores) + "; se bajó la VPN y la red no volvió"
+    log.info("La red volvió después de bajar la VPN.")
+    return None
+
+
 # --- Vigilante ------------------------------------------------------------------------------
 
 
@@ -185,21 +243,28 @@ def vigilar(
     ahora: Callable[[], datetime],
     dormir: Callable[[float], None],
     probar: Callable[[str], str | None] = probar_url,
+    fabrica_vpn: Callable[[Any], Any] | None = None,
 ) -> list[tuple[str, str]]:
-    """Red -> completa de hoy -> aviso. Devuelve los fallos (etapa, mensaje).
+    """Red (-> VPN pegada) -> completa de hoy -> aviso. Devuelve los fallos (etapa, mensaje).
 
     `correr_completa()` corre la completa de las dos empresas, sin avisar, y
     devuelve su código de salida. Nunca se corre si ya hay una completa buena de
     hoy: así no hay dos completas buenas el mismo día.
+
+    `fabrica_vpn(cfg.vpn)` da el RobotVPN con que se baja un túnel pegado (solo con
+    VIGILANTE_REINICIAR_VPN); None cuando el robot corre con --sin-vpn.
     """
     urls = [cfg.api.url]
     if cfg.vigilante.panel_url:
         urls.append(cfg.vigilante.panel_url)
     errores = probar_red(urls, probar=probar, dormir=dormir)
     if errores:
-        mensaje = "Sin salida a internet: " + "; ".join(errores)
-        log.error("%s. No se corre la completa.", mensaje)
-        return [("RED", mensaje)]
+        mensaje = _reiniciar_vpn(
+            cfg, errores, urls, fabrica_vpn=fabrica_vpn, ahora=ahora, dormir=dormir, probar=probar,
+        )
+        if mensaje is not None:
+            log.error("%s. No se corre la completa.", mensaje)
+            return [("RED", mensaje)]
     log.info("Hay salida a internet.")
 
     hoy = ahora().date()

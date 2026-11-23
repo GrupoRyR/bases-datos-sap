@@ -238,7 +238,8 @@ def config_de_prueba(csv_dir: Path) -> Config:
 
 
 class VpnFalsa:
-    """Mismos métodos que RobotVPN: conectar() y desconectar()."""
+    """Mismos métodos que RobotVPN: conectar(), desconectar(), esta_conectado() y
+    forzar_desconexion()."""
 
     def __init__(self, linea: list, *, fallar: bool = False) -> None:
         self.linea = linea
@@ -257,6 +258,14 @@ class VpnFalsa:
     def desconectar(self) -> None:
         self.arriba = False
         self.linea.append(("vpn", "abajo"))
+
+    def esta_conectado(self) -> bool:
+        return self.arriba
+
+    def forzar_desconexion(self) -> None:
+        """Como RobotVPN.forzar_desconexion: baja el túnel aunque no lo hayamos subido."""
+        self.arriba = False
+        self.linea.append(("vpn", "forzada"))
 
 
 # --- HANA --------------------------------------------------------------------
