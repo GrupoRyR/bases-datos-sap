@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -503,3 +504,239 @@ def test_si_no_puede_bajar_la_vpn_avisa(entorno, correos, reiniciar_vpn):
     assert vpn.conexiones == 0
     assert [etapa for etapa, _ in correos[0]] == ["RED"]
     assert "no se pudo bajar la VPN" in correos[0][0][1]
+
+
+# --- Cadena de los otros robots (T4) -----------------------------------------------------
+
+IA = "SAP HANA - todo"
+PUBLICADOR = "Publicador panel"
+AYER = datetime(2026, 10, 25, 23, 0, tzinfo=config.BOGOTA).timestamp()
+ESTA_MANANA = datetime(2026, 10, 26, 1, 0, tzinfo=config.BOGOTA).timestamp()
+
+
+class TareasFalsas:
+    """Reemplaza TareasWindows: anota cada tarea en la línea y corre su efecto.
+
+    Revisa que nunca haya dos a la vez, que el candado del robot siga tomado y
+    que la VPN del robot esté abajo mientras corre cada una.
+    """
+
+    def __init__(self, linea: list, vpn: VpnFalsa, *, efectos=None, fallos=None) -> None:
+        self.linea = linea
+        self.vpn = vpn
+        self.efectos = efectos or {}
+        self.fallos = fallos or {}
+        self.corriendo = False
+        self.lanzadas: list[str] = []
+
+    def correr(self, nombre, limite):
+        assert not self.corriendo, "dos tareas a la vez"
+        assert (config.STATE_DIR / "robot.lock").exists(), "sin el candado del robot"
+        assert not self.vpn.arriba, "con la VPN del robot arriba"
+        self.corriendo = True
+        try:
+            self.lanzadas.append(nombre)
+            self.linea.append(("tarea", nombre, limite))
+            if nombre in self.efectos:
+                self.efectos[nombre]()
+            return self.fallos.get(nombre)
+        finally:
+            self.corriendo = False
+
+
+def _tocar(ruta, momento: float) -> None:
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    if not ruta.exists():
+        ruta.write_text("x", encoding="utf-8")
+    os.utime(ruta, (momento, momento))
+
+
+@pytest.fixture
+def cadena(entorno, monkeypatch, tmp_path):
+    """Los dos robots de la cadena configurados, con sus archivos de ayer."""
+    carpeta = tmp_path / "ia"
+    publicador = tmp_path / "publicador" / "estado.json"
+    monkeypatch.setenv("VIGILANTE_IA_CARPETA", str(carpeta))
+    monkeypatch.setenv("VIGILANTE_IA_TAREA", IA)
+    monkeypatch.setenv("VIGILANTE_PUBLICADOR_ARCHIVO", str(publicador))
+    monkeypatch.setenv("VIGILANTE_PUBLICADOR_TAREA", PUBLICADOR)
+    for nombre in ("ia_clientes.csv", "ia_ventas.csv"):
+        _tocar(carpeta / nombre, AYER)
+    _tocar(publicador, AYER)
+    return carpeta, publicador
+
+
+def test_fecha_ia_es_la_del_archivo_ia_mas_nuevo(tmp_path):
+    _tocar(tmp_path / "ia_a.csv", AYER)
+    _tocar(tmp_path / "ia_b.csv", ESTA_MANANA)
+    _tocar(tmp_path / "otro.csv", ESTA_MANANA + 86400)  # no es ia_*
+    assert vigilante.fecha_ia(tmp_path) == HOY
+
+
+def test_fecha_ia_sin_archivos(tmp_path):
+    assert vigilante.fecha_ia(tmp_path / "no-existe") is None
+    assert vigilante.fecha_ia(tmp_path) is None
+
+
+def test_fecha_archivo(tmp_path):
+    _tocar(tmp_path / "estado.json", AYER)
+    assert vigilante.fecha_archivo(tmp_path / "estado.json") == date(2026, 10, 25)
+    assert vigilante.fecha_archivo(tmp_path / "no-existe.json") is None
+
+
+def test_sin_cadena_configurada_no_lanza_nada(entorno, correos):
+    e = entorno
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn)
+    assert _vigilar(e, tareas=tareas) == 0
+    assert tareas.lanzadas == []
+
+
+def test_con_ia_vieja_lanza_ia_y_luego_el_publicador_despues_de_bases_sap(entorno, correos, cadena):
+    e = entorno
+    carpeta, publicador = cadena
+    tareas = TareasFalsas(e.linea, e.vpn, efectos={
+        IA: lambda: _tocar(carpeta / "ia_clientes.csv", ESTA_MANANA),
+        PUBLICADOR: lambda: _tocar(publicador, ESTA_MANANA),
+    })
+    assert _vigilar(e, tareas=tareas) == 0  # sin completa de hoy: primero la repara
+    assert tareas.lanzadas == [IA, PUBLICADOR]
+    eventos = [evento[:2] for evento in e.linea if evento[0] in ("vpn", "tarea")]
+    assert eventos[0] == ("vpn", "conectar")
+    assert eventos[-3:] == [("vpn", "abajo"), ("tarea", IA), ("tarea", PUBLICADOR)]
+    assert all(evento[2] == timedelta(minutes=60) for evento in e.linea if evento[0] == "tarea")
+    assert vigilante.completa_buena_de_hoy(HOY)
+    assert correos == []
+
+
+def test_si_relanza_ia_tambien_relanza_el_publicador_aunque_este_al_dia(entorno, correos, cadena):
+    e = entorno
+    carpeta, publicador = cadena
+    _tocar(publicador, ESTA_MANANA)  # publicó con los ia_* de ayer
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn, efectos={IA: lambda: _tocar(carpeta / "ia_a.csv", ESTA_MANANA)})
+    assert _vigilar(e, tareas=tareas) == 0
+    assert tareas.lanzadas == [IA, PUBLICADOR]
+
+
+def test_con_ia_al_dia_y_el_publicador_viejo_solo_lanza_el_publicador(entorno, correos, cadena):
+    e = entorno
+    carpeta, publicador = cadena
+    _tocar(carpeta / "ia_ventas.csv", ESTA_MANANA)
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn, efectos={PUBLICADOR: lambda: _tocar(publicador, ESTA_MANANA)})
+    assert _vigilar(e, tareas=tareas) == 0
+    assert tareas.lanzadas == [PUBLICADOR]
+
+
+def test_con_todo_al_dia_no_lanza_nada(entorno, correos, cadena):
+    e = entorno
+    carpeta, publicador = cadena
+    _tocar(carpeta / "ia_ventas.csv", ESTA_MANANA)
+    _tocar(publicador, ESTA_MANANA)
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn)
+    assert _vigilar(e, tareas=tareas) == 0
+    assert tareas.lanzadas == []
+
+
+def test_solo_el_publicador_configurado(entorno, correos, cadena, monkeypatch):
+    e = entorno
+    _, publicador = cadena
+    monkeypatch.delenv("VIGILANTE_IA_CARPETA")
+    monkeypatch.delenv("VIGILANTE_IA_TAREA")
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn, efectos={PUBLICADOR: lambda: _tocar(publicador, ESTA_MANANA)})
+    assert _vigilar(e, tareas=tareas) == 0
+    assert tareas.lanzadas == [PUBLICADOR]
+
+
+def test_si_falla_ia_no_lanza_el_publicador_y_avisa(entorno, correos, cadena):
+    e = entorno
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn, fallos={IA: f"La tarea {IA} terminó con código 1"})
+    assert _vigilar(e, tareas=tareas) == 1
+    assert tareas.lanzadas == [IA]
+    assert correos == [[("CADENA", f"La tarea {IA} terminó con código 1")]]
+    assert [etapa for etapa, _ in _estado()["fallos"]] == ["CADENA"]
+
+
+def test_si_ia_termina_sin_renovar_sus_archivos_avisa(entorno, correos, cadena):
+    e = entorno
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn)  # termina bien pero no toca los ia_*
+    assert _vigilar(e, tareas=tareas) == 1
+    assert tareas.lanzadas == [IA]
+    assert [etapa for etapa, _ in correos[0]] == ["CADENA"]
+    assert "no renovó" in correos[0][0][1]
+
+
+def test_si_el_publicador_termina_sin_renovar_su_archivo_avisa(entorno, correos, cadena):
+    e = entorno
+    carpeta, _ = cadena
+    _tocar(carpeta / "ia_ventas.csv", ESTA_MANANA)
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn)
+    assert _vigilar(e, tareas=tareas) == 1
+    assert tareas.lanzadas == [PUBLICADOR]
+    assert [etapa for etapa, _ in correos[0]] == ["CADENA"]
+    assert "no renovó" in correos[0][0][1]
+
+
+def test_si_la_completa_de_reparacion_falla_no_corre_la_cadena(entorno, correos, cadena):
+    e = entorno
+    vpn = VpnFalsa(e.linea, fallar=True)
+    e.hana.vpn = vpn
+    tareas = TareasFalsas(e.linea, vpn)
+    assert _vigilar(e, vpn=vpn, tareas=tareas) == 1
+    assert tareas.lanzadas == []
+    assert [etapa for etapa, _ in correos[0]] == ["COMPLETA"]
+
+
+def test_sin_red_no_corre_la_cadena(entorno, correos, cadena):
+    e = entorno
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn)
+    assert _vigilar(e, Red(SIN_SALIDA), tareas=tareas) == 1
+    assert tareas.lanzadas == []
+
+
+def test_dentro_de_una_franja_espera_antes_de_lanzar_cada_tarea(entorno, correos, cadena):
+    e = entorno
+    carpeta, publicador = cadena
+    _completa_de()
+    a_las_1150 = lambda: datetime(2026, 10, 26, 11, 50, tzinfo=config.BOGOTA)  # noqa: E731
+    tareas = TareasFalsas(e.linea, e.vpn, efectos={
+        IA: lambda: _tocar(carpeta / "ia_a.csv", ESTA_MANANA),
+        PUBLICADOR: lambda: _tocar(publicador, ESTA_MANANA),
+    })
+
+    def dormir(segundos):
+        e.linea.append(("dormir", segundos))
+
+    assert _vigilar(e, ahora=a_las_1150, dormir=dormir, tareas=tareas) == 0
+    # la espera de run_robot al arrancar, y la de la cadena antes de cada tarea
+    assert [evento[:2] for evento in e.linea] == [
+        ("dormir", 56 * 60), ("dormir", 56 * 60), ("tarea", IA), ("dormir", 56 * 60), ("tarea", PUBLICADOR),
+    ]
+
+
+def test_un_robot_de_la_cadena_a_medias_es_error_de_configuracion(entorno, correos, monkeypatch):
+    monkeypatch.setenv("VIGILANTE_IA_TAREA", IA)
+    tareas = TareasFalsas(entorno.linea, entorno.vpn)
+    assert _vigilar(entorno, tareas=tareas) == 2
+    assert tareas.lanzadas == []
+    assert "VIGILANTE_IA_CARPETA" in _estado()["error"]
+
+
+def test_el_limite_de_las_tareas_sale_del_env(entorno, correos, cadena, monkeypatch):
+    e = entorno
+    carpeta, publicador = cadena
+    monkeypatch.setenv("VIGILANTE_LIMITE_TAREA_MIN", "15")
+    _completa_de()
+    tareas = TareasFalsas(e.linea, e.vpn, efectos={
+        IA: lambda: _tocar(carpeta / "ia_a.csv", ESTA_MANANA),
+        PUBLICADOR: lambda: _tocar(publicador, ESTA_MANANA),
+    })
+    assert _vigilar(e, tareas=tareas) == 0
+    assert {evento[2] for evento in e.linea if evento[0] == "tarea"} == {timedelta(minutes=15)}

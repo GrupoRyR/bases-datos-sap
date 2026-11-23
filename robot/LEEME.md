@@ -178,7 +178,7 @@ Para lanzar una ahora: `Start-ScheduledTask -TaskName BasesSAP-Nocturna`.
 
 ## Vigilante
 
-`run_robot.py --vigilar` revisa que Bases SAP tenga la completa de hoy y la repara si falta. Lo corre la tarea `BasesSAP-Vigilante` a las 03:45 (después de la nocturna) y a las 07:00 (por si a las 03:45 no se pudo). Va en este orden:
+`run_robot.py --vigilar` revisa que Bases SAP tenga la completa de hoy y la repara si falta; si lo configuras, también baja una VPN pegada y relanza a los otros robots (ver más abajo). Lo corre la tarea `BasesSAP-Vigilante` a las 03:45 (después de la nocturna) y a las 07:00 (por si a las 03:45 no se pudo). Va en este orden:
 
 1. **Red.** Prueba que la app (`BASES_SAP_API_URL`) y, si la pones, el panel (`VIGILANTE_PANEL_URL`) respondan por HTTPS: resuelve el nombre y pide la raíz del servidor. Cualquier respuesta, aunque sea un error HTTP, cuenta como salida a internet. Lo intenta hasta 3 veces, con un minuto entre intentos. Si no hay salida, no corre nada más y avisa con la etapa `RED`.
 2. **Completa de hoy.** Si `robot\state\ultima_completa.json` dice que hoy (Bogotá) ya hubo una completa buena de las dos empresas, no hace nada. Si falta, es de otro día, terminó con fallos o fue de una sola empresa, corre la completa una vez, dentro del mismo candado. Así nunca hay dos completas buenas el mismo día: la del vigilante de las 07:00 no se repite si la de las 03:45 ya quedó bien.
@@ -209,6 +209,33 @@ Queda apagado hasta que lo pruebes. Agrega esta línea a `robot\.env` y a `robot
 
 ```
 VIGILANTE_REINICIAR_VPN=false
+```
+
+### Cadena de los otros robots
+
+Con Bases SAP al día (la completa de hoy ya estaba bien o la de reparación terminó bien), el vigilante puede relanzar las tareas programadas de los otros robots que también dependen de la VPN y de los datos frescos. Va en este orden, una tarea a la vez:
+
+1. **Bases SAP.** Es la completa del vigilante, que corre dentro del mismo proceso (no se lanza su tarea por nombre: el robot tiene su propio candado tomado).
+2. **«SAP HANA - todo».** Si el archivo `ia_*` más nuevo de `VIGILANTE_IA_CARPETA` no es de hoy (Bogotá), lanza la tarea `VIGILANTE_IA_TAREA` y espera a que termine. Si termina bien pero sus `ia_*` siguen sin ser de hoy, avisa.
+3. **Publicador del panel.** Si el archivo `VIGILANTE_PUBLICADOR_ARCHIVO` no se modificó hoy, o si se acaba de relanzar «SAP HANA - todo», lanza la tarea `VIGILANTE_PUBLICADOR_TAREA` y espera a que termine. Ese archivo lo eliges tú: el log o el archivo de estado que el publicador escribe en cada corrida. Si termina bien pero el archivo sigue sin ser de hoy, avisa.
+
+Reglas de la cadena:
+
+- Nunca hay dos robots de VPN a la vez: cada tarea se lanza cuando la anterior terminó, y el candado del robot sigue tomado todo el tiempo, así que Bases SAP tampoco usa la VPN mientras tanto.
+- Nunca lanza una tarea dentro de una franja bloqueada: espera a que pase.
+- Espera cada tarea hasta `VIGILANTE_LIMITE_TAREA_MIN` minutos (60 por defecto). Si sigue corriendo, o termina con un código distinto de 0, avisa y no lanza la siguiente.
+- Si la completa de reparación falló o no hay salida a internet, no corre la cadena.
+- Los avisos de la cadena salen con la etapa `CADENA`.
+- No cambia nada de los otros robots: solo lanza sus tareas con `Start-ScheduledTask` y lee su estado con `Get-ScheduledTask` y `Get-ScheduledTaskInfo`.
+
+Está apagada hasta que la configures. Un robot de la cadena cuenta solo con sus dos variables (la ruta y el nombre de la tarea); si pones una sin la otra, el vigilante sale con error de configuración (código 2). Puedes configurar solo uno de los dos. Agrega estas líneas a `robot\.env` y a `robot\.env.example`, y llena las de `robot\.env` con las rutas y los nombres exactos de las tareas, tal como salen en el Programador de tareas:
+
+```
+VIGILANTE_IA_CARPETA=
+VIGILANTE_IA_TAREA=
+VIGILANTE_PUBLICADOR_ARCHIVO=
+VIGILANTE_PUBLICADOR_TAREA=
+VIGILANTE_LIMITE_TAREA_MIN=60
 ```
 
 ## Carpeta de CSV
