@@ -11,11 +11,12 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "instalar_tarea.ps
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
 
-def test_registra_las_tres_tareas():
+def test_registra_las_cuatro_tareas():
     texto = SCRIPT.read_text(encoding="utf-8")
     for esperado in (
-        "BasesSAP-Solicitudes", "BasesSAP-Nocturna", "BasesSAP-Domingo",
-        "revisar_solicitudes.py", "--completa", "--archivo fotos", "pythonw.exe",
+        "BasesSAP-Solicitudes", "BasesSAP-Nocturna", "BasesSAP-Domingo", "BasesSAP-Vigilante",
+        "revisar_solicitudes.py", "--completa", "--archivo fotos", "--vigilar", "pythonw.exe",
+        '(Hora "03:45")', '(Hora "07:00")',
         "-RepetitionInterval (New-TimeSpan -Minutes 1)", "-DaysOfWeek Sunday",
         '"IgnoreNew"', "-Desinstalar", "StartWhenAvailable",
     ):

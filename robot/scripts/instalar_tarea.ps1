@@ -3,25 +3,29 @@
     Registra el robot de Bases de datos SAP en el Programador de tareas de Windows.
 
 .DESCRIPTION
-    Crea tres tareas que corren con pythonw.exe (sin ventana) desde robot\.venv
+    Crea cuatro tareas que corren con pythonw.exe (sin ventana) desde robot\.venv
     y con carpeta de trabajo robot\etl:
 
-      BasesSAP-Solicitudes  cada minuto      revisar_solicitudes.py
-      BasesSAP-Nocturna     cada dia 02:00   run_robot.py --completa
-      BasesSAP-Domingo      domingo 03:00    run_robot.py --archivo fotos
+      BasesSAP-Solicitudes  cada minuto            revisar_solicitudes.py
+      BasesSAP-Nocturna     cada dia 02:00         run_robot.py --completa
+      BasesSAP-Domingo      domingo 03:00          run_robot.py --archivo fotos
+      BasesSAP-Vigilante    cada dia 03:45 y 07:00 run_robot.py --vigilar
 
     Las horas evitan las franjas en que los otros robots usan la misma VPN
     (00:00, 05:00, 06:00, 12:00 y 12:30, +/- 15 minutos): si dos robots se
     solapan, uno le baja el tunel al otro. La revision de cada minuto se salta
     sola esas franjas, y un candado (robot\state\robot.lock) evita que dos
-    procesos del robot corran a la vez: la nocturna y la del domingo esperan
-    hasta 20 minutos a que termine una revision de solicitudes.
+    procesos del robot corran a la vez: la nocturna, la del domingo y el
+    vigilante esperan hasta 20 minutos a que termine otra ejecucion.
+
+    El vigilante prueba la salida a internet y, si hoy no hay una completa
+    buena, la corre una vez; si no pudo reparar, avisa.
 
     Si el equipo estaba apagado a la hora, la tarea corre en cuanto arranca
     (StartWhenAvailable).
 
 .PARAMETER Desinstalar
-    Elimina las tres tareas en lugar de crearlas.
+    Elimina las cuatro tareas en lugar de crearlas.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\instalar_tarea.ps1
@@ -72,6 +76,20 @@ $Tareas = @(
         Reintentos  = $true
         Horario     = "cada domingo a las 03:00"
         Descripcion = "Fotos semanales del archivo y catalogo de Bases de datos SAP (solo carpeta)."
+    },
+    @{
+        Nombre      = "BasesSAP-Vigilante"
+        Script      = "run_robot.py"
+        Argumentos  = "--vigilar"
+        # Dos disparadores: Register-ScheduledTask acepta una lista en -Trigger.
+        Disparador  = @(
+            (New-ScheduledTaskTrigger -Daily -At (Hora "03:45")),
+            (New-ScheduledTaskTrigger -Daily -At (Hora "07:00"))
+        )
+        Limite      = New-TimeSpan -Hours 4
+        Reintentos  = $false
+        Horario     = "cada dia a las 03:45 y a las 07:00"
+        Descripcion = "Vigilante de Bases de datos SAP: prueba la salida a internet, corre la completa si hoy no hay una buena y avisa si no pudo reparar."
     }
 )
 

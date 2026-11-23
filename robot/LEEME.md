@@ -99,15 +99,16 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 | `run_robot.py --catalogo` | Solo el catálogo de tablas y columnas | No |
 | `run_robot.py --carga-produccion --desde AAAA-MM-DD` | Una vez, a mano: PRODUCCION de Segurex desde esa fecha (ver «Producción») | Sí |
 | `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
+| `run_robot.py --vigilar` | Vigilante (03:45 y 07:00): prueba la salida a internet, corre la completa si hoy no hay una buena y avisa si no pudo reparar (ver «Vigilante») | Sí, si corre la completa |
 | `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
 Opciones de `run_robot.py`:
 
-- `--empresa SGX` o `--empresa SDC`: solo esa empresa (se puede repetir). Por defecto, las dos.
+- `--empresa SGX` o `--empresa SDC`: solo esa empresa (se puede repetir). Por defecto, las dos. No va con `--vigilar`, que siempre revisa las dos.
 - `--sin-vpn`: no maneja la VPN; úsalo si ya la conectaste a mano.
-- `--forzar`: corre `--completa` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
+- `--forzar`: corre `--completa`, `--archivo` o `--vigilar` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
 
-Si el robot está ocupado (otra ejecución tiene el candado), `--completa` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
+Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--archivo` y `--vigilar` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
 
 Códigos de salida: `0` todo bien, `1` algún fallo, `2` configuración incompleta, `130` cancelado con Ctrl+C.
 
@@ -160,19 +161,40 @@ powershell -ExecutionPolicy Bypass -File scripts\instalar_tarea.ps1
 powershell -ExecutionPolicy Bypass -File scripts\instalar_tarea.ps1 -Desinstalar
 ```
 
-Registra tres tareas con `pythonw.exe` (sin ventana), como el usuario actual y con la sesión iniciada:
+Registra cuatro tareas con `pythonw.exe` (sin ventana), como el usuario actual y con la sesión iniciada:
 
 | Tarea | Cuándo | Qué corre |
 |---|---|---|
 | `BasesSAP-Solicitudes` | Cada minuto | `revisar_solicitudes.py` |
 | `BasesSAP-Nocturna` | Cada día a las 02:00 | `run_robot.py --completa` |
 | `BasesSAP-Domingo` | Domingo a las 03:00 | `run_robot.py --archivo fotos` |
+| `BasesSAP-Vigilante` | Cada día a las 03:45 y a las 07:00 | `run_robot.py --vigilar` |
 
 - Las horas quedan fuera de las franjas bloqueadas. La revisión de cada minuto se salta sola las franjas y, si otra ejecución tiene el candado, ese minuto no hace nada.
-- La nocturna y la del domingo esperan hasta 20 minutos a que termine una revisión de solicitudes.
+- La nocturna, la del domingo y el vigilante esperan hasta 20 minutos a que termine otra ejecución.
 - Si el PC estaba apagado a la hora, la tarea corre en cuanto prende.
 
 Para lanzar una ahora: `Start-ScheduledTask -TaskName BasesSAP-Nocturna`.
+
+## Vigilante
+
+`run_robot.py --vigilar` revisa que Bases SAP tenga la completa de hoy y la repara si falta. Lo corre la tarea `BasesSAP-Vigilante` a las 03:45 (después de la nocturna) y a las 07:00 (por si a las 03:45 no se pudo). Va en este orden:
+
+1. **Red.** Prueba que la app (`BASES_SAP_API_URL`) y, si la pones, el panel (`VIGILANTE_PANEL_URL`) respondan por HTTPS: resuelve el nombre y pide la raíz del servidor. Cualquier respuesta, aunque sea un error HTTP, cuenta como salida a internet. Lo intenta hasta 3 veces, con un minuto entre intentos. Si no hay salida, no corre nada más y avisa con la etapa `RED`.
+2. **Completa de hoy.** Si `robot\state\ultima_completa.json` dice que hoy (Bogotá) ya hubo una completa buena de las dos empresas, no hace nada. Si falta, es de otro día, terminó con fallos o fue de una sola empresa, corre la completa una vez, dentro del mismo candado. Así nunca hay dos completas buenas el mismo día: la del vigilante de las 07:00 no se repite si la de las 03:45 ya quedó bien.
+3. **Aviso.** Si la completa de reparación falla, manda un solo aviso con la etapa `COMPLETA` y los nombres de las etapas que fallaron; el detalle queda en `robot\logs\robot.log`. La completa de reparación no avisa por su cuenta.
+
+Como la nocturna, espera a que pase una franja bloqueada si arranca dentro de una (salvo con `--forzar`) y espera hasta 20 minutos el candado; si no lo consigue, avisa con la etapa `CANDADO`. Sus avisos usan el mismo correo de fallos de siempre.
+
+La tarea la crea `scripts\instalar_tarea.ps1`, junto con las otras (ver «Tareas programadas»). Si ya las tenías instaladas, vuelve a correr el script para que agregue el vigilante.
+
+El panel es opcional. Si quieres que el vigilante también lo pruebe, agrega esta línea a `robot\.env` y a `robot\.env.example` (con la base del panel, siempre `https://`):
+
+```
+VIGILANTE_PANEL_URL=https://<subdominio-del-panel>
+```
+
+Esa línea la agregas tú: el robot no edita esos archivos. Sin la variable, el vigilante solo prueba la app. Con una dirección que no empiece por `https://`, el vigilante sale con error de configuración (código 2).
 
 ## Carpeta de CSV
 

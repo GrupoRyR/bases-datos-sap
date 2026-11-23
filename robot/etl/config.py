@@ -224,6 +224,13 @@ class AlertaConfig:
 
 
 @dataclass(frozen=True)
+class VigilanteConfig:
+    # Base del panel (sin barra final). Opcional: si está, el vigilante también prueba
+    # que responda antes de dar por buena la salida a internet.
+    panel_url: str = ""
+
+
+@dataclass(frozen=True)
 class Config:
     vpn: VpnConfig
     hana: HanaConfig
@@ -234,12 +241,14 @@ class Config:
     historial_documentos: bool
     alertas: AlertaConfig
     numeros_invalidos: tuple[str, ...] = ()
+    vigilante: VigilanteConfig = field(default_factory=VigilanteConfig)
 
     def validar(
         self,
         *,
         requiere_vpn: bool = True,
         requiere_api: bool = True,
+        requiere_vigilante: bool = False,
         empresas: Iterable[str] = EMPRESAS,
     ) -> None:
         """Lanza ConfigError con un mensaje accionable si falta algo."""
@@ -283,6 +292,11 @@ class Config:
                 faltantes.append("BASES_SAP_ROBOT_KEY_ID (id de la llave del robot)")
             if not self.api.secret:
                 faltantes.append("BASES_SAP_ROBOT_SECRET (secreto de la llave del robot)")
+
+        if requiere_vigilante:
+            panel = self.vigilante.panel_url
+            if panel and not panel.lower().startswith("https://"):
+                faltantes.append(f"VIGILANTE_PANEL_URL debe empezar por https:// (solo HTTPS): {panel}")
 
         invalidas = [f for f in self.franjas if not _RE_FRANJA.match(f)]
         if invalidas:
@@ -370,6 +384,7 @@ def cargar_config(env_path: Path | None = None) -> Config:
             destinatarios=destinatarios,
         ),
         numeros_invalidos=tuple(invalidos),
+        vigilante=VigilanteConfig(panel_url=_texto("VIGILANTE_PANEL_URL").rstrip("/")),
     )
 
 

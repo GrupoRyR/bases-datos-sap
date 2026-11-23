@@ -14,7 +14,7 @@ import config
 import hana
 import registro
 
-PREFIJOS = ("SOPHOS_", "HANA_", "BASES_SAP_", "ALERTA_")
+PREFIJOS = ("SOPHOS_", "HANA_", "BASES_SAP_", "ALERTA_", "VIGILANTE_")
 
 
 def _limpiar_variables() -> None:

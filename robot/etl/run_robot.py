@@ -30,13 +30,17 @@ Uso:
     python run_robot.py --carga-produccion --desde 2026-08-01
                                                    # una vez, a mano: PRODUCCION de SGX desde esa
                                                    # fecha en vez de la ventana de HANA (contrato §12)
+    python run_robot.py --vigilar                  # 03:45 y 07:00: red -> completa de hoy (si
+                                                   # falta o falló) -> aviso (vigilante.py)
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
-completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
-revisión de solicitudes que está terminando); el catálogo y el diagnóstico, que
-los corre el usuario, no esperan. Si la completa o el archivo arrancan dentro de
-una franja bloqueada de los otros robots (±15 minutos), esperan a que pase,
-salvo con --forzar.
+completa, el archivo y el vigilante esperan hasta 20 minutos a que lo suelte otro
+(la revisión de solicitudes que está terminando); el catálogo y el diagnóstico,
+que los corre el usuario, no esperan. Si la completa, el archivo o el vigilante
+arrancan dentro de una franja bloqueada de los otros robots (±15 minutos),
+esperan a que pase, salvo con --forzar. La completa de reparación del vigilante
+corre dentro del mismo candado y no avisa por su cuenta: el vigilante manda un
+solo aviso.
 
 Salida: 0 todo bien, 1 algún fallo (se avisa por correo, salvo en el
 diagnóstico, que lo corre el usuario), 2 configuración incompleta, 130
@@ -295,13 +299,16 @@ def _parser() -> argparse.ArgumentParser:
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
+    modo.add_argument("--vigilar", action="store_true",
+                      help="Vigilante (tarea de las 03:45 y las 07:00): prueba la salida a internet, "
+                           "corre la completa si hoy no hay una buena y avisa si no pudo reparar.")
     parser.add_argument("--empresa", action="append", choices=EMPRESAS,
                         help="Empresa a procesar (se puede repetir). Por defecto, todas.")
     parser.add_argument("--sin-vpn", action="store_true",
                         help="No gestionar la VPN (asume que ya está activa).")
     parser.add_argument("--forzar", action="store_true",
-                        help="Correr la completa, la carga de producción o el archivo aunque sea "
-                             "dentro de una franja bloqueada de los otros robots.")
+                        help="Correr la completa, la carga de producción, el archivo o el vigilante "
+                             "aunque sea dentro de una franja bloqueada de los otros robots.")
     parser.add_argument("--desde", metavar="AAAA-MM-DD",
                         help="Primer día de la carga de producción (solo con --carga-produccion).")
     return parser
@@ -315,6 +322,7 @@ def main(
     conectar: Callable[..., Any] = hana.conectar,
     ahora: Callable[[], datetime] = config.ahora,
     dormir: Callable[[float], None] = time.sleep,
+    probar: Callable[[str], str | None] = vigilante.probar_url,
 ) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -322,6 +330,9 @@ def main(
     carga: Trabajo | None = None
     if args.desde is not None and not args.carga_produccion:
         parser.error("--desde va solo con --carga-produccion.")
+    if args.vigilar and args.empresa:
+        # Una completa de una sola empresa nunca deja a Bases SAP al día.
+        parser.error("--vigilar revisa las dos empresas: no va con --empresa.")
     if args.carga_produccion:
         if args.desde is None:
             parser.error("--carga-produccion necesita --desde AAAA-MM-DD.")
@@ -338,9 +349,12 @@ def main(
         modo = "carga produccion"
     elif args.archivo:
         modo = f"archivo {args.archivo}"
+    elif args.vigilar:
+        modo = "vigilar"
     else:
         modo = "catalogo" if args.catalogo else "diagnostico"
     completa = modo == "completa"
+    vigilar = modo == "vigilar"
 
     registro.configurar()
     inicio = time.monotonic()
@@ -352,10 +366,11 @@ def main(
     try:
         cfg = cargar_config()
         registro.registrar_secretos(cfg)
-        # Solo la completa y la carga hablan con la API; el archivo, el catálogo y el
-        # diagnóstico no.
-        cfg.validar(requiere_vpn=not args.sin_vpn, requiere_api=completa or carga is not None,
-                    empresas=empresas)
+        # Solo la completa, la carga y el vigilante (que puede correr la completa) hablan
+        # con la API; el archivo, el catálogo y el diagnóstico no.
+        cfg.validar(requiere_vpn=not args.sin_vpn,
+                    requiere_api=completa or carga is not None or vigilar,
+                    requiere_vigilante=vigilar, empresas=empresas)
     except ConfigError as exc:
         log.error("Configuración incompleta:\n%s", exc)
         guardar_estado(estado="ERROR", modo=modo, etapa="CONFIGURACION", error=str(exc))
@@ -365,7 +380,7 @@ def main(
 
     # Los modos de las tareas programadas, y la carga, que es larga: respetan las franjas de
     # los otros robots y esperan el candado.
-    programado = completa or carga is not None or modo.startswith("archivo")
+    programado = completa or carga is not None or modo.startswith("archivo") or vigilar
     avisar = modo != "diagnostico"  # el diagnóstico lo corre el usuario y ve el resumen
     momento = ahora()
     franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
@@ -412,6 +427,7 @@ def main(
         return _ejecutar(
             cfg, args, modo, empresas, inicio, avisar=avisar, fabrica_api=fabrica_api,
             fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora, carga=carga,
+            dormir=dormir, probar=probar,
         )
     finally:
         candado.soltar()
@@ -430,11 +446,17 @@ def _ejecutar(
     conectar: Callable[..., Any],
     ahora: Callable[[], datetime],
     carga: Trabajo | None = None,
+    dormir: Callable[[float], None] = time.sleep,
+    probar: Callable[[str], str | None] = vigilante.probar_url,
 ) -> int:
     """El modo pedido, con el candado ya tomado.
 
     La completa (no la carga de producción) deja su registro para el vigilante
     (vigilante.guardar_completa), con el día de Bogotá en que arrancó.
+
+    El vigilante corre su completa de reparación con este mismo `_ejecutar`, dentro
+    del candado ya tomado y sin avisar: la completa guarda su estado y su registro, y
+    los fallos del vigilante salen por el final de esta llamada, con un solo aviso.
     """
     completa = modo == "completa" or carga is not None
     registrar_completa = modo == "completa"
@@ -452,6 +474,17 @@ def _ejecutar(
             trabajos, fallos = _completa(
                 cfg, empresas, sin_vpn=args.sin_vpn, fabrica_api=fabrica_api,
                 fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora,
+            )
+        elif modo == "vigilar":
+            def correr_completa() -> int:
+                return _ejecutar(
+                    cfg, args, "completa", empresas, time.monotonic(), avisar=False,
+                    fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn, conectar=conectar,
+                    ahora=ahora, dormir=dormir, probar=probar,
+                )
+
+            fallos = vigilante.vigilar(
+                cfg, correr_completa=correr_completa, ahora=ahora, dormir=dormir, probar=probar,
             )
         else:
             fallos = _solo_carpeta(
