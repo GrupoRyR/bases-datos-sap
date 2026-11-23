@@ -61,6 +61,7 @@ import extraccion
 import hana
 import notificar
 import registro
+import vigilante
 from api import ApiCliente
 from carpeta import Carpeta
 from config import EMPRESAS, Config, ConfigError, HanaConfig, cargar_config
@@ -430,8 +431,14 @@ def _ejecutar(
     ahora: Callable[[], datetime],
     carga: Trabajo | None = None,
 ) -> int:
-    """El modo pedido, con el candado ya tomado."""
+    """El modo pedido, con el candado ya tomado.
+
+    La completa (no la carga de producción) deja su registro para el vigilante
+    (vigilante.guardar_completa), con el día de Bogotá en que arrancó.
+    """
     completa = modo == "completa" or carga is not None
+    registrar_completa = modo == "completa"
+    fecha = ahora().date()
     trabajos: list[Trabajo] = []
     try:
         if carga is not None:
@@ -459,6 +466,9 @@ def _ejecutar(
         mensaje = extraccion.mensaje_seguro(exc)
         guardar_estado(estado="ERROR", modo=modo, etapa="INESPERADO", error=mensaje,
                        duracion_seg=round(time.monotonic() - inicio, 1))
+        if registrar_completa:
+            vigilante.guardar_completa(fecha=fecha, estado="ERROR", empresas=empresas,
+                                       etapas=["INESPERADO"])
         if avisar:
             notificar.avisar_fallos(cfg.alertas, [("INESPERADO", mensaje)])
         return 1
@@ -472,6 +482,9 @@ def _ejecutar(
         fallos=[list(f) for f in fallos],
         duracion_seg=duracion,
     )
+    if registrar_completa:
+        vigilante.guardar_completa(fecha=fecha, estado="ERROR" if fallos else "OK", empresas=empresas,
+                                   etapas=[etapa for etapa, _ in fallos])
     if fallos:
         for etapa, mensaje in fallos:
             log.error("FALLO en la etapa %s: %s", etapa, mensaje)
