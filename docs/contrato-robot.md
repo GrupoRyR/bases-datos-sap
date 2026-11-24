@@ -154,7 +154,7 @@ Respuesta 200:
 }
 ```
 
-`conteo` solo viene en una corrida `completa` o `historico`. Que no cuadre no hace fallar la corrida. En la `completa` queda registrado para el panel y cuenta contra los 14 días de estabilidad; la `historico` no entra en el conteo diario ni en la estabilidad.
+`conteo` solo viene en una corrida `completa` o `historico`. En la `completa`, que no cuadre no hace fallar la corrida: queda registrado para el panel y cuenta contra los 14 días de estabilidad. En la `historico`, que `sap` no sea igual a `recibidas` sí la hace fallar sin aplicar nada (§10.4), y no entra en el conteo diario ni en la estabilidad.
 
 ### 4.4 Fallar: `POST /api/robot/v1/corridas/{run_id}/fallar`
 
@@ -354,13 +354,14 @@ Una sola parte, `ventas`, siempre en modo `todo`. Una fila por línea de factura
 
 Carga una vez, a mano, los meses anteriores a la ventana nocturna que `v_ventas` todavía no tiene. Las columnas, las reglas de notas crédito y anulaciones y la consulta son las de §10, cambiando solo el filtro de `DocDate` por el rango. La corrida `completa` y las de `solicitud` no cambian.
 
-- **Rango.** `ventana_desde` es el día 1 de un mes. `ventana_hasta` es un día de ese mismo mes, desde `ventana_desde` hasta su último día. Si no, 422.
+- **Rango.** `ventana_desde` es el día 1 de un mes, desde `2025-01-01`, el inicio acordado de la carga. `ventana_hasta` es un día de ese mismo mes, desde `ventana_desde` hasta su último día. Si no, 422.
 - **Antes de la ventana nocturna.** `ventana_hasta` es anterior al día en que empieza hoy la ventana nocturna, con la fórmula de §10.1 calculada en el servidor con hoy en Bogotá. Si no, 422. Así la carga nunca se cruza con la de las 02:00: el mes en curso, o el anterior si la ventana ya entra en él, solo se carga hasta el día antes de la ventana.
+  - El servidor calcula ese límite con hoy en Bogotá y el robot con `CURRENT_DATE` de HANA. En el borde de fin de mes pueden diferir en un día. Si el último tramo recibe 422 por `ventana_hasta`, se repite con el límite que trae el mensaje (el día anterior al inicio de la ventana que dice).
 - **Solo un rango vacío.** Si la empresa ya tiene alguna fila de `VENTAS` con `fecha_contabilizacion` entre `ventana_desde` y `ventana_hasta`, la apertura responde 409 y no abre nada. Así nunca se toca el histórico congelado de Comisiones (§10.2), y repetir un mes ya cargado no hace daño.
 - **Lotes.** Una fila con `fecha_contabilizacion` fuera del rango da 422.
 - **Cierre.** En una transacción, la API inserta las filas recibidas, con `sincronizado_en`, sin borrar nada. El mes queda completo o vacío, nunca a medias. Mientras la corrida está abierta, ninguna otra corrida de `VENTAS` de la empresa puede abrir (§4.1), así que el rango sigue vacío hasta el cierre.
 - **Nunca vacía.** Un cierre con 0 filas falla (§4.3) y el rango queda vacío.
-- **Conteo.** `conteo_sap.ventas` es el `COUNT(*)` del rango, en la misma conexión, justo después de extraer. La respuesta trae `conteo` con `cuadra`, como en la `completa`; `activas_mysql` son las filas de la empresa en el rango. No entra en el conteo diario ni en la estabilidad.
+- **Conteo.** `conteo_sap.ventas` es el `COUNT(*)` del rango, en la misma conexión, justo después de extraer. **Si no es igual a las filas recibidas, el cierre falla (422 en `conteo_sap.ventas`), la corrida queda `fallida` y no se aplica nada:** un mes cargado a medias no se podría volver a cargar. Si cuadra, la respuesta trae `conteo` con `cuadra`, como en la `completa`; `activas_mysql` son las filas de la empresa en el rango. No entra en el conteo diario ni en la estabilidad.
 
 ## 11. PEDIDOS
 
