@@ -13,7 +13,7 @@ import hmac
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from api import ErrorRed, Respuesta
@@ -113,6 +113,7 @@ class Corrida:
     conteo_sap: dict[str, int] | None = None
     error: str | None = None
     ventana_desde: str | None = None  # solo VENTAS (contrato §10.1)
+    ventana_hasta: str | None = None  # solo una corrida historico (contrato §10.4)
 
     def filas(self, parte: str) -> list[dict[str, Any]]:
         """Filas recibidas de una parte, como dicts columna -> valor, en orden de lote."""
@@ -182,6 +183,10 @@ class ApiFalsa:
         self.estado_solicitudes: dict[int, str] = {}
         self._nonces: set[tuple[str, str]] = set()
         self._fallas: dict[str, list[_Falla]] = {}
+        # Días con VENTAS ya cargadas por empresa (fecha_contabilizacion): una corrida historico
+        # con alguno en su rango responde 409 sin abrir nada (contrato §10.4). Las pruebas
+        # pueden llenarlo; cada corrida de VENTAS cerrada suma los suyos.
+        self.ventas_cargadas: dict[str, set[str]] = {}
 
     # ------------------------------------------------------------ para pruebas
     def reloj(self) -> float:
@@ -211,6 +216,11 @@ class ApiFalsa:
 
     def peticiones_a(self, nombre: str) -> list[Peticion]:
         return [p for p in self.peticiones if p.nombre == nombre]
+
+    def inicio_ventana_nocturna(self) -> str:
+        """Primer día de la ventana nocturna con la fórmula de §10.1 y la fecha de la API."""
+        hoy = datetime.fromtimestamp(self.reloj(), BOGOTA).date()
+        return (hoy - timedelta(days=6 + hoy.day)).isoformat()
 
     # ------------------------------------------------------------- transporte
     def __call__(
@@ -336,8 +346,10 @@ class ApiFalsa:
             raise _rechazo("Conjunto desconocido.", "conjunto")
         if empresa not in ("SGX", "SDC"):
             raise _rechazo("Empresa desconocida.", "empresa")
-        if tipo not in ("completa", "solicitud"):
+        if tipo not in ("completa", "solicitud", "historico"):
             raise _rechazo("Tipo inválido.", "tipo")
+        if tipo == "historico" and conjunto != "VENTAS":
+            raise _rechazo("Solo VENTAS tiene corridas historico.", "tipo")
         if not isinstance(partes, dict) or not partes:
             raise _rechazo("partes es obligatorio.", "partes")
         for parte, modo in partes.items():
@@ -345,12 +357,14 @@ class ApiFalsa:
                 raise _rechazo(f"Parte o modo inválido: {parte}.", f"partes.{parte}")
         # Contrato §4.1: Derivados no tiene lista de precios pública y puede omitir precios.
         omitibles = {"precios"} if (empresa, conjunto) == ("SDC", "MAESTROS") else set()
-        if tipo == "completa" and (
+        if tipo in ("completa", "historico") and (
             not set(PARTES[conjunto]) - omitibles <= set(partes) or set(partes.values()) != {"todo"}
         ):
             raise _rechazo("Una corrida completa lleva todas las partes en modo todo.", "partes")
         if not isinstance(solicitudes, list):
             raise _rechazo("solicitudes debe ser una lista.", "solicitudes")
+        if tipo == "historico" and solicitudes:
+            raise _rechazo("Una corrida historico no atiende solicitudes.", "solicitudes")
         for sid in solicitudes:
             solicitud = self.solicitudes.get(sid)
             if (
@@ -375,6 +389,13 @@ class ApiFalsa:
             raise _rechazo("Solo VENTAS y PRODUCCION llevan ventana_desde.", "ventana_desde")
         if conjunto == "PRODUCCION" and empresa != "SGX":
             raise _rechazo("PRODUCCION es solo de SGX.", "empresa")
+        ventana_hasta = self._ventana_hasta(tipo, datos, ventana_desde)
+        if tipo == "historico":
+            # Contrato §10.4: solo un rango vacío; si no, 409 sin run_id y no abre nada.
+            cargadas = self.ventas_cargadas.get(empresa, ())
+            if any(ventana_desde <= dia <= ventana_hasta for dia in cargadas):
+                raise _Error(409, {"message": f"La empresa ya tiene ventas entre {ventana_desde} y "
+                                              f"{ventana_hasta}: ese rango no se vuelve a cargar."})
 
         for corrida in self.corridas.values():
             if (corrida.conjunto, corrida.empresa, corrida.estado) == (conjunto, empresa, "abierta"):
@@ -384,9 +405,26 @@ class ApiFalsa:
         self.siguiente_run_id += 1
         self.corridas[run_id] = Corrida(
             run_id, conjunto, empresa, tipo, dict(partes), list(solicitudes),
-            fecha_corte, datos["extraida_en"], ventana_desde=ventana_desde,
+            fecha_corte, datos["extraida_en"], ventana_desde=ventana_desde, ventana_hasta=ventana_hasta,
         )
         return 201, {"run_id": run_id, "estado": "abierta", "abierta_hasta": _hora_iso(self.reloj() + 1800)}
+
+    def _ventana_hasta(self, tipo: str, datos: dict[str, Any], ventana_desde: str) -> str | None:
+        """Contrato §4.1 y §10.4: ventana_hasta va solo, y siempre, en una corrida historico."""
+        if tipo != "historico":
+            if "ventana_hasta" in datos:
+                raise _rechazo("Solo una corrida historico lleva ventana_hasta.", "ventana_hasta")
+            return None
+        if not ventana_desde.endswith("-01"):
+            raise _rechazo("En una corrida historico es el primer día de un mes.", "ventana_desde")
+        hasta = datos.get("ventana_hasta")
+        if not isinstance(hasta, str) or not _RE_FECHA.fullmatch(hasta):
+            raise _rechazo("Una corrida historico lleva ventana_hasta AAAA-MM-DD.", "ventana_hasta")
+        if hasta < ventana_desde or hasta[:7] != ventana_desde[:7]:
+            raise _rechazo("Debe estar en el mismo mes de ventana_desde, desde ese día.", "ventana_hasta")
+        if hasta >= self.inicio_ventana_nocturna():
+            raise _rechazo("Debe ser anterior al inicio de la ventana nocturna.", "ventana_hasta")
+        return hasta
 
     def _lote(self, corrida: Corrida, datos: dict[str, Any], cuerpo: bytes) -> tuple[int, dict[str, Any]]:
         batch, parte = datos.get("batch"), datos.get("parte")
@@ -417,6 +455,8 @@ class ApiFalsa:
             for i, fila in enumerate(rows):
                 if not isinstance(fila[posicion], str) or fila[posicion] < corrida.ventana_desde:
                     raise _rechazo("Fila anterior a ventana_desde.", f"rows.{i}.{columna}")
+                if corrida.ventana_hasta is not None and fila[posicion] > corrida.ventana_hasta:
+                    raise _rechazo("Fila posterior a ventana_hasta.", f"rows.{i}.{columna}")
         corrida.lotes[batch] = Lote(batch, parte, list(columns), rows, sha)
         return 201, {"batch": batch, "rows": len(rows)}
 
@@ -426,10 +466,11 @@ class ApiFalsa:
             raise _rechazo("batches debe ser un entero.", "batches")
         if not isinstance(filas, dict) or not set(filas) <= set(corrida.partes):
             raise _rechazo("filas inválidas.", "filas")
-        if corrida.tipo == "completa" and not isinstance(datos.get("conteo_sap"), dict):
-            raise _rechazo("conteo_sap es obligatorio en una corrida completa.", "conteo_sap")
-        if corrida.tipo != "completa" and "conteo_sap" in datos:
-            raise _rechazo("conteo_sap solo va en una corrida completa.", "conteo_sap")
+        con_conteo = corrida.tipo in ("completa", "historico")
+        if con_conteo and not isinstance(datos.get("conteo_sap"), dict):
+            raise _rechazo("conteo_sap es obligatorio en una corrida completa o historico.", "conteo_sap")
+        if not con_conteo and "conteo_sap" in datos:
+            raise _rechazo("conteo_sap solo va en una corrida completa o historico.", "conteo_sap")
 
         faltan = [n for n in range(1, batches + 1) if n not in corrida.lotes]
         recibidas = corrida.total_filas()
@@ -443,12 +484,16 @@ class ApiFalsa:
 
         corrida.conteo_sap = datos.get("conteo_sap")
         self._terminar(corrida, "cerrada")
+        if corrida.conjunto == "VENTAS":
+            self.ventas_cargadas.setdefault(corrida.empresa, set()).update(
+                f["fecha_contabilizacion"] for f in corrida.filas("ventas")
+            )
         respuesta: dict[str, Any] = {
             "run_id": corrida.run_id,
             "estado": "cerrada",
             "aplicada_en": _hora_iso(self.reloj()),
         }
-        if corrida.tipo == "completa":
+        if con_conteo:
             conteo_sap = corrida.conteo_sap or {}
             respuesta["conteo"] = {
                 p: {

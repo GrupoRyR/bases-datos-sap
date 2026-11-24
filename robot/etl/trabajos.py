@@ -23,15 +23,19 @@ class TrabajoInvalido(ValueError):
 class Trabajo:
     empresa: str
     conjunto: str
-    tipo: str  # completa | solicitud
+    tipo: str  # completa | solicitud | historico
     partes: dict[str, str]  # parte -> todo | cambios, en orden de envío
     desde: dict[str, str | None] = field(default_factory=dict)
     solicitudes: list[int] = field(default_factory=list)
     fecha_corte: str | None = None  # solo CARTERA. VENTAS lleva su ventana_desde, que sale de HANA
     # al extraer (extraccion.Resultado.ventana_desde), no del trabajo.
-    # Solo la carga inicial de PRODUCCION: el primer día de la ventana, fijado a mano
-    # (--desde). Reemplaza al que daría HANA, en la consulta y en ventana_desde.
+    # Solo la carga inicial de PRODUCCION y el histórico de VENTAS: el primer día de la
+    # ventana, fijado a mano (--desde). Reemplaza al que daría HANA, en la consulta y en
+    # ventana_desde.
     ventana_fija: str | None = None
+    # Solo el histórico de VENTAS (contrato §10.4): el último día del rango. Con él, la
+    # consulta trae de ventana_fija a ventana_hasta (consultas.sql_rango).
+    ventana_hasta: str | None = None
 
     @property
     def nombre(self) -> str:
@@ -40,8 +44,24 @@ class Trabajo:
 
 _ORDEN = list(esquema.PARTES)
 
+# Contrato §4.3: las corridas que cierran con el COUNT(*) de SAP (conteo_sap).
+TIPOS_CON_CONTEO = ("completa", "historico")
+
 # Contrato §12: la API acepta ventana_desde de PRODUCCION desde este día hasta mañana.
 PRIMER_DIA_PRODUCCION = date(2026, 1, 1)
+
+
+def trabajo_historico_ventas(empresa: str, desde: date, hasta: date) -> Trabajo:
+    """Un tramo del histórico de VENTAS (contrato §10.4): la corrida `historico` de una
+    empresa con el rango de `desde` a `hasta` (historico.tramos), su única parte en `todo`."""
+    return Trabajo(
+        empresa=empresa,
+        conjunto="VENTAS",
+        tipo="historico",
+        partes={p: "todo" for p in esquema.PARTES_POR_CONJUNTO["VENTAS"]},
+        ventana_fija=desde.isoformat(),
+        ventana_hasta=hasta.isoformat(),
+    )
 
 
 def trabajo_carga_produccion(desde: str, hoy: date) -> Trabajo:

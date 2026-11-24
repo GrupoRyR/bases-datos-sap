@@ -146,6 +146,19 @@ def test_iniciar_ventas_manda_la_ventana_y_los_demas_no_la_mandan(cliente: ApiCl
     assert "ventana_desde" not in servidor.peticiones_a("iniciar")[1].datos
 
 
+def test_iniciar_historico_manda_ventana_hasta_y_los_demas_no(cliente: ApiCliente, servidor: ApiFalsa) -> None:
+    # Contrato §4.1 y §10.4: ventana_hasta solo va en una corrida historico.
+    cliente.iniciar_corrida(
+        conjunto="VENTAS", empresa="SGX", tipo="historico", partes={"ventas": "todo"},
+        solicitudes=[], fecha_corte=None, extraida_en=EXTRAIDA, ventana_desde="2025-01-01",
+        ventana_hasta="2025-01-31",
+    )
+    datos = servidor.peticiones_a("iniciar")[0].datos
+    assert (datos["ventana_desde"], datos["ventana_hasta"]) == ("2025-01-01", "2025-01-31")
+    _iniciar_maestros(cliente)
+    assert "ventana_hasta" not in servidor.peticiones_a("iniciar")[1].datos
+
+
 def test_fallar_corrida_recorta_el_error_a_mil_caracteres(cliente: ApiCliente, servidor: ApiFalsa) -> None:
     run_id = _iniciar_maestros(cliente)["run_id"]
 

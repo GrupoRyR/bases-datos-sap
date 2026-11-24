@@ -176,6 +176,7 @@ class ApiCliente:
         fecha_corte: str | None,
         extraida_en: str,
         ventana_desde: str | None = None,
+        ventana_hasta: str | None = None,
     ) -> dict[str, Any]:
         cuerpo: dict[str, Any] = {
             "conjunto": conjunto,
@@ -189,6 +190,10 @@ class ApiCliente:
         if ventana_desde is not None:
             # Solo VENTAS y PRODUCCION (contrato §4.1 y §12): en los demás la llave ni siquiera va.
             cuerpo["ventana_desde"] = ventana_desde
+        if ventana_hasta is not None:
+            # Solo en una corrida historico de VENTAS (contrato §4.1 y §10.4).
+            cuerpo["ventana_hasta"] = ventana_hasta
+
         def recuperar(datos: dict[str, Any]) -> dict[str, Any] | None:
             # La corrida abierta es la que creó el intento cuya respuesta se perdió.
             if datos.get("run_id") is None:
