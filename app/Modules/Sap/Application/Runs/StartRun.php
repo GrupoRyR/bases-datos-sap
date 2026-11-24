@@ -32,6 +32,9 @@ final class StartRun
     /** The earliest PRODUCCION window start, so the initial load can reach back months (contract section 12.3). */
     private const PRODUCTION_WINDOW_FROM = '2026-01-01';
 
+    /** The first month a historical VENTAS run may load, the agreed start of the load (contract section 10.4). */
+    private const HISTORICAL_FROM = '2025-01-01';
+
     /** @var array<string, string> */
     private array $errors = [];
 
@@ -280,8 +283,8 @@ final class StartRun
         }
 
         if ($type === RunType::Historical) {
-            if (substr($date, 8) !== '01') {
-                $this->fail('ventana_desde', 'En una corrida historico es el primer día de un mes.');
+            if (substr($date, 8) !== '01' || $date < self::HISTORICAL_FROM) {
+                $this->fail('ventana_desde', 'En una corrida historico es el primer día de un mes, desde '.self::HISTORICAL_FROM.'.');
 
                 return null;
             }

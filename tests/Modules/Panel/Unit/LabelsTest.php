@@ -29,6 +29,12 @@ it('labels every company, dataset and part in Spanish', function () {
         ->and(Labels::part('grupos_articulos'))->toBe('Grupos de artículos');
 });
 
+it('labels every run type of the robot contract', function () {
+    expect(Labels::runType('completa'))->toBe('Nocturna')
+        ->and(Labels::runType('solicitud'))->toBe('Por solicitud')
+        ->and(Labels::runType('historico'))->toBe('Carga histórica');
+});
+
 it('falls back to the raw value of an unknown company, dataset, part or run', function () {
     expect(Labels::company('XYZ'))->toBe('XYZ')
         ->and(Labels::dataset('COMPRAS'))->toBe('COMPRAS')
