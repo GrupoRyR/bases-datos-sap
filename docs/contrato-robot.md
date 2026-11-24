@@ -154,7 +154,7 @@ Respuesta 200:
 }
 ```
 
-`conteo` solo viene en una corrida `completa` o `historico`. Que no cuadre no hace fallar la corrida. En la `completa` queda registrado para el panel y cuenta contra los 14 días de estabilidad; la `historico` no entra en el conteo diario ni en la estabilidad.
+`conteo` solo viene en una corrida `completa` o `historico`. En la `completa`, que no cuadre no hace fallar la corrida: queda registrado para el panel y cuenta contra los 14 días de estabilidad. En la `historico`, que `sap` no sea igual a `recibidas` sí la hace fallar sin aplicar nada (§10.4), y no entra en el conteo diario ni en la estabilidad.
 
 ### 4.4 Fallar: `POST /api/robot/v1/corridas/{run_id}/fallar`
 
@@ -360,7 +360,7 @@ Carga una vez, a mano, los meses anteriores a la ventana nocturna que `v_ventas`
 - **Lotes.** Una fila con `fecha_contabilizacion` fuera del rango da 422.
 - **Cierre.** En una transacción, la API inserta las filas recibidas, con `sincronizado_en`, sin borrar nada. El mes queda completo o vacío, nunca a medias. Mientras la corrida está abierta, ninguna otra corrida de `VENTAS` de la empresa puede abrir (§4.1), así que el rango sigue vacío hasta el cierre.
 - **Nunca vacía.** Un cierre con 0 filas falla (§4.3) y el rango queda vacío.
-- **Conteo.** `conteo_sap.ventas` es el `COUNT(*)` del rango, en la misma conexión, justo después de extraer. La respuesta trae `conteo` con `cuadra`, como en la `completa`; `activas_mysql` son las filas de la empresa en el rango. No entra en el conteo diario ni en la estabilidad.
+- **Conteo.** `conteo_sap.ventas` es el `COUNT(*)` del rango, en la misma conexión, justo después de extraer. **Si no es igual a las filas recibidas, el cierre falla (422 en `conteo_sap.ventas`), la corrida queda `fallida` y no se aplica nada:** un mes cargado a medias no se podría volver a cargar. Si cuadra, la respuesta trae `conteo` con `cuadra`, como en la `completa`; `activas_mysql` son las filas de la empresa en el rango. No entra en el conteo diario ni en la estabilidad.
 
 ## 11. PEDIDOS
 

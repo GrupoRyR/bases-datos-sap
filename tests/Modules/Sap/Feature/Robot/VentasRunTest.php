@@ -408,6 +408,18 @@ it('requires the SAP count to close a historical run', function () {
         ->assertJsonValidationErrorFor('conteo_sap');
 });
 
+it('fails a historical close whose SAP count differs from the lines received, and applies nothing', function () {
+    $run = sendVentas($this, [saleLine(1, '2026-08-01'), saleLine(2, '2026-08-31')], historicoRun());
+
+    // An applied month that does not match SAP could never be loaded again (409), so it is never applied.
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2], 'conteo_sap' => ['ventas' => 3]])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor('conteo_sap.ventas');
+
+    expect(storedSales())->toBe([])
+        ->and(Run::find($run)->estado)->toBe(RunState::Failed);
+});
+
 it('leaves the range empty when applying the historical month fails', function () {
     $lines = array_map(fn (int $entry): array => saleLine($entry, '2026-08-15'), range(1, 250));
     $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', historicoRun())->assertCreated()->json('run_id');
