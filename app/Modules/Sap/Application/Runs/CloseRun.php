@@ -46,8 +46,9 @@ final class CloseRun
 
         // Under a lock on the run, so a late batch, its expiry or a second
         // close cannot change what is counted and applied. Returns the full
-        // parts that came empty instead of applying anything.
-        $empty = DB::transaction(function () use ($run, $appliedAt, $batches, $declared, $sapCounts): array {
+        // parts that came empty, or the parts of a historical run whose SAP
+        // count differs, instead of applying anything.
+        [$empty, $mismatched] = DB::transaction(function () use ($run, $appliedAt, $batches, $declared, $sapCounts): array {
             $current = Run::query()->whereKey($run->id)->lockForUpdate()->firstOrFail();
 
             if ($current->estado !== RunState::Open) {
@@ -58,7 +59,18 @@ final class CloseRun
             $empty = array_keys(array_filter($rows, fn (int $count, string $part): bool => $count === 0 && $run->partes[$part] === PartMode::Full->value, ARRAY_FILTER_USE_BOTH));
 
             if ($empty !== []) {
-                return $empty;
+                return [$empty, []];
+            }
+
+            // A historical month is loaded once (contract section 10.4): one
+            // that does not match SAP is never applied, since it could not be
+            // loaded again.
+            $mismatched = $run->tipo === RunType::Historical
+                ? array_keys(array_filter($rows, fn (int $count, string $part): bool => $count !== ($sapCounts[$part] ?? null), ARRAY_FILTER_USE_BOTH))
+                : [];
+
+            if ($mismatched !== []) {
+                return [[], $mismatched];
             }
 
             DB::connection($run->conjunto->connection())->transaction(fn () => match ($run->conjunto) {
@@ -77,11 +89,15 @@ final class CloseRun
                 'aplicada_en' => $appliedAt,
             ]);
 
-            return [];
+            return [[], []];
         });
 
         if ($empty !== []) {
             $this->failEmpty($run, $empty);
+        }
+
+        if ($mismatched !== []) {
+            $this->failMismatched($run, $mismatched, $declared, $sapCounts ?? []);
         }
 
         return $run;
@@ -128,10 +144,10 @@ final class CloseRun
         $declared = $this->counts($run, $input['filas'] ?? null, 'filas', $errors);
         $sapCounts = null;
 
-        if ($run->tipo === RunType::Full) {
+        if ($run->tipo->isWhole()) {
             $sapCounts = $this->counts($run, $input['conteo_sap'] ?? null, 'conteo_sap', $errors);
         } elseif (($input['conteo_sap'] ?? null) !== null) {
-            $errors['conteo_sap'] = 'Solo una corrida completa envía el conteo de SAP.';
+            $errors['conteo_sap'] = 'Solo una corrida completa o historico envía el conteo de SAP.';
         }
 
         if ($errors !== []) {
@@ -175,6 +191,24 @@ final class CloseRun
             ->pluck('filas', 'parte')->map(fn (mixed $rows): int => (int) $rows)->all();
 
         return array_map(fn (string $part): int => $received[$part] ?? 0, array_combine(array_keys($run->partes), array_keys($run->partes)));
+    }
+
+    /**
+     * A historical run whose rows do not match the SAP count fails (422)
+     * and its range stays empty, ready to be loaded again.
+     *
+     * @param  list<string>  $parts
+     * @param  array<string, int>  $rows
+     * @param  array<string, int>  $sapCounts
+     */
+    private function failMismatched(Run $run, array $parts, array $rows, array $sapCounts): never
+    {
+        $run->finish(RunState::Failed, 'El conteo de SAP no cuadra con las filas recibidas: '.implode(', ', $parts).'.');
+
+        throw RobotRequestRejected::invalid('El conteo de SAP no cuadra con las filas recibidas; la carga histórica falló y el rango sigue vacío.', array_combine(
+            array_map(fn (string $part): string => "conteo_sap.{$part}", $parts),
+            array_map(fn (string $part): string => "SAP contó {$sapCounts[$part]} filas y llegaron {$rows[$part]}.", $parts),
+        ));
     }
 
     /**

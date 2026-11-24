@@ -62,6 +62,26 @@ it('tells the last applied time and the latest run in any state', function () {
         ->and($sgx->lastRun?->finishedAt?->format('H:i'))->toBe('09:40');
 });
 
+it('never shows a historical load as the last update or the latest run of VENTAS', function () {
+    statusRun(Company::Sgx, Dataset::Ventas, ['tipo' => 'completa', 'partes' => ['ventas' => 'todo'], 'aplicada_en' => '2026-10-26 02:30:00']);
+    $nightly = statusRun(Company::Sgx, Dataset::Ventas, [
+        'tipo' => 'completa', 'partes' => ['ventas' => 'todo'], 'estado' => 'fallida',
+        'error' => 'VPN no conectó', 'terminada_en' => '2026-10-27 02:10:00',
+    ]);
+    // A later historical load, applied after the failed nightly run.
+    statusRun(Company::Sgx, Dataset::Ventas, [
+        'tipo' => 'historico', 'partes' => ['ventas' => 'todo'], 'ventana_desde' => '2026-08-01', 'ventana_hasta' => '2026-08-31',
+        'aplicada_en' => '2026-10-27 09:00:00', 'terminada_en' => '2026-10-27 09:00:00',
+    ]);
+
+    $ventas = app(DatasetStatuses::class)->all()[2];
+
+    expect($ventas->dataset)->toBe(Dataset::Ventas)
+        ->and($ventas->lastAppliedAt?->format('Y-m-d H:i'))->toBe('2026-10-26 02:30')
+        ->and($ventas->lastRun?->id)->toBe($nightly->id)
+        ->and($ventas->lastRun?->state)->toBe('fallida');
+});
+
 it('counts the active master rows and every receivable, sales and order line of each company', function () {
     $synced = '2026-10-27 02:30:00';
     DB::connection('maestros')->table('clientes')->insert([

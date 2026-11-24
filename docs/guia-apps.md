@@ -134,7 +134,7 @@ Una fila por línea de factura de clientes (incluidas las notas débito) o de no
 - **Venta neta** = `SUM(total)`: las notas crédito llegan con `cantidad`, `total`, `iva` y `ganancia_bruta` negativos, así que la suma ya las descuenta.
 - **Margen** = `SUM(ganancia_bruta) / SUM(total)`, **solo sobre las filas donde `ganancia_bruta IS NOT NULL`** (en el divisor también). `ganancia_bruta` viene de `GrssProfit` de SAP y cuadra con su «Ganancia bruta»; es `null` en las líneas cargadas antes de que el robot la enviara, y mezclarlas bajaría el margen.
 - **`costo_total` nunca se usa para márgenes**: es el costo de inventario y no cuadra con la ganancia bruta de SAP (plan §4).
-- **Historia**: empieza en la primera carga (ventana desde el 2026-10-25). Cada corrida nocturna reemplaza solo la ventana actual, que es el mes en curso más los últimos 7 días del mes anterior; lo anterior queda congelado y no se toca.
+- **Historia**: la nocturna empezó el 2026-10-25, y los meses anteriores llegan con la carga histórica (contrato §10.4), mes por mes, desde el primero que se cargue. Cada corrida nocturna reemplaza solo la ventana actual, que es el mes en curso más los últimos 7 días del mes anterior. **Lo anterior a la ventana nunca cambia**: ni la nocturna ni la carga histórica lo tocan, y la carga histórica solo llena meses que estaban vacíos.
 - `id_pedido_app` solo existe en `SGX`; en `SDC` siempre es `null`.
 
 #### `v_pedidos` (`ventas_sap`)

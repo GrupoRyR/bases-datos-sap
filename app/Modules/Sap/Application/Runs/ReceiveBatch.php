@@ -80,8 +80,9 @@ final class ReceiveBatch
 
     /**
      * A row of a part with a window (VENTAS and the PRODUCCION movement)
-     * dated before the run's window would land where the close never
-     * replaces (contract sections 10.1 and 12.3): the batch is refused.
+     * dated before the run's window, or after the end of a historical
+     * range, would land where the close never writes (contract sections
+     * 10.1, 10.4 and 12.3): the batch is refused.
      *
      * @param  list<list<mixed>>  $rows
      * @return array<string, string>
@@ -90,6 +91,7 @@ final class ReceiveBatch
     {
         // StartRun always stores the window of a run whose parts have one.
         $from = $run->ventana_desde?->toDateString();
+        $until = $run->ventana_hasta?->toDateString();
         $column = $part->windowColumn();
 
         if ($column === null || $from === null) {
@@ -102,6 +104,8 @@ final class ReceiveBatch
         foreach ($rows as $index => $row) {
             if ($row[$position] < $from) {
                 $errors["rows.{$index}.{$column}"] = "Es anterior a ventana_desde ({$from}).";
+            } elseif ($until !== null && $row[$position] > $until) {
+                $errors["rows.{$index}.{$column}"] = "Es posterior a ventana_hasta ({$until}).";
             }
         }
 

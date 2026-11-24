@@ -24,6 +24,7 @@ use Illuminate\Support\LazyCollection;
  * @property list<int> $solicitudes
  * @property Carbon|null $fecha_corte
  * @property Carbon|null $ventana_desde
+ * @property Carbon|null $ventana_hasta
  * @property Carbon $extraida_en
  * @property RunState $estado
  * @property string|null $abierta_lock
@@ -48,7 +49,7 @@ final class Run extends Model
 
     /** What opening a run sets; results and state changes go through forceFill. */
     protected $fillable = [
-        'conjunto', 'empresa', 'tipo', 'partes', 'solicitudes', 'fecha_corte', 'ventana_desde',
+        'conjunto', 'empresa', 'tipo', 'partes', 'solicitudes', 'fecha_corte', 'ventana_desde', 'ventana_hasta',
         'extraida_en', 'estado', 'abierta_lock', 'abierta_hasta', 'robot_key',
     ];
 
@@ -66,6 +67,7 @@ final class Run extends Model
             'conteo' => 'array',
             'fecha_corte' => 'date',
             'ventana_desde' => 'date',
+            'ventana_hasta' => 'date',
             'extraida_en' => 'datetime',
             'abierta_hasta' => 'datetime',
             'aplicada_en' => 'datetime',

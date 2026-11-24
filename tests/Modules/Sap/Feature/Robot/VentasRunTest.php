@@ -3,6 +3,7 @@
 use App\Modules\Sap\Contracts\Enums\Part;
 use App\Modules\Sap\Domain\Runs\RunState;
 use App\Modules\Sap\Models\Run;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Tests\Modules\Sap\Support\RobotClient;
@@ -301,4 +302,153 @@ it('counts the lines of the company inside the window in the nightly run', funct
     expect($count->conjunto)->toBe('VENTAS')
         ->and($count->parte)->toBe('ventas')
         ->and($count->fecha)->toStartWith('2026-10-16');
+});
+
+/*
+| A historical run (contract sections 4.1 and 10.4): one calendar month, or
+| the part of it before the nightly window, loaded only into an empty range,
+| all at once or not at all, so the frozen history is never touched.
+*/
+
+/**
+ * The start body of a historical VENTAS run of SGX for August 2026.
+ *
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function historicoRun(array $overrides = []): array
+{
+    return ventasRun(['tipo' => 'historico', 'ventana_desde' => '2026-08-01', 'ventana_hasta' => '2026-08-31', ...$overrides]);
+}
+
+it('loads a historical month into an empty range, with its SAP count and no daily count', function () {
+    DB::connection('ventas')->table('ventas')->insert([
+        storedSale('SGX', 1, '2026-07-31'),
+        storedSale('SGX', 2, '2026-09-24'),
+        // Another company's lines in the range do not block it.
+        storedSale('SDC', 3, '2026-08-10'),
+    ]);
+    $run = sendVentas($this, [saleLine(4, '2026-08-01'), saleLine(5, '2026-08-31', ['total' => '-40.00'])], historicoRun());
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2], 'conteo_sap' => ['ventas' => 2]])
+        ->assertOk()
+        ->assertJsonPath('estado', 'cerrada')
+        ->assertJsonPath('conteo.ventas', ['sap' => 2, 'recibidas' => 2, 'activas_recibidas' => 2, 'activas_mysql' => 2, 'cuadra' => true]);
+
+    $stored = Run::find($run);
+
+    expect(storedSales())->toBe(['SDC/3/100.00', 'SGX/1/100.00', 'SGX/2/100.00', 'SGX/4/1000.50', 'SGX/5/-40.00'])
+        ->and($stored->tipo->value)->toBe('historico')
+        ->and($stored->ventana_hasta?->toDateString())->toBe('2026-08-31')
+        // A historical load never stands for the nightly count of the day.
+        ->and(DB::table('daily_counts')->count())->toBe(0);
+});
+
+it('accepts January 2025, the first month of the historical load', function () {
+    RobotClient::post($this, '/api/robot/v1/corridas', historicoRun(['ventana_desde' => '2025-01-01', 'ventana_hasta' => '2025-01-31']))
+        ->assertCreated();
+});
+
+it('accepts the days of the month before the nightly window starts', function () {
+    // On 16/10 the nightly window starts on 24/09.
+    RobotClient::post($this, '/api/robot/v1/corridas', historicoRun(['ventana_desde' => '2026-09-01', 'ventana_hasta' => '2026-09-23']))
+        ->assertCreated();
+});
+
+it('refuses with 409 a range that already has lines of the company, and opens nothing', function () {
+    DB::connection('ventas')->table('ventas')->insert(storedSale('SGX', 1, '2026-08-15'));
+
+    RobotClient::post($this, '/api/robot/v1/corridas', historicoRun())->assertConflict();
+
+    expect(Run::count())->toBe(0)
+        ->and(storedSales())->toBe(['SGX/1/100.00']);
+});
+
+it('refuses a historical range that is not within one month before the nightly window', function (array $range, string $field) {
+    RobotClient::post($this, '/api/robot/v1/corridas', historicoRun($range))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor($field);
+
+    expect(Run::count())->toBe(0);
+})->with([
+    'not the first day of a month' => [['ventana_desde' => '2026-08-02'], 'ventana_desde'],
+    'before 2025-01-01' => [['ventana_desde' => '2024-12-01', 'ventana_hasta' => '2024-12-31'], 'ventana_desde'],
+    'without ventana_desde' => [['ventana_desde' => null], 'ventana_desde'],
+    'without ventana_hasta' => [['ventana_hasta' => null], 'ventana_hasta'],
+    'ventana_hasta not a date' => [['ventana_hasta' => '2026-08-32'], 'ventana_hasta'],
+    'crossing into the next month' => [['ventana_hasta' => '2026-09-01'], 'ventana_hasta'],
+    'ending before it starts' => [['ventana_hasta' => '2026-07-31'], 'ventana_hasta'],
+    'reaching the nightly window' => [['ventana_desde' => '2026-09-01', 'ventana_hasta' => '2026-09-24'], 'ventana_hasta'],
+    'in the current month' => [['ventana_desde' => '2026-10-01', 'ventana_hasta' => '2026-10-15'], 'ventana_hasta'],
+    'serving requests' => [['solicitudes' => [1]], 'solicitudes'],
+]);
+
+it('refuses a historical run of any other dataset', function (string $dataset) {
+    RobotClient::post($this, '/api/robot/v1/corridas', historicoRun(['conjunto' => $dataset, 'partes' => ['pedidos' => 'todo']]))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor('tipo');
+})->with(['MAESTROS', 'CARTERA', 'PEDIDOS', 'PRODUCCION']);
+
+it('refuses ventana_hasta outside a historical run', function (string $type) {
+    RobotClient::post($this, '/api/robot/v1/corridas', ventasRun(['tipo' => $type, 'ventana_hasta' => '2026-08-31']))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor('ventana_hasta');
+})->with(['completa', 'solicitud']);
+
+it('refuses a batch line outside the historical range', function () {
+    $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', historicoRun())->assertCreated()->json('run_id');
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/lotes", RobotClient::batch(1, Part::Sales, [
+        saleLine(1, '2026-07-31'), saleLine(2, '2026-08-15'), saleLine(3, '2026-09-01'),
+    ]))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['rows.0.fecha_contabilizacion', 'rows.2.fecha_contabilizacion'])
+        ->assertJsonMissingValidationErrors(['rows.1.fecha_contabilizacion']);
+});
+
+it('requires the SAP count to close a historical run', function () {
+    $run = sendVentas($this, [saleLine(1, '2026-08-15')], historicoRun());
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 1]])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor('conteo_sap');
+});
+
+it('fails a historical close whose SAP count differs from the lines received, and applies nothing', function () {
+    $run = sendVentas($this, [saleLine(1, '2026-08-01'), saleLine(2, '2026-08-31')], historicoRun());
+
+    // An applied month that does not match SAP could never be loaded again (409), so it is never applied.
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2], 'conteo_sap' => ['ventas' => 3]])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor('conteo_sap.ventas');
+
+    expect(storedSales())->toBe([])
+        ->and(Run::find($run)->estado)->toBe(RunState::Failed);
+});
+
+it('leaves the range empty when applying the historical month fails', function () {
+    $lines = array_map(fn (int $entry): array => saleLine($entry, '2026-08-15'), range(1, 250));
+    $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', historicoRun())->assertCreated()->json('run_id');
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/lotes", RobotClient::batch(1, Part::Sales, $lines))->assertCreated();
+
+    // The second chunk of 200 lines fails after the first one was written.
+    $inserts = 0;
+    DB::listen(function (QueryExecuted $query) use (&$inserts) {
+        if ($query->connectionName === 'ventas' && str_starts_with($query->sql, 'insert into') && str_contains($query->sql, 'ventas') && ++$inserts === 2) {
+            throw new RuntimeException('Simulated failure while applying.');
+        }
+    });
+
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 250], 'conteo_sap' => ['ventas' => 250]])
+        ->assertServerError();
+
+    expect($inserts)->toBe(2)
+        ->and(storedSales())->toBe([])
+        ->and(Run::find($run)->estado)->toBe(RunState::Open);
+});
+
+it('keeps one open VENTAS run per company, historical or not', function () {
+    RobotClient::post($this, '/api/robot/v1/corridas', historicoRun())->assertCreated();
+
+    RobotClient::post($this, '/api/robot/v1/corridas', ventasRun(['tipo' => 'completa']))->assertConflict();
 });

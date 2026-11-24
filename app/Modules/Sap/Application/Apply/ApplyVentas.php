@@ -3,6 +3,7 @@
 namespace App\Modules\Sap\Application\Apply;
 
 use App\Modules\Sap\Contracts\Enums\Part;
+use App\Modules\Sap\Domain\Runs\RunType;
 use App\Modules\Sap\Models\Run;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,10 @@ use LogicException;
  * and nothing earlier is ever touched. That is the frozen history
  * Comisiones reads (docs/plan-bases-sap.md, section 4). The batches already
  * refused any line before the window, so every received line lands in it.
+ *
+ * A historical run (section 10.4) deletes nothing: it inserts its month
+ * into a range the company had empty when the run opened, and the open
+ * run lock kept every other VENTAS run of the company out since then.
  */
 final class ApplyVentas
 {
@@ -30,10 +35,12 @@ final class ApplyVentas
         $from = $run->ventana_desde?->toDateString()
             ?? throw new LogicException("VENTAS run {$run->id} has no window.");
 
-        DB::connection('ventas')->table('ventas')
-            ->where('empresa', $company)
-            ->where('fecha_contabilizacion', '>=', $from)
-            ->delete();
+        if ($run->tipo !== RunType::Historical) {
+            DB::connection('ventas')->table('ventas')
+                ->where('empresa', $company)
+                ->where('fecha_contabilizacion', '>=', $from)
+                ->delete();
+        }
 
         $run->rowsOf(Part::Sales)->chunk(self::CHUNK)->each(function ($lines) use ($run, $company, $appliedAt) {
             DB::connection('ventas')->table('ventas')->insert($lines->map(fn (array $line): array => [
