@@ -86,6 +86,74 @@ def sql_desde_fecha(sql: str, dia: str) -> str:
     return sql.replace(EXPRESION_VENTANA, f"TO_DATE('{dia}', 'YYYY-MM-DD')")
 
 
+# `<columna> >= <expresión de la ventana>`: la columna con su alias de tabla (T0."DocDate").
+_RE_FILTRO_VENTANA = re.compile(
+    r'(?P<columna>(?:[A-Za-z_]\w*\.)?(?:"[^"\n]+"|[A-Za-z_]\w*))(?P<espacio>\s*)>=\s*'
+    + re.escape(EXPRESION_VENTANA)
+)
+
+
+def _partir_comentario(linea: str) -> tuple[str, str]:
+    """(código, comentario) de una línea: el comentario empieza en el primer `--` que no
+    está dentro de un texto ('...') ni de un nombre entre comillas ("...")."""
+    comilla: str | None = None
+    for i, caracter in enumerate(linea):
+        if comilla:
+            if caracter == comilla:
+                comilla = None
+        elif caracter in ("'", '"'):
+            comilla = caracter
+        elif linea.startswith("--", i):
+            return linea[:i], linea[i:]
+    return linea, ""
+
+
+def _fecha_sql(dia: date) -> str:
+    return f"TO_DATE('{dia.isoformat()}', 'YYYY-MM-DD')"
+
+
+def sql_rango(sql: str, desde: date, hasta: date) -> str:
+    """La consulta con su ventana cambiada por el rango cerrado de `desde` a `hasta`.
+
+    Para el histórico de VENTAS (contrato §10.4): la consulta es la misma de la nocturna
+    y solo cambia el filtro de la fecha. Cada `<columna> >= <expresión de la ventana>`
+    del código pasa a `<columna> BETWEEN <desde> AND <hasta>` sobre la misma columna, así
+    que las dos nunca se separan. Los comentarios no cuentan y no se tocan.
+
+    Falla con ConfigError si el código no tiene la expresión o si una aparición no tiene
+    esa forma: así nunca corre una consulta con otra ventana. Las fechas solo llegan
+    como `date`, nunca como texto.
+    """
+    for dia in (desde, hasta):
+        if not isinstance(dia, date) or isinstance(dia, datetime):
+            raise TypeError(f"El rango de la consulta va con fechas (date), no {type(dia).__name__}.")
+    if hasta < desde:
+        raise ValueError(f"El rango de la consulta va al revés: {desde} a {hasta}.")
+    rango = f"BETWEEN {_fecha_sql(desde)} AND {_fecha_sql(hasta)}"
+    lineas = sql.split("\n")
+    cambios = 0
+    for i, linea in enumerate(lineas):
+        codigo, comentario = _partir_comentario(linea)
+        apariciones = codigo.count(EXPRESION_VENTANA)
+        if not apariciones:
+            continue
+        nuevo, cambiadas = _RE_FILTRO_VENTANA.subn(
+            lambda m: f"{m['columna']}{m['espacio']}{rango}", codigo
+        )
+        if cambiadas != apariciones:
+            raise config.ConfigError(
+                f"La consulta usa la expresión de la ventana ({EXPRESION_VENTANA}) fuera de un filtro "
+                f"`<columna> >= ...` en la línea {i + 1}; no se corre con un rango."
+            )
+        lineas[i] = nuevo + comentario
+        cambios += cambiadas
+    if not cambios:
+        raise config.ConfigError(
+            f"La consulta no tiene la expresión de la ventana ({EXPRESION_VENTANA}); no se corre."
+        )
+    return "\n".join(lineas)
+
+
 def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
     """Ruta de una consulta relativa a robot/queries (ej: "maestros/precios.sql").
 

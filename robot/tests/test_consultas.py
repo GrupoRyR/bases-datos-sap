@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+import sqlite3
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -279,3 +280,150 @@ def test_trozos():
     assert consultas.trozos(["a", "b", "c"], 2) == [["a", "b"], ["c"]]
     with pytest.raises(ValueError):
         consultas.trozos(codigos, 0)
+
+
+# --- sql_rango: el filtro de la ventana cambiado por un rango cerrado (contrato §10.4) ---
+
+VENTAS_SQL = Path(__file__).resolve().parent.parent / "queries" / "ventas" / "ventas.sql"
+ENERO = (date(2025, 1, 1), date(2025, 1, 31))
+RANGO_ENERO = "BETWEEN TO_DATE('2025-01-01', 'YYYY-MM-DD') AND TO_DATE('2025-01-31', 'YYYY-MM-DD')"
+
+
+def _ventas() -> str:
+    return VENTAS_SQL.read_text(encoding="utf-8")
+
+
+def _codigo(sql: str) -> str:
+    return re.sub(r"--[^\n]*", "", sql)
+
+
+def test_sql_rango_cambia_cada_filtro_de_la_ventana_de_ventas():
+    sql = _ventas()
+    cambiada = consultas.sql_rango(sql, *ENERO)
+    # Facturas y notas crédito: los dos filtros, sobre la misma columna.
+    assert cambiada.count(f'T0."DocDate" {RANGO_ENERO}') == 2
+    assert consultas.EXPRESION_VENTANA not in _codigo(cambiada)
+    # Solo cambian esas dos líneas: el resto (comentarios incluidos) queda igual.
+    distintas = [(a, b) for a, b in zip(sql.split("\n"), cambiada.split("\n")) if a != b]
+    assert [a.strip() for a, _ in distintas] == [
+        f'WHERE T0."DocDate" >= {consultas.EXPRESION_VENTANA}',
+    ] * 2
+    assert cambiada.replace(RANGO_ENERO, f">= {consultas.EXPRESION_VENTANA}") == sql
+
+
+def test_sql_rango_no_cambia_la_consulta_nocturna():
+    sql = _ventas()
+    consultas.sql_rango(sql, *ENERO)
+    assert _ventas() == sql
+    assert _codigo(sql).count(f'T0."DocDate" >= {consultas.EXPRESION_VENTANA}') == 2
+
+
+def test_sql_rango_sirve_con_la_consulta_de_derivados():
+    sql = consultas.sql_id_pedido_app(_ventas(), "SDC")
+    assert consultas.sql_rango(sql, *ENERO).count(RANGO_ENERO) == 2
+
+
+def test_sql_rango_sin_la_expresion_no_corre():
+    with pytest.raises(ConfigError, match="ventana"):
+        consultas.sql_rango('SELECT 1 FROM "OINV" T0 WHERE T0."DocDate" >= CURRENT_DATE', *ENERO)
+
+
+def test_sql_rango_con_la_expresion_solo_en_un_comentario_no_corre():
+    sql = f"-- {consultas.EXPRESION_VENTANA}\nSELECT 1 FROM DUMMY"
+    with pytest.raises(ConfigError, match="ventana"):
+        consultas.sql_rango(sql, *ENERO)
+
+
+@pytest.mark.parametrize("filtro", [
+    'T0."DocDate" > {e}',
+    '{e} <= T0."DocDate"',
+    'T0."DocDate" >= {e} AND T1."Otra" = {e}',
+    "{e} IS NOT NULL",
+])
+def test_sql_rango_con_una_aparicion_que_no_es_columna_mayor_o_igual_no_corre(filtro: str):
+    sql = 'SELECT 1 FROM "OINV" T0 WHERE ' + filtro.format(e=consultas.EXPRESION_VENTANA)
+    with pytest.raises(ConfigError, match="ventana"):
+        consultas.sql_rango(sql, *ENERO)
+
+
+def test_sql_rango_no_toma_por_comentario_un_guion_doble_dentro_de_un_texto():
+    sql = f"""SELECT 1 FROM "OINV" T0 WHERE T0."Comments" <> '--' AND T0."DocDate" >= {consultas.EXPRESION_VENTANA}"""
+    assert consultas.sql_rango(sql, *ENERO).endswith(f'T0."DocDate" {RANGO_ENERO}')
+
+
+@pytest.mark.parametrize("desde, hasta, error", [
+    ("2025-01-01", date(2025, 1, 31), TypeError),
+    (date(2025, 1, 1), datetime(2025, 1, 31, 0, 0), TypeError),
+    (date(2025, 1, 31), date(2025, 1, 1), ValueError),
+])
+def test_sql_rango_solo_acepta_fechas_en_orden(desde, hasta, error):
+    with pytest.raises(error):
+        consultas.sql_rango(_ventas(), desde, hasta)
+
+
+# --- La consulta de VENTAS con el rango, en SQLite ------------------------------------
+
+
+def _sqlite_con_ventas() -> sqlite3.Connection:
+    """Las tablas que lee ventas.sql, con las funciones de HANA que usa como propias."""
+    con = sqlite3.connect(":memory:")
+    con.create_function("ADD_DAYS", 2, lambda d, n: (date.fromisoformat(d) + timedelta(days=n)).isoformat())
+    con.create_function("DAYOFMONTH", 1, lambda d: date.fromisoformat(d).day)
+    con.create_function("TO_DATE", 2, lambda d, formato: date.fromisoformat(d).isoformat())
+    encabezado = ('"DocEntry" INT, "DocNum" INT, "DocSubType" TEXT, "CANCELED" TEXT, "DocStatus" TEXT, '
+                  '"DocDate" TEXT, "TaxDate" TEXT, "SlpCode" INT, "CardCode" TEXT, "CardName" TEXT, '
+                  '"NumAtCard" TEXT, "Address2" TEXT, "DiscPrcnt" REAL, "DocCur" TEXT, "DocRate" REAL, '
+                  '"Comments" TEXT')
+    lineas = ('"DocEntry" INT, "LineNum" INT, "ItemCode" TEXT, "Dscription" TEXT, "Quantity" REAL, '
+              '"Price" REAL, "PriceBefDi" REAL, "StockPrice" REAL, "LineTotal" REAL, "VatSum" REAL, '
+              '"GrssProfit" REAL, "TaxOnly" TEXT, "BaseType" INT, "BaseRef" TEXT')
+    con.executescript(f"""
+        CREATE TABLE "OINV" ({encabezado}, "U_SGX_IdPedidoApp" TEXT);
+        CREATE TABLE "ORIN" ({encabezado});
+        CREATE TABLE "INV1" ({lineas});
+        CREATE TABLE "RIN1" ({lineas});
+        CREATE TABLE "OCRD" ("CardCode" TEXT, "LicTradNum" TEXT, "City" TEXT, "GroupCode" INT);
+        CREATE TABLE "OSLP" ("SlpCode" INT, "SlpName" TEXT);
+        CREATE TABLE "OITM" ("ItemCode" TEXT, "ItmsGrpCod" INT, "FirmCode" INT);
+        CREATE TABLE "OITB" ("ItmsGrpCod" INT, "ItmsGrpNam" TEXT);
+        CREATE TABLE "OMRC" ("FirmCode" INT, "FirmName" TEXT);
+        CREATE TABLE "OCRG" ("GroupCode" INT, "GroupName" TEXT);
+    """)
+    return con
+
+
+def _documento(con: sqlite3.Connection, tabla: str, doc_entry: int, dia: date) -> None:
+    lineas = {"OINV": "INV1", "ORIN": "RIN1"}[tabla]
+    valores = [doc_entry, doc_entry, "--", "N", "O", dia.isoformat(), dia.isoformat(), 1, "C1", "Cliente",
+               None, None, 0, "COP", 1]
+    extra = [None] if tabla == "OINV" else []
+    marcas = ", ".join("?" for _ in range(16 + len(extra)))
+    con.execute(f'INSERT INTO "{tabla}" VALUES ({marcas})', valores + [None] + extra)
+    con.execute(f'INSERT INTO "{lineas}" VALUES (?, 0, \'A1\', \'Art\', 1, 10, 10, 5, 10, 1.9, 5, \'N\', -1, NULL)',
+                (doc_entry,))
+
+
+def test_la_consulta_con_el_rango_trae_solo_los_dias_del_rango_y_su_conteo_cuadra():
+    con = _sqlite_con_ventas()
+    desde, hasta = ENERO
+    for doc_entry, dia in [
+        (1, desde - timedelta(days=1)),  # el día antes: no sale
+        (2, desde),
+        (3, date(2025, 1, 15)),
+        (4, hasta),
+        (5, hasta + timedelta(days=1)),  # el día después: no sale
+    ]:
+        _documento(con, "OINV", doc_entry, dia)
+    _documento(con, "ORIN", 6, date(2025, 1, 20))  # nota crédito en el rango
+    _documento(con, "ORIN", 7, date(2024, 12, 31))  # nota crédito antes: no sale
+
+    sql = consultas.sql_rango(_ventas(), desde, hasta)
+    cursor = con.execute(sql)
+    nombres = [d[0] for d in cursor.description]
+    filas = [dict(zip(nombres, f)) for f in cursor.fetchall()]
+    assert [(f["Tipo objeto"], f["DocEntry"]) for f in filas] == [(13, 2), (13, 3), (14, 6), (13, 4)]
+    assert {f["Fecha contabilización"] for f in filas} <= {
+        (desde + timedelta(days=n)).isoformat() for n in range(31)
+    }
+    [(conteo,)] = con.execute(consultas.sql_contar(sql)).fetchall()
+    assert conteo == len(filas) == 4
