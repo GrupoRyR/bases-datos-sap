@@ -9,6 +9,10 @@ Por cada resultado con error de extracción que atiende solicitudes o es la
 completa: abre la corrida y la falla de inmediato, para que sus solicitudes
 pasen a `fallida` con el motivo (contrato §4.4).
 
+El histórico de VENTAS (historico.py) envía cada tramo con `enviar_resultado`: lleva
+también `ventana_hasta`, y un 409 al iniciar sin corrida abierta es un rango que la app
+ya tiene (RangoYaCargado, contrato §10.4).
+
 Devuelve los fallos como (etapa, mensaje), sin valores de SAP ni secretos.
 """
 from __future__ import annotations
@@ -22,7 +26,7 @@ from api import ApiCliente, ApiError, ApiRechazo, CorridaAbierta, LotesFaltantes
 from carpeta import Carpeta
 from extraccion import Resultado, mensaje_seguro
 from registro import obtener
-from trabajos import Trabajo
+from trabajos import TIPOS_CON_CONTEO, Trabajo
 
 log = obtener("envio")
 
@@ -36,6 +40,13 @@ class FalloEnvio(RuntimeError):
     def __init__(self, etapa: str, mensaje: str) -> None:
         super().__init__(mensaje)
         self.etapa = etapa
+
+
+class RangoYaCargado(FalloEnvio):
+    """409 al iniciar una corrida historico: la app ya tiene ventas en ese rango (§10.4).
+
+    No abre nada y no es un fallo: repetir un mes ya cargado no hace daño.
+    """
 
 
 def _mensaje(exc: BaseException) -> str:
@@ -81,9 +92,16 @@ def _iniciar(api: ApiCliente, trabajo: Trabajo, extraida_en: str, ventana_desde:
                 "(sus solicitudes vencen solas en la API).",
             )
         datos["ventana_desde"] = ventana_desde
+    if trabajo.ventana_hasta:
+        # Solo el histórico de VENTAS (contrato §4.1 y §10.4); en los demás la llave ni va.
+        datos["ventana_hasta"] = trabajo.ventana_hasta
     try:
         return int(api.iniciar_corrida(**datos)["run_id"])
     except CorridaAbierta as exc:
+        if exc.run_id is None and trabajo.tipo == "historico":
+            raise RangoYaCargado(
+                "API", f"La app ya tiene ventas de {trabajo.ventana_fija} a {trabajo.ventana_hasta} (409)."
+            ) from exc
         if exc.run_id is None:
             raise
         # El bloqueo garantiza un solo robot: la abierta es de una ejecución que se cortó.
@@ -131,7 +149,7 @@ def foto_de_cartera(columnas: list[str], filas: list[list[Any]], fecha_corte: st
 def _cerrar(api: ApiCliente, run_id: int, r: Resultado, lotes: list[Lote]) -> dict[str, Any]:
     t = r.trabajo
     filas = {p: len(r.filas[p]) for p in t.partes}
-    conteo = dict(r.conteo_sap or {}) if t.tipo == "completa" else None
+    conteo = dict(r.conteo_sap or {}) if t.tipo in TIPOS_CON_CONTEO else None
     try:
         return api.cerrar_corrida(run_id, batches=len(lotes), filas=filas, conteo_sap=conteo)
     except LotesFaltantes as exc:
@@ -150,7 +168,12 @@ def _enviar_lote(api: ApiCliente, run_id: int, lote: Lote) -> None:
     api.enviar_lote(run_id, batch=batch, parte=parte, columns=columnas, rows=filas)
 
 
-def _enviar_resultado(api: ApiCliente, r: Resultado) -> None:
+def enviar_resultado(api: ApiCliente, r: Resultado) -> None:
+    """Inicia la corrida de un resultado ya extraído, manda sus lotes y la cierra.
+
+    Lanza FalloEnvio si algo falla (si la corrida alcanzó a abrirse, queda fallida en la
+    API) o RangoYaCargado si la app ya tiene ese rango del histórico.
+    """
     t = r.trabajo
     run_id: int | None = None
     try:
@@ -159,6 +182,8 @@ def _enviar_resultado(api: ApiCliente, r: Resultado) -> None:
         for lote in lotes:
             _enviar_lote(api, run_id, lote)
         respuesta = _cerrar(api, run_id, r, lotes)
+    except RangoYaCargado:
+        raise  # no se abrió nada: no hay corrida que fallar
     except Exception as exc:
         # El mismo texto seguro que va a /fallar y al correo: el de la API no entra al log.
         mensaje = _mensaje(exc)
@@ -210,7 +235,7 @@ def enviar(
             fallos.append(("CARPETA", f"{t.nombre}: No se pudo guardar el CSV: {exc}"))
 
         try:
-            _enviar_resultado(api, r)
+            enviar_resultado(api, r)
         except FalloEnvio as exc:
             fallos.append((exc.etapa, f"{t.nombre}: {exc}"))
     return fallos

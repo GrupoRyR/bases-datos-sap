@@ -5,8 +5,11 @@ from datetime import date
 
 import pytest
 
+import esquema
+import extraccion
 import historico
 from historico import RangoInvalido, inicio_ventana_estimado, mes, tramos
+from trabajos import Trabajo, trabajo_historico_ventas
 
 VENTANA = date(2026, 10, 25)  # la ventana nocturna del 24/11/2026
 
@@ -139,3 +142,28 @@ def test_los_meses_van_por_su_primer_dia():
 
 def test_rango_invalido_es_un_value_error():
     assert issubclass(historico.RangoInvalido, ValueError)
+
+
+# --- El trabajo de un tramo y la revisión del rango -----------------------------------
+
+
+def test_trabajo_de_un_tramo_es_una_corrida_historico_de_ventas_con_su_rango():
+    assert trabajo_historico_ventas("SDC", date(2025, 1, 1), date(2025, 1, 31)) == Trabajo(
+        empresa="SDC", conjunto="VENTAS", tipo="historico", partes={"ventas": "todo"},
+        ventana_fija="2025-01-01", ventana_hasta="2025-01-31",
+    )
+
+
+def test_una_fila_fuera_del_rango_falla_antes_de_enviar():
+    parte = esquema.PARTES["ventas"]
+    posicion = parte.nombres.index("fecha_contabilizacion")
+
+    def filas(*dias: str) -> list[list]:
+        vacia = [None] * len(parte.nombres)
+        return [vacia[:posicion] + [d] + vacia[posicion + 1:] for d in dias]
+
+    extraccion.revisar_ventana(parte, filas("2025-01-01", "2025-01-31"), "2025-01-01", "2025-01-31")
+    with pytest.raises(extraccion.FalloTrabajo, match="posterior a ventana_hasta 2025-01-31"):
+        extraccion.revisar_ventana(parte, filas("2025-01-31", "2025-02-01"), "2025-01-01", "2025-01-31")
+    with pytest.raises(extraccion.FalloTrabajo, match="anterior a ventana_desde 2025-01-01"):
+        extraccion.revisar_ventana(parte, filas("2024-12-31"), "2025-01-01", "2025-01-31")

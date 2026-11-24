@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Callable
 
 import config
@@ -22,7 +22,7 @@ import esquema
 import hana
 from config import Config, ConfigError, EmpresaHana
 from registro import obtener
-from trabajos import Trabajo
+from trabajos import TIPOS_CON_CONTEO, Trabajo
 from vpn import RobotVPN, VpnError
 
 log = obtener("extraccion")
@@ -35,7 +35,7 @@ class Resultado:
     trabajo: Trabajo
     columnas: dict[str, list[str]] = field(default_factory=dict)  # nombres del contrato
     filas: dict[str, list[list[Any]]] = field(default_factory=dict)  # ya serializadas
-    conteo_sap: dict[str, int] | None = None  # solo en una corrida completa
+    conteo_sap: dict[str, int] | None = None  # solo en una corrida completa o historico
     extraida_en: str = ""  # hora de Bogotá con zona, al terminar la última consulta
     # Solo VENTAS y PRODUCCION: primer día de la ventana (AAAA-MM-DD), calculado por HANA
     # (contrato §10.1 y §12).
@@ -78,12 +78,15 @@ def leer_ventana(conn: Any, empresa: str) -> str:
     return dia
 
 
-def revisar_ventana(parte: esquema.Parte, filas: list[list[Any]], ventana_desde: str) -> None:
-    """Falla si alguna fila trae su columna de ventana anterior a ventana_desde.
+def revisar_ventana(
+    parte: esquema.Parte, filas: list[list[Any]], ventana_desde: str, ventana_hasta: str | None = None
+) -> None:
+    """Falla si alguna fila trae su columna de ventana anterior a ventana_desde o, en el
+    histórico de VENTAS, posterior a ventana_hasta.
 
-    La API rechazaría el lote (contrato §10.1 y §12); se corta antes de abrir la corrida.
-    Una parte sin ventana (los maestros de PRODUCCION) no se revisa. Las fechas ya están
-    serializadas (AAAA-MM-DD), así que se comparan como texto.
+    La API rechazaría el lote (contrato §10.1, §10.4 y §12); se corta antes de abrir la
+    corrida. Una parte sin ventana (los maestros de PRODUCCION) no se revisa. Las fechas
+    ya están serializadas (AAAA-MM-DD), así que se comparan como texto.
     """
     if not parte.columna_ventana:
         return
@@ -94,6 +97,13 @@ def revisar_ventana(parte: esquema.Parte, filas: list[list[Any]], ventana_desde:
             "VALIDACION",
             f"Parte {parte.nombre}: {antes} filas con {parte.columna_ventana} anterior a "
             f"ventana_desde {ventana_desde}; la API las rechazaría.",
+        )
+    despues = 0 if ventana_hasta is None else sum(1 for fila in filas if fila[posicion] > ventana_hasta)
+    if despues:
+        raise FalloTrabajo(
+            "VALIDACION",
+            f"Parte {parte.nombre}: {despues} filas con {parte.columna_ventana} posterior a "
+            f"ventana_hasta {ventana_hasta}; la API las rechazaría.",
         )
 
 
@@ -193,9 +203,10 @@ def _extraer_trabajo(conn: Any, empresa_cfg: EmpresaHana, r: Resultado, ahora: C
         _extraer_partes(conn, empresa_cfg, r)
     r.extraida_en = ahora().isoformat(timespec="seconds")
     log.info(
-        "%s extraído: %s%s.", t.nombre,
+        "%s extraído: %s%s%s.", t.nombre,
         ", ".join(f"{p} {len(f)}" for p, f in r.filas.items()),
         f"; ventana desde {r.ventana_desde}" if r.ventana_desde else "",
+        f" hasta {t.ventana_hasta}" if t.ventana_hasta else "",
     )
 
 
@@ -229,31 +240,39 @@ def _extraer_en_ventana(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> No
 
 
 def _extraer_con_ventana_fija(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
-    """Carga inicial de PRODUCCION: la ventana es la pedida (--desde), no la de HANA.
+    """Carga inicial de PRODUCCION e histórico de VENTAS: la ventana es la pedida, no la de HANA.
 
     Las consultas llevan esa fecha en vez de la expresión de la ventana
-    (consultas.sql_desde_fecha), así que no hay nada que pedir antes ni después.
+    (consultas.sql_desde_fecha) o, en el histórico, el rango hasta ventana_hasta
+    (consultas.sql_rango), así que no hay nada que pedir antes ni después.
     """
     t = r.trabajo
     r.ventana_desde = t.ventana_fija
     _extraer_partes(conn, empresa_cfg, r)
     for nombre in t.partes:
-        revisar_ventana(esquema.PARTES[nombre], r.filas[nombre], t.ventana_fija or "")
+        revisar_ventana(esquema.PARTES[nombre], r.filas[nombre], t.ventana_fija or "", t.ventana_hasta)
+
+
+def _sql_con_ventana_fija(sql: str, t: Trabajo) -> str:
+    if t.ventana_hasta:
+        desde = date.fromisoformat(t.ventana_fija or "")
+        return consultas.sql_rango(sql, desde, date.fromisoformat(t.ventana_hasta))
+    return consultas.sql_desde_fecha(sql, t.ventana_fija or "")
 
 
 def _extraer_partes(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
     t = r.trabajo
     esquema_db = empresa_cfg.esquema
-    completa = t.tipo == "completa"
+    con_conteo = t.tipo in TIPOS_CON_CONTEO
     r.columnas, r.filas = {}, {}
-    r.conteo_sap = {} if completa else None
+    r.conteo_sap = {} if con_conteo else None
     codigos: list[str] = []  # códigos de los socios extraídos, en orden
 
     for nombre, modo in t.partes.items():
         parte = esquema.PARTES[nombre]
         sql = consultas.leer_parte(parte, empresa_cfg)
         if t.ventana_fija and parte.columna_ventana:
-            sql = consultas.sql_desde_fecha(sql, t.ventana_fija)
+            sql = _sql_con_ventana_fija(sql, t)
         if nombre in esquema.HIJAS_DE_SOCIO:
             columnas, datos = _hijas(conn, esquema_db, t, parte, sql, codigos)
         elif modo == "cambios" and t.desde.get(nombre) is not None:
@@ -263,12 +282,13 @@ def _extraer_partes(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
             columnas, datos = _leer(conn, esquema_db, t.empresa, parte, sql)
 
         filas = esquema.preparar_filas(parte, columnas, datos) if columnas is not None else []
-        if completa:
-            # COUNT(*) del archivo sin filtro, en la misma conexión (contrato §4.3).
+        if con_conteo:
+            # COUNT(*) de la misma consulta, en la misma conexión (contrato §4.3).
             r.conteo_sap[nombre] = hana.contar(
                 conn, consultas.sql_contar(sql), f"{t.empresa} {nombre} (conteo)"
             )
-        if modo == "todo" and not filas:
+        # Un mes del histórico sin ventas no es un error: no se envía (historico.py).
+        if modo == "todo" and not filas and t.tipo != "historico":
             raise FalloTrabajo(
                 "VALIDACION",
                 f"La parte {nombre} llegó con 0 filas de SAP; no se envía para no vaciar la tabla.",
@@ -284,6 +304,18 @@ def _extraer_partes(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
                     codigos.append(f[posicion])
 
 
+def extraer_resultados(
+    conn: Any, empresa_cfg: EmpresaHana, resultados: list[Resultado], ahora: Callable[[], datetime]
+) -> None:
+    """Extrae cada resultado en esta conexión. Nunca lanza: un error falla solo su resultado."""
+    for r in resultados:
+        try:
+            _extraer_trabajo(conn, empresa_cfg, r, ahora)
+        except Exception as exc:
+            r.fallar(_etapa(exc), mensaje_seguro(exc))
+            log.error("Falló la extracción de %s: %s", r.trabajo.nombre, exc)
+
+
 def _extraer_empresa(
     cfg: Config, empresa: str, resultados: list[Resultado], conectar: Callable[..., Any],
     ahora: Callable[[], datetime], extra: Extra | None,
@@ -295,12 +327,7 @@ def _extraer_empresa(
         return
     try:
         with conectar(cfg.hana, empresa_cfg) as conn:
-            for r in resultados:
-                try:
-                    _extraer_trabajo(conn, empresa_cfg, r, ahora)
-                except Exception as exc:
-                    r.fallar(_etapa(exc), mensaje_seguro(exc))
-                    log.error("Falló la extracción de %s: %s", r.trabajo.nombre, exc)
+            extraer_resultados(conn, empresa_cfg, resultados, ahora)
             if extra is not None:
                 try:
                     extra(conn, empresa)

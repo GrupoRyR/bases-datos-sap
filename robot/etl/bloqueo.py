@@ -6,7 +6,8 @@ dos se solapan, uno le baja el túnel al otro.
 - `en_franja()`: mientras existan los otros robots, usan la VPN a las horas de
   BASES_SAP_FRANJAS_BLOQUEADAS (00:00, 05:00, 06:00, 12:00 y 12:30 en Bogotá).
   A 15 minutos o menos de esas horas, antes o después, este robot no corre
-  (contrato §7.2, regla 5).
+  (contrato §7.2, regla 5). `inicio_hueco()` busca cuándo cabe una ejecución larga
+  (el histórico de ventas) entre una franja y la siguiente.
 - `Bloqueo`: un solo proceso de este robot a la vez (la revisión de cada minuto,
   la nocturna, la del domingo o una manual), con el archivo robot/state/robot.lock.
 """
@@ -74,6 +75,46 @@ def fin_de_franja(momento: datetime, franjas: Iterable[str], margen_min: int = 1
     raise ValueError("Todas las horas del día están bloqueadas: revisa BASES_SAP_FRANJAS_BLOQUEADAS.")
 
 
+def proxima_franja(momento: datetime, franjas: Iterable[str], margen_min: int = 15) -> datetime | None:
+    """Primer minuto entero, desde `momento` (incluido), que está en una franja.
+
+    Es la hora de la franja menos el margen: con las 05:00 y 15 minutos, las 04:45. None
+    si no hay ninguna franja en las 24 horas siguientes (BASES_SAP_FRANJAS_BLOQUEADAS vacía).
+    """
+    franjas = list(franjas)
+    minuto = momento.replace(second=0, microsecond=0)
+    if minuto < momento:
+        minuto += timedelta(minutes=1)
+    for _ in range(MINUTOS_DIA + 1):
+        if en_franja(minuto, franjas, margen_min) is not None:
+            return minuto
+        minuto += timedelta(minutes=1)
+    return None
+
+
+def inicio_hueco(
+    momento: datetime, duracion: timedelta, franjas: Iterable[str], margen_min: int = 15
+) -> datetime:
+    """Primer momento, desde `momento`, en que algo que dura `duracion` termina antes de la
+    siguiente franja. `momento` mismo si ya cabe.
+
+    Lo usa el histórico de ventas, que tiene la VPN arriba mucho tiempo: si no alcanza a
+    terminar antes de la siguiente franja, espera a que esa franja pase y vuelve a probar.
+    Lanza ValueError si ningún hueco del día es tan largo.
+    """
+    franjas = list(franjas)
+    inicio = fin_de_franja(momento, franjas, margen_min)
+    while inicio - momento <= timedelta(days=1):
+        siguiente = proxima_franja(inicio, franjas, margen_min)
+        if siguiente is None or inicio + duracion < siguiente:
+            return inicio
+        inicio = fin_de_franja(siguiente, franjas, margen_min)
+    raise ValueError(
+        f"Ningún hueco entre las franjas bloqueadas ({', '.join(franjas)}, ±{margen_min} minutos) "
+        f"dura {int(duracion.total_seconds() // 60)} minutos."
+    )
+
+
 class Bloqueo:
     """Candado de archivo: se crea en exclusiva con el pid y la hora de Bogotá.
 
@@ -136,6 +177,32 @@ class Bloqueo:
         else:
             log.warning("El candado %s ya no era de este proceso; no se borra.", self.ruta)
         self._marca = None
+
+    def renovar(self) -> bool:
+        """Pone la hora actual en el candado, si sigue siendo nuestro. True si lo renovó.
+
+        Para una ejecución que puede pasar de la `vigencia` (el histórico de ventas): sin
+        renovarlo, otro proceso lo daría por vencido y correría a la vez. Se escribe en un
+        temporal que se renombra, así que nadie lee un candado a medias; si no se puede
+        (en Windows, otro proceso lo tiene abierto en ese instante), queda en el log y se
+        sigue con la marca anterior.
+        """
+        if self._marca is None or self.dueno() != self._marca:
+            return False
+        marca = {"pid": self._marca["pid"], "tomado_en": self.reloj().isoformat()}
+        temporal = self.ruta.with_name(f".{self.ruta.name}.{os.getpid()}.tmp")
+        try:
+            temporal.write_text(json.dumps(marca), encoding="utf-8", newline="\n")
+            os.replace(temporal, self.ruta)
+        except OSError as exc:
+            log.warning("No se pudo renovar el candado %s: %s", self.ruta, exc)
+            try:
+                temporal.unlink()
+            except OSError:
+                pass
+            return False
+        self._marca = marca
+        return True
 
     def dueno(self) -> dict[str, Any] | None:
         """Contenido del candado (pid y tomado_en), o None si no existe o no se puede leer."""

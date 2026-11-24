@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import config
+import consultas
 import run_robot
 from fake_hana import VpnFalsa, revisar_fases
 from trabajos import trabajos_de_solicitudes
@@ -80,6 +81,26 @@ def test_completa_trae_ventas_de_las_dos_empresas_con_su_conteo_y_ventana(entorn
         extra = ["ventana", "ventana"] if empresa == "SGX" else []
         assert [x.tipo for x in pasos] == ["ventana", "todo", "contar", "ventana", *extra]
         assert len({x.conexion for x in pasos}) == 1
+
+
+def test_completa_de_ventas_no_cambia_con_el_historico(entorno, correos):
+    # El histórico (contrato §10.4) no toca la nocturna: mismo inicio, sin ventana_hasta, y
+    # la consulta con la expresión de la ventana, sin rango.
+    e = entorno
+    assert _main(e, "--completa") == 0
+    inicios = [p.datos for p in e.servidor.peticiones_a("iniciar") if p.datos["conjunto"] == "VENTAS"]
+    assert [d["empresa"] for d in inicios] == ["SGX", "SDC"]
+    for datos in inicios:
+        assert {k: v for k, v in datos.items() if k != "extraida_en"} == {
+            "conjunto": "VENTAS", "empresa": datos["empresa"], "tipo": "completa",
+            "partes": {"ventas": "todo"}, "solicitudes": [], "fecha_corte": None,
+            "ventana_desde": "2026-09-24",
+        }
+    for empresa in ("SGX", "SDC"):
+        for paso in e.hana.de(empresa, parte="ventas"):
+            assert consultas.EXPRESION_VENTANA in paso.sql and "BETWEEN" not in paso.sql
+    assert [c.tipo for c in e.servidor.corridas.values()] == ["completa"] * 9
+    assert not (e.csv_dir / "VENTAS" / "SGX" / "historico").exists()
 
 
 def test_completa_trae_pedidos_de_las_dos_empresas_con_su_conteo(entorno, correos):

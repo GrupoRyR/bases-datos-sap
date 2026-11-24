@@ -8,7 +8,9 @@ los envoltorios de consultas.py:
 - `SELECT COUNT(*) FROM (...)`         -> una fila con el conteo;
 - `X."actualizado_en_sap" >= ?`       -> filas con esa hora o posterior;
 - `X."codigo_socio" IN (?, ...)`      -> filas de esos socios;
-- `X."lista_codigo" = N`              -> filas de la lista de precios N.
+- `X."lista_codigo" = N`              -> filas de la lista de precios N;
+- `<col> BETWEEN TO_DATE(...) AND TO_DATE(...)` (consultas.sql_rango, histórico de
+  VENTAS)                              -> filas con la columna de la ventana en el rango.
 
 La consulta de la ventana de VENTAS (consultas.SQL_VENTANA) devuelve, por empresa, los
 días de `HanaFalsa.ventanas[empresa]` en orden y, cuando se acaban, `HanaFalsa.ventana`
@@ -77,6 +79,9 @@ _RE_REGISTRO_DESDE = re.compile(r'X\."([^"]+)" >= \? AND X\."\1" < \?')
 _RE_REGISTRO_HASTA = re.compile(r'X\."([^"]+)" < \?')
 _RE_LISTA_PRECIOS = re.compile(r'X\."lista_codigo" = (\d+)')
 _RE_VENTANA_FIJA = re.compile(r"TO_DATE\('\d{4}-\d{2}-\d{2}', 'YYYY-MM-DD'\)")
+_RE_RANGO = re.compile(
+    r"BETWEEN TO_DATE\('(\d{4}-\d{2}-\d{2})', 'YYYY-MM-DD'\) AND TO_DATE\('(\d{4}-\d{2}-\d{2})', 'YYYY-MM-DD'\)"
+)
 
 
 def columnas_select(sql: str) -> list[str]:
@@ -278,9 +283,12 @@ class _Cursor:
         if sql.strip() == consultas.SQL_VENTANA:
             self._ventana(sql)
             return
-        # La carga inicial de PRODUCCION fija la ventana (consultas.sql_desde_fecha): se
-        # reconoce el archivo con la expresión de vuelta en su lugar.
-        original = _RE_VENTANA_FIJA.sub(consultas.EXPRESION_VENTANA, sql)
+        # La carga inicial de PRODUCCION fija la ventana (consultas.sql_desde_fecha) y el
+        # histórico de VENTAS la cambia por un rango (consultas.sql_rango): se reconoce el
+        # archivo con la expresión de vuelta en su lugar.
+        rango = _RE_RANGO.search(sql)
+        original = _RE_RANGO.sub(f">= {consultas.EXPRESION_VENTANA}", sql)
+        original = _RE_VENTANA_FIJA.sub(consultas.EXPRESION_VENTANA, original)
         parte = h.identificar(original, self.esquema, self.empresa)
         params = tuple(params or ())
         if parte not in esquema.PARTES:
@@ -308,6 +316,11 @@ class _Cursor:
         lista = _RE_LISTA_PRECIOS.search(sql)
         if lista:
             filas = [f for f in filas if f["lista_codigo"] == int(lista.group(1))]
+        if rango:
+            desde, hasta = (date.fromisoformat(d) for d in rango.groups())
+            columna = esquema.PARTES[parte].columna_ventana
+            [alias] = [c.hana for c in esquema.PARTES[parte].columnas if c.nombre == columna]
+            filas = [f for f in filas if desde <= f[alias] <= hasta]
 
         if tipo == "contar":
             self.description = [("COUNT(*)",)]

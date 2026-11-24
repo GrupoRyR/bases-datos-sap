@@ -199,3 +199,84 @@ def test_candado_que_se_esta_borrando_se_reintenta(tmp_path, monkeypatch) -> Non
     monkeypatch.setattr(type(ruta), "stat", stat)
 
     assert candado.tomar() is True
+
+
+# --- Huecos entre franjas: una ejecución larga no puede alcanzar la siguiente ---------
+
+
+def _d(dia: int, hora: int, minuto: int) -> datetime:
+    return datetime(2026, 10, dia, hora, minuto, tzinfo=BOGOTA)
+
+
+@pytest.mark.parametrize("momento, esperado", [
+    (_h(2, 0, 5), _d(26, 4, 45)),   # la franja de las 05:00 empieza a las 04:45
+    (_h(4, 45), _d(26, 4, 45)),     # ya dentro: es ese mismo minuto
+    (_h(5, 16), _d(26, 5, 45)),
+    (_h(12, 46), _d(26, 23, 45)),   # la de las 00:00 empieza el mismo día a las 23:45
+])
+def test_proxima_franja(momento, esperado):
+    assert bloqueo.proxima_franja(momento, FRANJAS, 15) == esperado
+
+
+def test_proxima_franja_sin_franjas():
+    assert bloqueo.proxima_franja(_h(2, 0), [], 15) is None
+
+
+@pytest.mark.parametrize("momento, minutos, esperado", [
+    (_h(2, 0, 5), 21, _h(2, 0, 5)),         # cabe antes de las 04:45: arranca ya
+    (_h(4, 30), 20, _d(26, 5, 16)),         # cabe en el hueco de 05:16 a 05:44
+    (_h(4, 30), 89, _d(26, 6, 16)),         # no cabe ahí: después de la de las 06:00
+    (_h(11, 50), 21, _d(26, 12, 46)),       # dentro de una franja: cuando termina
+    (_h(23, 0), 60, _d(27, 0, 16)),         # cruza la medianoche
+    (_h(4, 15), 29, _d(26, 4, 15)),         # termina a las 04:44: justo antes
+    (_h(4, 15), 30, _d(26, 6, 16)),         # termina a las 04:45: ya es franja (y no cabe a las 05:16)
+])
+def test_inicio_hueco(momento, minutos, esperado):
+    assert bloqueo.inicio_hueco(momento, timedelta(minutes=minutos), FRANJAS, 15) == esperado
+
+
+def test_inicio_hueco_sin_franjas_es_ya():
+    assert bloqueo.inicio_hueco(_h(12, 0), timedelta(hours=30), [], 15) == _h(12, 0)
+
+
+def test_inicio_hueco_sin_un_hueco_tan_largo_falla():
+    # El hueco más largo del día va de 12:46 a 23:44.
+    assert bloqueo.inicio_hueco(_h(2, 0), timedelta(minutes=658), FRANJAS, 15) == _d(26, 12, 46)
+    with pytest.raises(ValueError, match="hueco"):
+        bloqueo.inicio_hueco(_h(2, 0), timedelta(minutes=659), FRANJAS, 15)
+
+
+# --- Renovar el candado en una ejecución larga ------------------------------------------
+
+
+def test_renovar_pone_la_hora_actual_y_no_se_vence(tmp_path):
+    ruta = tmp_path / "robot.lock"
+    horas = [AHORA]
+    candado = Bloqueo(ruta, reloj=lambda: horas[0])
+    assert candado.tomar()
+    horas[0] = AHORA + timedelta(hours=2, minutes=30)
+    assert candado.renovar() is True
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {
+        "pid": os.getpid(), "tomado_en": horas[0].isoformat(),
+    }
+    # A las 4 horas de tomarlo, otro proceso lo ve renovado hace 1 h 30: no está vencido.
+    otro = Bloqueo(ruta, reloj=lambda: AHORA + timedelta(hours=4))
+    assert otro.tomar() is False
+    candado.soltar()  # sigue siendo nuestro con la marca nueva
+    assert not ruta.exists()
+
+
+def test_renovar_un_candado_ajeno_no_lo_toca(tmp_path):
+    ruta = tmp_path / "robot.lock"
+    candado = Bloqueo(ruta, reloj=_reloj)
+    assert candado.tomar()
+    _escribir(ruta, pid=999)  # otro proceso lo dio por vencido y lo tomó
+    antes = ruta.read_text(encoding="utf-8")
+    assert candado.renovar() is False
+    assert ruta.read_text(encoding="utf-8") == antes
+
+
+def test_renovar_sin_tomar_no_hace_nada(tmp_path):
+    ruta = tmp_path / "robot.lock"
+    assert Bloqueo(ruta, reloj=_reloj).renovar() is False
+    assert not ruta.exists()
