@@ -319,3 +319,28 @@ def test_diagnostico_resumen_y_purga_de_90_dias(tmp_path: Path):
         vieja.write_text("x", encoding="utf-8")
     assert sorted(c.purgar_diagnostico(date(2026, 10, 26))) == sorted(viejas)
     assert ruta.exists()
+
+
+def test_guardar_historico_ventas_un_csv_por_tramo(tmp_path: Path):
+    ruta = Carpeta(tmp_path).guardar_historico_ventas(
+        "SGX", date(2025, 1, 1), date(2025, 1, 31), ["a", "b"], [[1, "x"]]
+    )
+    assert ruta == tmp_path / "VENTAS" / "SGX" / "historico" / "2025-01-01_2025-01-31.csv"
+    assert ruta.read_text(encoding="utf-8-sig").splitlines() == ["a;b", "1;x"]
+    # Repetir el tramo reemplaza su CSV.
+    Carpeta(tmp_path).guardar_historico_ventas("SGX", date(2025, 1, 1), date(2025, 1, 31), ["a", "b"], [])
+    assert ruta.read_text(encoding="utf-8-sig").splitlines() == ["a;b"]
+
+
+def test_guardar_historico_ventas_solo_con_fechas(tmp_path: Path):
+    with pytest.raises(TypeError):
+        Carpeta(tmp_path).guardar_historico_ventas("SGX", "2025-01-01", date(2025, 1, 31), ["a"], [])
+
+
+def test_la_retencion_no_borra_el_historico_de_ventas(tmp_path: Path):
+    historico = Carpeta(tmp_path).guardar_historico_ventas(
+        "SDC", date(2025, 1, 1), date(2025, 1, 31), ["a"], [[1]]
+    )
+    vieja = _tocar(tmp_path / "VENTAS" / "SDC" / "2026-07-27_0200.csv")
+    assert Carpeta(tmp_path).purgar_corridas(date(2026, 10, 26)) == [vieja]
+    assert historico.exists()

@@ -30,13 +30,18 @@ Uso:
     python run_robot.py --carga-produccion --desde 2026-08-01
                                                    # una vez, a mano: PRODUCCION de SGX desde esa
                                                    # fecha en vez de la ventana de HANA (contrato §12)
+    python run_robot.py --historico-ventas --desde 2025-01 [--hasta 2026-06]
+                                                   # una vez, a mano: VENTAS mes por mes antes de la
+                                                   # ventana nocturna (historico.py, contrato §10.4)
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
 revisión de solicitudes que está terminando); el catálogo y el diagnóstico, que
 los corre el usuario, no esperan. Si la completa o el archivo arrancan dentro de
 una franja bloqueada de los otros robots (±15 minutos), esperan a que pase,
-salvo con --forzar.
+salvo con --forzar. El histórico de ventas, además, espera a que su fase con VPN
+quepa entera antes de la siguiente franja (bloqueo.inicio_hueco) y renueva el
+candado por cada tramo, porque puede durar más que su vigencia.
 
 Salida: 0 todo bien, 1 algún fallo (se avisa por correo, salvo en el
 diagnóstico, que lo corre el usuario), 2 configuración incompleta, 130
@@ -59,6 +64,7 @@ import diagnostico
 import envio
 import extraccion
 import hana
+import historico
 import notificar
 import registro
 from api import ApiCliente
@@ -291,6 +297,9 @@ def _parser() -> argparse.ArgumentParser:
     modo.add_argument("--carga-produccion", action="store_true",
                       help="Carga inicial de PRODUCCION desde la fecha de --desde, en vez de la ventana de "
                            "HANA. Solo SGX: PRODUCCION no existe en SDC. Se corre una vez, a mano.")
+    modo.add_argument("--historico-ventas", action="store_true",
+                      help="Histórico de VENTAS: los meses de --desde a --hasta, uno por corrida, hasta el "
+                           "día antes de la ventana nocturna. Se corre una vez, a mano.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
@@ -299,11 +308,59 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--sin-vpn", action="store_true",
                         help="No gestionar la VPN (asume que ya está activa).")
     parser.add_argument("--forzar", action="store_true",
-                        help="Correr la completa, la carga de producción o el archivo aunque sea "
-                             "dentro de una franja bloqueada de los otros robots.")
-    parser.add_argument("--desde", metavar="AAAA-MM-DD",
-                        help="Primer día de la carga de producción (solo con --carga-produccion).")
+                        help="Correr la completa, la carga de producción, el histórico de ventas o el "
+                             "archivo aunque sea dentro de una franja bloqueada de los otros robots.")
+    parser.add_argument("--desde", metavar="AAAA-MM-DD | AAAA-MM",
+                        help="Primer día de la carga de producción (AAAA-MM-DD, con --carga-produccion) "
+                             "o primer mes del histórico de ventas (AAAA-MM, con --historico-ventas).")
+    parser.add_argument("--hasta", metavar="AAAA-MM",
+                        help="Último mes del histórico de ventas (solo con --historico-ventas). Por "
+                             "defecto, el mes en que empieza la ventana nocturna, hasta el día antes.")
     return parser
+
+
+def _esperar_hueco(
+    cfg: Config,
+    modo: str,
+    estimado: timedelta,
+    forzar: bool,
+    ahora: Callable[[], datetime],
+    dormir: Callable[[float], None],
+) -> int | None:
+    """Histórico de ventas: espera a que su fase con VPN quepa entera antes de la siguiente
+    franja de los otros robots. None si puede seguir; el código de salida si no hay hueco."""
+    momento = ahora()
+    minutos = int(estimado.total_seconds() // 60)
+    try:
+        inicio = bloqueo.inicio_hueco(momento, estimado, cfg.franjas, cfg.margen_franja_min)
+    except ValueError as exc:
+        mensaje = (f"{exc} La fase con VPN del histórico tarda unos {minutos} minutos: "
+                   "córrelo por partes con --hasta.")
+        if forzar:
+            log.warning("%s Se corre igual por --forzar.", mensaje)
+            return None
+        log.error(mensaje)
+        guardar_estado(estado="ERROR", modo=modo, etapa="FRANJA", error=mensaje)
+        notificar.avisar_fallos(cfg.alertas, [("FRANJA", mensaje)])
+        return 1
+    if inicio <= momento:
+        return None
+    franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
+    if franja:
+        mensaje = (f"Son las {momento:%H:%M}, dentro de la franja de las {franja} "
+                   f"(±{cfg.margen_franja_min} minutos) en que los otros robots usan la VPN")
+    else:
+        siguiente = bloqueo.proxima_franja(momento, cfg.franjas, cfg.margen_franja_min)
+        hora = bloqueo.en_franja(siguiente, cfg.franjas, cfg.margen_franja_min) if siguiente else "?"
+        mensaje = (f"La fase con VPN del histórico tarda unos {minutos} minutos y no cabe antes de la "
+                   f"franja de las {hora} (±{cfg.margen_franja_min} minutos) en que los otros robots "
+                   "usan la VPN")
+    if forzar:
+        log.warning("%s: se corre igual por --forzar.", mensaje)
+        return None
+    log.warning("%s: espero hasta las %s para no cruzarme con ellos.", mensaje, f"{inicio:%H:%M}")
+    dormir((inicio - momento).total_seconds())
+    return None
 
 
 def main(
@@ -319,8 +376,12 @@ def main(
     args = parser.parse_args(argv)
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
     carga: Trabajo | None = None
-    if args.desde is not None and not args.carga_produccion:
-        parser.error("--desde va solo con --carga-produccion.")
+    meses: tuple[date, date | None] | None = None  # (--desde, --hasta) del histórico de ventas
+    estimado: timedelta | None = None  # cuánto estará arriba la VPN en el histórico
+    if args.desde is not None and not (args.carga_produccion or args.historico_ventas):
+        parser.error("--desde va solo con --carga-produccion o --historico-ventas.")
+    if args.hasta is not None and not args.historico_ventas:
+        parser.error("--hasta va solo con --historico-ventas.")
     if args.carga_produccion:
         if args.desde is None:
             parser.error("--carga-produccion necesita --desde AAAA-MM-DD.")
@@ -331,10 +392,24 @@ def main(
         if args.empresa and empresas != [carga.empresa]:
             parser.error(f"--carga-produccion es solo de {carga.empresa}.")
         empresas = [carga.empresa]
+    if args.historico_ventas:
+        if args.desde is None:
+            parser.error("--historico-ventas necesita --desde AAAA-MM.")
+        try:
+            desde_mes = historico.mes(args.desde)
+            hasta_mes = historico.mes(args.hasta) if args.hasta is not None else None
+            # Con la ventana estimada (reloj del PC): los tramos de verdad salen de la de HANA.
+            plan = historico.tramos(desde_mes, hasta_mes, historico.inicio_ventana_estimado(ahora().date()))
+        except historico.RangoInvalido as exc:
+            parser.error(str(exc))
+        meses = (desde_mes, hasta_mes)
+        estimado = historico.duracion_estimada(len(plan), len(empresas))
     if args.completa:
         modo = "completa"
     elif carga is not None:
         modo = "carga produccion"
+    elif meses is not None:
+        modo = "historico ventas"
     elif args.archivo:
         modo = f"archivo {args.archivo}"
     else:
@@ -351,10 +426,10 @@ def main(
     try:
         cfg = cargar_config()
         registro.registrar_secretos(cfg)
-        # Solo la completa y la carga hablan con la API; el archivo, el catálogo y el
-        # diagnóstico no.
-        cfg.validar(requiere_vpn=not args.sin_vpn, requiere_api=completa or carga is not None,
-                    empresas=empresas)
+        # Solo la completa, la carga y el histórico hablan con la API; el archivo, el
+        # catálogo y el diagnóstico no.
+        cfg.validar(requiere_vpn=not args.sin_vpn,
+                    requiere_api=completa or carga is not None or meses is not None, empresas=empresas)
     except ConfigError as exc:
         log.error("Configuración incompleta:\n%s", exc)
         guardar_estado(estado="ERROR", modo=modo, etapa="CONFIGURACION", error=str(exc))
@@ -362,13 +437,20 @@ def main(
             notificar.avisar_fallos(cfg.alertas, [("CONFIGURACION", str(exc))])
         return 2
 
-    # Los modos de las tareas programadas, y la carga, que es larga: respetan las franjas de
-    # los otros robots y esperan el candado.
-    programado = completa or carga is not None or modo.startswith("archivo")
+    # Los modos de las tareas programadas, y la carga y el histórico, que son largos:
+    # respetan las franjas de los otros robots y esperan el candado. Los dos manuales que
+    # hablan con la API avisan por correo como la nocturna: el diagnóstico no.
+    programado = completa or carga is not None or meses is not None or modo.startswith("archivo")
     avisar = modo != "diagnostico"  # el diagnóstico lo corre el usuario y ve el resumen
     momento = ahora()
     franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
-    if programado and franja:
+    if estimado is not None:
+        # El histórico tiene la VPN arriba mucho tiempo: no basta con estar fuera de la
+        # franja, toda la fase con VPN debe caber antes de la siguiente.
+        codigo = _esperar_hueco(cfg, modo, estimado, args.forzar, ahora, dormir)
+        if codigo is not None:
+            return codigo
+    elif programado and franja:
         mensaje = (f"Son las {momento:%H:%M}, dentro de la franja de las {franja} "
                    f"(±{cfg.margen_franja_min} minutos) en que los otros robots usan la VPN")
         if args.forzar:
@@ -399,6 +481,12 @@ def main(
                     guardar_estado(estado="ERROR", modo=modo, etapa="CANDADO", error=mensaje)
                     notificar.avisar_fallos(cfg.alertas, [("CANDADO", mensaje)])
                     return 1
+            if estimado is not None:
+                # La espera del candado pudo correr la hora: se revisa de nuevo, ya con él.
+                codigo = _esperar_hueco(cfg, modo, estimado, args.forzar, ahora, dormir)
+                if codigo is not None:
+                    candado.soltar()
+                    return codigo
         elif not candado.tomar():
             log.warning("El robot está ocupado con otra ejecución (%s). Intenta de nuevo en unos "
                         "minutos.", candado.quien())
@@ -410,7 +498,8 @@ def main(
     try:
         return _ejecutar(
             cfg, args, modo, empresas, inicio, avisar=avisar, fabrica_api=fabrica_api,
-            fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora, carga=carga,
+            fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora, carga=carga, meses=meses,
+            renovar=candado.renovar,
         )
     finally:
         candado.soltar()
@@ -429,12 +518,22 @@ def _ejecutar(
     conectar: Callable[..., Any],
     ahora: Callable[[], datetime],
     carga: Trabajo | None = None,
+    meses: tuple[date, date | None] | None = None,
+    renovar: Callable[[], Any] = lambda: None,
 ) -> int:
     """El modo pedido, con el candado ya tomado."""
     completa = modo == "completa" or carga is not None
     trabajos: list[Trabajo] = []
+    extra: dict[str, Any] = {}
     try:
-        if carga is not None:
+        if meses is not None:
+            tramos, fallos = historico.ejecutar(
+                cfg, empresas, *meses, api=fabrica_api(cfg.api), carpeta=Carpeta(cfg.csv_dir),
+                robot_vpn=None if args.sin_vpn else fabrica_vpn(cfg.vpn), conectar=conectar,
+                sin_vpn=args.sin_vpn, ahora=ahora, renovar=renovar,
+            )
+            extra["tramos"] = [t.para_estado() for t in tramos]
+        elif carga is not None:
             trabajos = [carga]
             fallos = ejecutar_trabajos(
                 cfg, trabajos, api=fabrica_api(cfg.api),
@@ -471,6 +570,7 @@ def _ejecutar(
         trabajos=[t.nombre for t in trabajos],
         fallos=[list(f) for f in fallos],
         duracion_seg=duracion,
+        **extra,
     )
     if fallos:
         for etapa, mensaje in fallos:

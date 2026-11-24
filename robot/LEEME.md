@@ -98,6 +98,7 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 | `run_robot.py --archivo registros` | Solo los registros del archivo (auditoría y tasas de cambio) | No |
 | `run_robot.py --catalogo` | Solo el catálogo de tablas y columnas | No |
 | `run_robot.py --carga-produccion --desde AAAA-MM-DD` | Una vez, a mano: PRODUCCION de Segurex desde esa fecha (ver «Producción») | Sí |
+| `run_robot.py --historico-ventas --desde AAAA-MM` | Una vez, a mano: VENTAS mes por mes antes de la ventana nocturna (ver «Histórico de ventas») | Sí |
 | `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
 | `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
@@ -105,9 +106,10 @@ Opciones de `run_robot.py`:
 
 - `--empresa SGX` o `--empresa SDC`: solo esa empresa (se puede repetir). Por defecto, las dos.
 - `--sin-vpn`: no maneja la VPN; úsalo si ya la conectaste a mano.
-- `--forzar`: corre `--completa` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
+- `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
+- `--desde` y `--hasta`: solo para `--carga-produccion` (`--desde AAAA-MM-DD`) y `--historico-ventas` (`--desde AAAA-MM`, `--hasta AAAA-MM`).
 
-Si el robot está ocupado (otra ejecución tiene el candado), `--completa` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
+Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
 
 Códigos de salida: `0` todo bien, `1` algún fallo, `2` configuración incompleta, `130` cancelado con Ctrl+C.
 
@@ -120,6 +122,33 @@ Cada corrida de VENTAS (la nocturna o una solicitud) trae el mes en curso más l
 - Si alguna fila trae una `fecha_contabilizacion` anterior a `ventana_desde`, la corrida falla antes de enviar nada.
 - `ganancia_bruta` es la ganancia de cada línea según SAP (`GrssProfit`), con signo negativo en las notas crédito. No se calcula con el costo de inventario (`costo_total`), que se desvía cerca de 0,5 % de lo que muestra SAP. Para revisarla, suma `ganancia_bruta` del 01 al 16/11/2026 en el CSV de `VENTAS\<empresa>`: SGX 294.070.622,59 y SDC 604.768.247,13.
 - Si la extracción falla antes de que HANA dé la ventana (por ejemplo, no conectó la VPN), la corrida no se puede abrir para marcarla fallida: el fallo va al correo y sus solicitudes vencen solas en la app.
+
+## Histórico de ventas
+
+La nocturna solo trae la ventana (el mes en curso más los últimos 7 días del anterior). Los meses de antes se cargan **una vez, a mano**, con el histórico (contrato §10.4):
+
+```powershell
+.venv\Scripts\python.exe etl\run_robot.py --historico-ventas --desde 2025-01
+```
+
+- Cada mes es un tramo y cada tramo, una corrida `historico` de VENTAS con su rango: del día 1 al último día del mes. El mes en que empieza la ventana nocturna llega solo hasta el día antes (el 24/11/2026 la ventana empieza el 25/10, así que octubre va del 01/10 al 24/10 y noviembre no se toca). Lo demás lo trae la nocturna.
+- `--hasta AAAA-MM`: último mes. Por defecto, el mes en que empieza la ventana. `--empresa SGX` o `--empresa SDC`: solo esa empresa; por defecto, las dos.
+- La consulta es la misma de la nocturna (`queries\ventas\ventas.sql`, que no cambia): el robot solo cambia el filtro de `DocDate` por el rango del tramo. La ventana la da HANA cuando la VPN ya está arriba.
+- Primero extrae todos los tramos con la VPN arriba (consulta y `COUNT(*)` de cada tramo, en la misma conexión), baja la VPN y luego envía tramo por tramo: empresa por empresa, del mes más viejo al más nuevo.
+- Cada tramo con ventas queda en `VENTAS\<empresa>\historico\<desde>_<hasta>.csv` (por ejemplo `2025-01-01_2025-01-31.csv`). La retención de 90 días no los borra.
+
+Cuándo correrlo: con la API del histórico ya desplegada, fuera de las franjas y con tiempo, por ejemplo un día entre semana en la tarde. Respeta las franjas de los otros robots y espera el candado, como la nocturna. Además, antes de subir la VPN estima cuánto la va a tener arriba: unos 5 minutos fijos más 2 por cada mes de cada empresa (`MINUTOS_FIJOS` y `MINUTOS_POR_TRAMO` en `etl\historico.py`). Desde enero de 2025 son unos 22 meses por empresa, cerca de hora y media. Si eso no alcanza a terminar antes de la siguiente franja, espera a que la franja pase y vuelve a mirar; si ningún hueco del día alcanza, falla sin subir la VPN y te pide correrlo por partes con `--hasta`. Es una estimación: si en la práctica tarda más, sube esas dos cifras. Como puede pasar de las 3 horas de vigencia del candado, lo renueva en cada tramo.
+
+Todos los tramos quedan en memoria hasta que baja la VPN. Si el PC se queda corto, córrelo por partes, por ejemplo un año a la vez con `--hasta`.
+
+Al final, el log trae un resumen por empresa:
+
+- `cargado del … al …`: la primera y la última `fecha_contabilizacion` de los tramos que la app cerró bien.
+- `vacíos`: meses sin ventas en SAP. No se envían: la app nunca recibe una corrida vacía.
+- `ya cargados`: meses en los que la app ya tenía ventas de esa empresa. La app responde 409 y no abre nada, así que repetir un mes ya cargado no hace daño: puedes volver a correr todo el comando sin miedo.
+- `fallidos`: meses que no se cargaron, con el motivo. Un tramo que falla no frena a los demás; la corrida que alcanzó a abrirse queda fallida y el mes sigue vacío en la app. Vuelve a correr el comando: los meses cargados responden «ya cargado» y solo se cargan los que faltan.
+
+Sale con `1` si algún tramo falló (y avisa por correo, como la nocturna) y con `0` si no. `robot\state\ultima_ejecucion.json` lista cada tramo con su estado, sin datos de SAP.
 
 ## Pedidos
 
@@ -183,6 +212,7 @@ Todo queda en `BASES_SAP_CSV_DIR` (UTF-8 con BOM, separador `;`):
 | `MAESTROS\<empresa>\<parte>\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
 | `CARTERA\<empresa>\cartera\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
 | `VENTAS\<empresa>\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
+| `VENTAS\<empresa>\historico\aaaa-mm-dd_aaaa-mm-dd.csv` | Un tramo del histórico de ventas (ver «Histórico de ventas») | Siempre |
 | `PEDIDOS\<empresa>\aaaa-mm-dd_hhmm.csv` | Una por corrida | 90 días |
 | `PRODUCCION\SGX\<parte>\aaaa-mm-dd_hhmm.csv` | Una por parte y corrida | 90 días |
 | `CARTERA\<empresa>\historico\aaaa-mm-dd.csv` | Foto diaria de cartera, con fecha de corte de ayer y los días de mora contados a esa fecha | Siempre |

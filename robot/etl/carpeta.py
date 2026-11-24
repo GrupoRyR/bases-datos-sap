@@ -5,6 +5,7 @@ Estructura (plan §5):
     CARTERA\\<SGX|SDC>\\cartera\\aaaa-mm-dd_hhmm.csv      una por corrida, 90 días
     CARTERA\\<SGX|SDC>\\historico\\aaaa-mm-dd.csv         foto diaria, no se borra
     VENTAS\\<SGX|SDC>\\aaaa-mm-dd_hhmm.csv                una por corrida, 90 días
+    VENTAS\\<SGX|SDC>\\historico\\<desde>_<hasta>.csv      un tramo del histórico, no se borra
     PEDIDOS\\<SGX|SDC>\\aaaa-mm-dd_hhmm.csv               una por corrida, 90 días
     PRODUCCION\\SGX\\<parte>\\aaaa-mm-dd_hhmm.csv           una por parte y corrida, 90 días
     <CARPETA>\\<SGX|SDC>\\<TABLA>\\aaaa-mm-dd.csv         foto del archivo, 52 semanas
@@ -203,6 +204,21 @@ class Carpeta:
         """Foto diaria `<raiz>/CARTERA/<EMPRESA>/historico/<fecha>.csv`; reemplaza la del mismo día."""
         dia = date.fromisoformat(fecha)  # ValueError si no es AAAA-MM-DD
         ruta = self.raiz / "CARTERA" / empresa / "historico" / f"{dia.isoformat()}.csv"
+        return escribir_csv(ruta, columnas, filas)
+
+    def guardar_historico_ventas(
+        self, empresa: str, desde: date, hasta: date, columnas: Sequence[str],
+        filas: Iterable[Sequence[Any]],
+    ) -> Path:
+        """Un tramo del histórico de VENTAS (contrato §10.4):
+        `<raiz>/VENTAS/<EMPRESA>/historico/<desde>_<hasta>.csv`; reemplaza el del mismo tramo.
+
+        La retención no lo toca: purgar_corridas no baja a la subcarpeta `historico`.
+        """
+        for dia in (desde, hasta):
+            if not isinstance(dia, date) or isinstance(dia, datetime):
+                raise TypeError(f"El tramo del histórico va con fechas (date), no {type(dia).__name__}.")
+        ruta = self.raiz / "VENTAS" / empresa / "historico" / f"{desde.isoformat()}_{hasta.isoformat()}.csv"
         return escribir_csv(ruta, columnas, filas)
 
     def guardar_foto(
