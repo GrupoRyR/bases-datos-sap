@@ -63,6 +63,7 @@ return [
     'tipos_corrida' => [
         'completa' => 'Nocturna',
         'solicitud' => 'Por solicitud',
+        'historico' => 'Carga histórica',
     ],
 
     'estados_corrida' => [
