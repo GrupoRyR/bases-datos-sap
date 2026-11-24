@@ -344,6 +344,11 @@ it('loads a historical month into an empty range, with its SAP count and no dail
         ->and(DB::table('daily_counts')->count())->toBe(0);
 });
 
+it('accepts January 2025, the first month of the historical load', function () {
+    RobotClient::post($this, '/api/robot/v1/corridas', historicoRun(['ventana_desde' => '2025-01-01', 'ventana_hasta' => '2025-01-31']))
+        ->assertCreated();
+});
+
 it('accepts the days of the month before the nightly window starts', function () {
     // On 16/10 the nightly window starts on 24/09.
     RobotClient::post($this, '/api/robot/v1/corridas', historicoRun(['ventana_desde' => '2026-09-01', 'ventana_hasta' => '2026-09-23']))
@@ -367,6 +372,7 @@ it('refuses a historical range that is not within one month before the nightly w
     expect(Run::count())->toBe(0);
 })->with([
     'not the first day of a month' => [['ventana_desde' => '2026-08-02'], 'ventana_desde'],
+    'before 2025-01-01' => [['ventana_desde' => '2024-12-01', 'ventana_hasta' => '2024-12-31'], 'ventana_desde'],
     'without ventana_desde' => [['ventana_desde' => null], 'ventana_desde'],
     'without ventana_hasta' => [['ventana_hasta' => null], 'ventana_hasta'],
     'ventana_hasta not a date' => [['ventana_hasta' => '2026-08-32'], 'ventana_hasta'],
@@ -406,6 +412,18 @@ it('requires the SAP count to close a historical run', function () {
     RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 1]])
         ->assertUnprocessable()
         ->assertJsonValidationErrorFor('conteo_sap');
+});
+
+it('fails a historical close whose SAP count differs from the lines received, and applies nothing', function () {
+    $run = sendVentas($this, [saleLine(1, '2026-08-01'), saleLine(2, '2026-08-31')], historicoRun());
+
+    // An applied month that does not match SAP could never be loaded again (409), so it is never applied.
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2], 'conteo_sap' => ['ventas' => 3]])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrorFor('conteo_sap.ventas');
+
+    expect(storedSales())->toBe([])
+        ->and(Run::find($run)->estado)->toBe(RunState::Failed);
 });
 
 it('leaves the range empty when applying the historical month fails', function () {
