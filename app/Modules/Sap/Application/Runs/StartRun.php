@@ -16,6 +16,7 @@ use App\Modules\Sap\Models\Run;
 use App\Modules\Sap\Models\UpdateRequest;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use LogicException;
 
 /**
@@ -56,17 +57,24 @@ final class StartRun
         }
 
         if ($type === null) {
-            $this->fail('tipo', 'Tipo desconocido: solo completa o solicitud.');
+            $this->fail('tipo', 'Tipo desconocido: solo completa, solicitud o historico.');
+        } elseif ($type === RunType::Historical && $dataset !== null && $dataset !== Dataset::Ventas) {
+            $this->fail('tipo', 'Solo VENTAS tiene corridas historico.');
         }
 
         $parts = $dataset ? $this->parts($input['partes'] ?? null, $dataset, $type, $company) : [];
         $requests = $this->requests($input['solicitudes'] ?? []);
         $cutOff = $dataset ? $this->cutOff($input['fecha_corte'] ?? null, $dataset) : null;
-        $window = $dataset ? $this->window($input['ventana_desde'] ?? null, $dataset) : null;
+        $window = $dataset ? $this->window($input['ventana_desde'] ?? null, $dataset, $type) : null;
+        $until = $this->until($input['ventana_hasta'] ?? null, $type, $window);
         $extractedAt = SapTime::parse($input['extraida_en'] ?? null);
 
         if ($extractedAt === null) {
             $this->fail('extraida_en', 'Debe ser una hora ISO 8601 con zona.');
+        }
+
+        if ($type === RunType::Historical && $requests !== []) {
+            $this->fail('solicitudes', 'Una corrida historico no atiende solicitudes.');
         }
 
         if ($dataset !== null && $company !== null && $requests !== []) {
@@ -75,6 +83,10 @@ final class StartRun
 
         if ($this->errors !== [] || $dataset === null || $company === null || $type === null || $extractedAt === null) {
             throw RobotRequestRejected::invalid('La corrida no cumple el contrato.', $this->errors);
+        }
+
+        if ($type === RunType::Historical && $window !== null && $until !== null) {
+            $this->refuseLoadedRange($company, $window, $until);
         }
 
         $this->expireIdleRun($dataset, $company);
@@ -87,6 +99,7 @@ final class StartRun
             'solicitudes' => $requests,
             'fecha_corte' => $cutOff,
             'ventana_desde' => $window,
+            'ventana_hasta' => $until,
             'extraida_en' => $extractedAt,
             'estado' => RunState::Open,
             'abierta_lock' => Run::lockFor($dataset, $company),
@@ -134,19 +147,19 @@ final class StartRun
                 $this->fail("partes.{$name}", "Parte desconocida en {$dataset->value}.");
             } elseif ($mode === null) {
                 $this->fail("partes.{$name}", 'Modo desconocido: solo todo o cambios.');
-            } elseif ($mode === PartMode::Changes && ($type === RunType::Full || ! $part->tracksSapUpdates() && ! in_array($part, [Part::Addresses, Part::Contacts], true))) {
+            } elseif ($mode === PartMode::Changes && ($type?->isWhole() || ! $part->tracksSapUpdates() && ! in_array($part, [Part::Addresses, Part::Contacts], true))) {
                 // Only parts with an SAP update time (and the addresses and
                 // contacts that follow their partner) can bring changes.
-                $this->fail("partes.{$name}", $type === RunType::Full
-                    ? 'En una corrida completa todas las partes van en modo todo.'
+                $this->fail("partes.{$name}", $type?->isWhole()
+                    ? 'En una corrida completa o historico todas las partes van en modo todo.'
                     : 'Esta parte siempre llega en modo todo.');
             } else {
                 $valid[$part->value] = $mode->value;
             }
         }
 
-        if ($type === RunType::Full && array_diff($this->required($dataset, $company), array_keys($parts)) !== []) {
-            $this->fail('partes', 'Una corrida completa trae todas las partes del conjunto.');
+        if ($type?->isWhole() && array_diff($this->required($dataset, $company), array_keys($parts)) !== []) {
+            $this->fail('partes', 'Una corrida completa o historico trae todas las partes del conjunto.');
         }
 
         return $valid;
@@ -247,9 +260,10 @@ final class StartRun
      * 4.1, 10.1 and 12.3), computed by the robot in HANA, up to tomorrow,
      * today in Bogota. VENTAS reaches back 40 days at most, so a robot error
      * never reaches closed months; PRODUCCION, to 2026-01-01, since all of it
-     * comes again from SAP. The other datasets have no window.
+     * comes again from SAP. The other datasets have no window. A historical
+     * run starts on the first day of a month instead (section 10.4).
      */
-    private function window(mixed $date, Dataset $dataset): ?string
+    private function window(mixed $date, Dataset $dataset, ?RunType $type): ?string
     {
         if (! in_array($dataset, [Dataset::Ventas, Dataset::Produccion], true)) {
             if ($date !== null) {
@@ -265,6 +279,16 @@ final class StartRun
             return null;
         }
 
+        if ($type === RunType::Historical) {
+            if (substr($date, 8) !== '01') {
+                $this->fail('ventana_desde', 'En una corrida historico es el primer día de un mes.');
+
+                return null;
+            }
+
+            return $date;
+        }
+
         $today = CarbonImmutable::now((string) config('app.timezone'));
         [$earliest, $message] = $dataset === Dataset::Ventas
             ? [$today->subDays(self::WINDOW_MAX_DAYS)->toDateString(), 'Debe estar entre hoy menos '.self::WINDOW_MAX_DAYS.' días y mañana.']
@@ -277,6 +301,68 @@ final class StartRun
         }
 
         return $date;
+    }
+
+    /**
+     * The last day of a historical run (contract section 10.4): in the month
+     * of ventana_desde and before the nightly window starts today, so the
+     * load never meets the 02:00 run. Any other run carries none.
+     */
+    private function until(mixed $date, ?RunType $type, ?string $from): ?string
+    {
+        if ($type !== RunType::Historical) {
+            if ($date !== null) {
+                $this->fail('ventana_hasta', 'Solo una corrida historico lleva ventana_hasta.');
+            }
+
+            return null;
+        }
+
+        if (! SapTime::isDate($date)) {
+            $this->fail('ventana_hasta', 'Una corrida historico lleva ventana_hasta AAAA-MM-DD.');
+
+            return null;
+        }
+
+        $nightly = self::nightlyWindowStart();
+
+        if ($from !== null && ($date < $from || substr($date, 0, 7) !== substr($from, 0, 7))) {
+            $this->fail('ventana_hasta', 'Debe estar en el mismo mes de ventana_desde, desde ese día.');
+        } elseif ($date >= $nightly) {
+            $this->fail('ventana_hasta', "Debe ser anterior al inicio de la ventana nocturna ({$nightly}).");
+        } else {
+            return $date;
+        }
+
+        return null;
+    }
+
+    /**
+     * The day the nightly window starts today, with the formula of contract
+     * section 10.1 (ADD_DAYS(CURRENT_DATE, -6 - DAYOFMONTH(CURRENT_DATE)))
+     * and today in Bogota.
+     */
+    private static function nightlyWindowStart(): string
+    {
+        $today = CarbonImmutable::now((string) config('app.timezone'))->startOfDay();
+
+        return $today->subDays(6 + $today->day)->toDateString();
+    }
+
+    /**
+     * A historical run only loads an empty range: if the company has any
+     * VENTAS line in it, 409 and nothing opens (contract section 10.4).
+     */
+    private function refuseLoadedRange(Company $company, string $from, string $until): void
+    {
+        $loaded = DB::connection(Dataset::Ventas->connection())->table(Part::Sales->table())
+            ->where('empresa', $company->value)
+            ->whereBetween('fecha_contabilizacion', [$from, $until])
+            ->exists();
+
+        if ($loaded) {
+            throw new RobotRequestRejected(409, "La empresa ya tiene ventas entre {$from} y {$until}: ese rango no se vuelve a cargar.");
+        }
     }
 
     private function expireIdleRun(Dataset $dataset, Company $company): void

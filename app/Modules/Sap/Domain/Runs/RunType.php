@@ -12,4 +12,13 @@ enum RunType: string
 
     /** A run that serves update requests. */
     case Request = 'solicitud';
+
+    /** A manual VENTAS load of one month before the nightly window, into an empty range (section 10.4). */
+    case Historical = 'historico';
+
+    /** Whether the run brings every part of the dataset in full and its SAP count. */
+    public function isWhole(): bool
+    {
+        return $this !== self::Request;
+    }
 }

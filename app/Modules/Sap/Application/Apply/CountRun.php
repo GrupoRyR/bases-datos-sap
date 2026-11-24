@@ -4,6 +4,7 @@ namespace App\Modules\Sap\Application\Apply;
 
 use App\Modules\Sap\Contracts\Enums\Dataset;
 use App\Modules\Sap\Contracts\Enums\Part;
+use App\Modules\Sap\Domain\Runs\RunType;
 use App\Modules\Sap\Models\Run;
 use Illuminate\Support\Facades\DB;
 
@@ -40,6 +41,12 @@ final class CountRun
                 'activas_mysql' => $active,
                 'cuadra' => $sap[$name] === $received[$name] && $active === $activeReceived,
             ];
+        }
+
+        // A historical load covers past months, not the day it ran: only the
+        // nightly run stands for the daily count (contract section 10.4).
+        if ($run->tipo === RunType::Historical) {
+            return $counts;
         }
 
         $day = $run->extraida_en->copy()->setTimezone((string) config('app.timezone'))->toDateString();
@@ -80,8 +87,9 @@ final class CountRun
     /**
      * Active rows of the company. Only MAESTROS has a flag; elsewhere all
      * rows count, but a part with a window (VENTAS and the PRODUCCION
-     * movement) counts the rows of the run's window, which is what the SAP
-     * count covers (contract sections 10.2 and 12.3).
+     * movement) counts the rows of the run's window, up to the end of a
+     * historical range, which is what the SAP count covers (contract
+     * sections 10.2, 10.4 and 12.3).
      */
     private function activeRows(Run $run, Part $part): int
     {
@@ -89,6 +97,7 @@ final class CountRun
             ->where('empresa', $run->empresa->value)
             ->when($part->dataset() === Dataset::Maestros, fn ($query) => $query->where('activo', true))
             ->when($part->windowColumn() !== null, fn ($query) => $query->where((string) $part->windowColumn(), '>=', $run->ventana_desde?->toDateString()))
+            ->when($part->windowColumn() !== null && $run->ventana_hasta !== null, fn ($query) => $query->where((string) $part->windowColumn(), '<=', $run->ventana_hasta?->toDateString()))
             ->count();
     }
 }

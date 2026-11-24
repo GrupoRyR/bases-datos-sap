@@ -11,7 +11,6 @@ use App\Modules\Sap\Application\Apply\CountRun;
 use App\Modules\Sap\Contracts\Enums\Dataset;
 use App\Modules\Sap\Domain\Runs\PartMode;
 use App\Modules\Sap\Domain\Runs\RunState;
-use App\Modules\Sap\Domain\Runs\RunType;
 use App\Modules\Sap\Http\Exceptions\RobotRequestRejected;
 use App\Modules\Sap\Models\Run;
 use Illuminate\Support\Facades\DB;
@@ -128,10 +127,10 @@ final class CloseRun
         $declared = $this->counts($run, $input['filas'] ?? null, 'filas', $errors);
         $sapCounts = null;
 
-        if ($run->tipo === RunType::Full) {
+        if ($run->tipo->isWhole()) {
             $sapCounts = $this->counts($run, $input['conteo_sap'] ?? null, 'conteo_sap', $errors);
         } elseif (($input['conteo_sap'] ?? null) !== null) {
-            $errors['conteo_sap'] = 'Solo una corrida completa envía el conteo de SAP.';
+            $errors['conteo_sap'] = 'Solo una corrida completa o historico envía el conteo de SAP.';
         }
 
         if ($errors !== []) {
