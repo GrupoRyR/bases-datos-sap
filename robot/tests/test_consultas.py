@@ -427,3 +427,94 @@ def test_la_consulta_con_el_rango_trae_solo_los_dias_del_rango_y_su_conteo_cuadr
     }
     [(conteo,)] = con.execute(consultas.sql_contar(sql)).fetchall()
     assert conteo == len(filas) == 4
+
+
+# --- Kilos de VENTAS (orden 016): la columna que falta y su consulta -------------------
+
+CON_COMENTARIOS = '    X."Comments"                                               AS "Comentarios"\n'
+
+
+def _alias_del_select(sql: str) -> list[str]:
+    """Etiquetas del SELECT de afuera de ventas.sql (sin comentarios), en orden."""
+    codigo = _codigo(sql)
+    seleccion = codigo[codigo.index("SELECT"):codigo.index("\nFROM (")]
+    return re.findall(r'AS "([^"]+)"', seleccion)
+
+
+def _con_kilos(sql: str, expresion: str = 'IFNULL(X."Quantity", 0) * X."Signo"') -> str:
+    """ventas.sql con una columna de kilos DE PRUEBA al final del SELECT. La expresión de
+    verdad («Tot KG» de «AnálisisVentas-1») todavía no existe: solo vive en las pruebas."""
+    assert sql.count(CON_COMENTARIOS) == 1
+    return sql.replace(CON_COMENTARIOS, CON_COMENTARIOS[:-1] + f',\n    {expresion} AS "Kilos"\n')
+
+
+def test_la_consulta_de_ventas_aun_no_trae_kilos_y_su_select_no_cambia():
+    sql = _ventas()
+    with pytest.raises(ConfigError, match="kilos"):
+        consultas.exigir_kilos(sql)
+    # La nocturna, las solicitudes y el histórico siguen con las mismas columnas, en orden.
+    assert _alias_del_select(sql) == [c.hana for c in PARTES["ventas"].columnas]
+    assert consultas.ALIAS_KILOS not in _alias_del_select(sql)
+
+
+def test_exigir_kilos_acepta_la_consulta_con_la_columna():
+    consultas.exigir_kilos(_con_kilos(_ventas()))
+    consultas.exigir_kilos(consultas.sql_id_pedido_app(_con_kilos(_ventas()), "SDC"))
+
+
+@pytest.mark.parametrize("reemplazo", [
+    CON_COMENTARIOS + '    -- X."Peso" AS "Kilos"\n',             # en una línea de comentario
+    CON_COMENTARIOS[:-1] + ' -- , X."Peso" AS "Kilos"\n',          # al final de la última columna
+])
+def test_exigir_kilos_no_cuenta_los_kilos_de_un_comentario(reemplazo: str):
+    sql = _ventas().replace(CON_COMENTARIOS, reemplazo)
+    assert 'AS "Kilos"' in sql
+    with pytest.raises(ConfigError, match="kilos"):
+        consultas.exigir_kilos(sql)
+
+
+def test_exigir_kilos_pide_la_etiqueta_exacta():
+    # El envoltorio la nombra entre comillas (X."Kilos"), y en HANA eso distingue mayúsculas.
+    with pytest.raises(ConfigError, match="Kilos"):
+        consultas.exigir_kilos(_ventas().replace(CON_COMENTARIOS, CON_COMENTARIOS[:-1] + ',\n    1 AS "kilos"\n'))
+
+
+def test_sql_kilos_sin_la_columna_no_corre():
+    with pytest.raises(ConfigError, match="kilos"):
+        consultas.sql_kilos(_ventas(), *ENERO)
+
+
+def test_columnas_de_los_kilos_son_la_llave_la_fecha_y_kilos():
+    columnas = consultas.columnas_kilos()
+    assert [c.nombre for c in columnas] == ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos"]
+    assert [c.hana for c in columnas] == ["Tipo objeto", "DocEntry", "Línea", "Fecha contabilización", "Kilos"]
+    # La llave es la de VENTAS y todas son obligatorias: un kilo vacío no se envía como dato.
+    assert set(PARTES["ventas"].llave) < {c.nombre for c in columnas}
+    assert all(c.requerida for c in columnas)
+
+
+def test_sql_kilos_trae_solo_la_llave_la_fecha_y_kilos_con_el_rango():
+    sql = _con_kilos(_ventas())
+    kilos = consultas.sql_kilos(sql, *ENERO)
+    assert kilos.startswith(
+        'SELECT X."Tipo objeto", X."DocEntry", X."Línea", X."Fecha contabilización", X."Kilos" FROM (\n'
+    )
+    assert kilos.endswith("\n) X")
+    assert kilos.count(RANGO_ENERO) == 2
+    assert consultas.sql_rango(sql, *ENERO) in kilos
+    assert "X.*" not in kilos
+
+
+def test_sql_kilos_en_sqlite_trae_el_rango_con_signo_y_su_conteo_cuadra():
+    con = _sqlite_con_ventas()
+    desde, hasta = ENERO
+    _documento(con, "OINV", 1, desde - timedelta(days=1))  # el día antes: no sale
+    _documento(con, "OINV", 2, desde)
+    _documento(con, "ORIN", 3, date(2025, 1, 20))  # nota crédito: kilos negativos
+    _documento(con, "OINV", 4, hasta + timedelta(days=1))  # el día después: no sale
+    sql = consultas.sql_kilos(_con_kilos(_ventas()), desde, hasta)
+    cursor = con.execute(sql)
+    assert [d[0] for d in cursor.description] == [c.hana for c in consultas.columnas_kilos()]
+    assert cursor.fetchall() == [(13, 2, 0, "2025-01-01", 1.0), (14, 3, 0, "2025-01-20", -1.0)]
+    [(conteo,)] = con.execute(consultas.sql_contar(sql)).fetchall()
+    assert conteo == 2

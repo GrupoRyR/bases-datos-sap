@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 
 import config
 from config import BOGOTA, EmpresaHana
-from esquema import PRECIOS, Parte
+from esquema import CANTIDAD, PARTES, PRECIOS, Columna, Parte
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
 
@@ -152,6 +152,61 @@ def sql_rango(sql: str, desde: date, hasta: date) -> str:
             f"La consulta no tiene la expresión de la ventana ({EXPRESION_VENTANA}); no se corre."
         )
     return "\n".join(lineas)
+
+
+# Kilos de VENTAS (orden 016): la columna «Tot KG» de la consulta guardada «AnálisisVentas-1»
+# de Derivados va al final del SELECT de ventas.sql, con esta etiqueta y signo negativo en
+# las notas crédito, como "Cantidad". Hasta que la expresión llegue, la consulta no la trae y
+# todo lo que necesita kilos falla cerrado (exigir_kilos): nunca se envían kilos inventados
+# ni un NULL como si fuera un dato.
+MARCADOR_KILOS = "@kilos"
+ALIAS_KILOS = "Kilos"
+# El envoltorio la nombra entre comillas (X."Kilos"): en HANA eso distingue mayúsculas, así
+# que la etiqueta va exacta; solo AS puede ir en minúsculas.
+_RE_ALIAS_KILOS = re.compile(r'\b(?i:AS)\s+"' + re.escape(ALIAS_KILOS) + '"')
+
+
+def _sin_comentarios(sql: str) -> str:
+    return "\n".join(_partir_comentario(linea)[0] for linea in sql.split("\n"))
+
+
+def exigir_kilos(sql: str) -> None:
+    """Falla con ConfigError si la consulta de ventas no trae la columna de kilos.
+
+    Busca `AS "Kilos"` en el código; los comentarios no cuentan (tampoco el marcador
+    `-- @kilos`, que solo dice dónde irá). El modo de kilos la llama antes de esperar el
+    candado o subir la VPN: sin la expresión de «Tot KG» no corre.
+    """
+    if not _RE_ALIAS_KILOS.search(_sin_comentarios(sql)):
+        raise config.ConfigError(
+            f'La consulta de ventas no trae la columna de kilos (... AS "{ALIAS_KILOS}" al final del '
+            f"SELECT, donde va el marcador -- {MARCADOR_KILOS}): falta la expresión de «Tot KG» de "
+            "«AnálisisVentas-1» (orden 016). No se corre, para no enviar kilos inventados ni vacíos."
+        )
+
+
+def columnas_kilos() -> tuple[Columna, ...]:
+    """Columnas de los kilos de VENTAS, en orden: la llave de la parte ventas, su columna de
+    la ventana (fecha_contabilizacion) y kilos. Todas obligatorias: un kilo vacío no se
+    envía como si fuera un dato."""
+    ventas = PARTES["ventas"]
+    propias = tuple(
+        c for c in ventas.columnas if c.nombre in ventas.llave or c.nombre == ventas.columna_ventana
+    )
+    return (*propias, Columna(ALIAS_KILOS, "kilos", CANTIDAD, requerida=True))
+
+
+def sql_kilos(sql: str, desde: date, hasta: date) -> str:
+    """La consulta de ventas de una empresa (sql_de_empresa) con el rango de `desde` a
+    `hasta` (sql_rango), de la que solo salen la llave, la fecha y los kilos.
+
+    Las columnas van una por una, con las etiquetas de la consulta. Falla con ConfigError si
+    la consulta no trae kilos (exigir_kilos) o no tiene la expresión de la ventana. El
+    conteo es sql_contar de esta misma consulta.
+    """
+    exigir_kilos(sql)
+    lista = ", ".join(f'X."{c.hana}"' for c in columnas_kilos())
+    return f"SELECT {lista} FROM (\n{sql_rango(sql, desde, hasta)}\n) X"
 
 
 def ruta_consulta(nombre_relativo: str, esquema: str) -> Path:
