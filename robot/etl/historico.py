@@ -9,7 +9,8 @@ La planeación va sin red: los tramos y la ventana estimada con el reloj del PC.
 ventana de verdad la da HANA (consultas.SQL_VENTANA) cuando la VPN ya está arriba; la
 estimada solo sirve para calcular cuánto va a durar la fase con VPN.
 
-La ejecución (`ejecutar`) sigue las dos fases de siempre:
+La ejecución (`ejecutar`, sobre `dos_fases`, que comparte con kilos.py) sigue las dos fases
+de siempre:
     FASE 1 - con VPN:  por empresa, la ventana de HANA, los tramos y, por tramo, la
                        consulta con su rango y su COUNT(*) en la misma conexión
     FASE 2 - sin VPN:  por tramo, del más viejo al más nuevo y empresa por empresa: el
@@ -146,6 +147,70 @@ class Tramo:
                 "estado": self.estado, "motivo": self.motivo}
 
 
+Enviar = Callable[[extraccion.Resultado], tuple[Tramo, list[tuple[str, str]]]]
+
+
+def dos_fases(
+    cfg: Config,
+    empresas: list[str],
+    desde_mes: date,
+    hasta_mes: date | None,
+    *,
+    trabajo: Callable[[str, date, date], Trabajo],
+    enviar: Enviar,
+    extraer: extraccion.Extractor | None = None,
+    etapa: str = "HISTORICO",
+    robot_vpn: Any = None,
+    conectar: Callable[..., Any] = hana.conectar,
+    sin_vpn: bool = False,
+    ahora: Callable[[], datetime] = config.ahora,
+    renovar: Callable[[], Any] = lambda: None,
+) -> tuple[list[Tramo], list[tuple[str, str]]]:
+    """Las dos fases de una carga por tramos: la del histórico y la de los kilos (kilos.py).
+
+    FASE 1, con VPN: por empresa, la ventana de HANA y los tramos; por tramo, el trabajo
+    `trabajo(empresa, desde, hasta)` extraído con `extraer` (el de siempre si es None).
+    FASE 2, sin VPN: `enviar(resultado)` por tramo, empresa por empresa y del más viejo al
+    más nuevo; devuelve el Tramo con su estado y sus fallos. Un rango sin tramos va a los
+    fallos con `etapa`. `renovar()` corre después de cada tramo extraído y enviado.
+    """
+    por_empresa: dict[str, list[extraccion.Resultado]] = {}
+    fallos: list[tuple[str, str]] = []
+    opciones = {} if extraer is None else {"extraer": extraer}
+
+    def leer(conn: Any, empresa: str) -> None:
+        # La ventana de verdad es la de HANA, en esta conexión (contrato §10.1 y §10.4).
+        inicio = date.fromisoformat(extraccion.leer_ventana(conn, empresa))
+        try:
+            plan = tramos(desde_mes, hasta_mes, inicio)
+        except RangoInvalido as exc:
+            log.error("VENTAS %s: %s", empresa, exc)
+            fallos.append((etapa, f"VENTAS {empresa}: {exc}"))
+            return
+        log.info("VENTAS %s: la ventana nocturna empieza el %s; %d tramos, de %s a %s.",
+                 empresa, inicio, len(plan), plan[0][0], plan[-1][1])
+        resultados = por_empresa[empresa] = [
+            extraccion.Resultado(trabajo(empresa, desde, hasta)) for desde, hasta in plan
+        ]
+        for r in resultados:
+            extraccion.extraer_resultados(conn, cfg.hana.empresas[empresa], [r], ahora, **opciones)
+            renovar()
+
+    # FASE 1: con VPN. sesion() la baja en finally.
+    fallos += extraccion.sesion(cfg, empresas, leer, robot_vpn=robot_vpn, conectar=conectar, sin_vpn=sin_vpn)
+
+    # FASE 2: sin VPN, empresa por empresa y del mes más viejo al más nuevo.
+    lista: list[Tramo] = []
+    for empresa in empresas:
+        for r in por_empresa.get(empresa, []):
+            tramo, fallos_tramo = enviar(r)
+            lista.append(tramo)
+            fallos += fallos_tramo
+            r.columnas, r.filas = {}, {}  # ya se envió: se suelta la memoria
+            renovar()
+    return lista, fallos
+
+
 def ejecutar(
     cfg: Config,
     empresas: list[str],
@@ -165,66 +230,49 @@ def ejecutar(
     `renovar()` corre después de cada tramo extraído y enviado: run_robot renueva ahí el
     candado, porque el histórico puede durar más que su vigencia.
     """
-    por_empresa: dict[str, list[extraccion.Resultado]] = {}
-    fallos: list[tuple[str, str]] = []
-
-    def leer(conn: Any, empresa: str) -> None:
-        # La ventana de verdad es la de HANA, en esta conexión (contrato §10.1 y §10.4).
-        inicio = date.fromisoformat(extraccion.leer_ventana(conn, empresa))
-        try:
-            plan = tramos(desde_mes, hasta_mes, inicio)
-        except RangoInvalido as exc:
-            log.error("VENTAS %s: %s", empresa, exc)
-            fallos.append(("HISTORICO", f"VENTAS {empresa}: {exc}"))
-            return
-        log.info("VENTAS %s: la ventana nocturna empieza el %s; %d tramos, de %s a %s.",
-                 empresa, inicio, len(plan), plan[0][0], plan[-1][1])
-        resultados = por_empresa[empresa] = [
-            extraccion.Resultado(trabajo_historico_ventas(empresa, desde, hasta)) for desde, hasta in plan
-        ]
-        for r in resultados:
-            extraccion.extraer_resultados(conn, cfg.hana.empresas[empresa], [r], ahora)
-            renovar()
-
-    # FASE 1: con VPN. sesion() la baja en finally.
-    fallos += extraccion.sesion(cfg, empresas, leer, robot_vpn=robot_vpn, conectar=conectar, sin_vpn=sin_vpn)
-
-    # FASE 2: sin VPN, empresa por empresa y del mes más viejo al más nuevo.
-    lista: list[Tramo] = []
-    for empresa in empresas:
-        for r in por_empresa.get(empresa, []):
-            tramo, fallos_tramo = _enviar_tramo(api, carpeta, r)
-            lista.append(tramo)
-            fallos += fallos_tramo
-            r.columnas, r.filas = {}, {}  # ya está en el CSV y en la app: se suelta la memoria
-            renovar()
+    lista, fallos = dos_fases(
+        cfg, empresas, desde_mes, hasta_mes, trabajo=trabajo_historico_ventas,
+        enviar=lambda r: _enviar_tramo(api, carpeta, r), robot_vpn=robot_vpn, conectar=conectar,
+        sin_vpn=sin_vpn, ahora=ahora, renovar=renovar,
+    )
     resumir(lista, empresas)
     return lista, fallos
 
 
-def _enviar_tramo(
-    api: ApiCliente, carpeta: Carpeta, r: extraccion.Resultado
-) -> tuple[Tramo, list[tuple[str, str]]]:
+def revisar_extraido(r: extraccion.Resultado) -> tuple[Tramo, list[tuple[str, str]], bool]:
+    """El tramo de un resultado ya extraído, antes de enviarlo: (tramo, fallos, terminado).
+
+    Terminado si la extracción falló (`falló`, con su motivo) o si SAP no trae filas
+    (`vacío`, no se envía). Si no, el tramo queda por enviar.
+    """
     t = r.trabajo
     desde, hasta = date.fromisoformat(t.ventana_fija or ""), date.fromisoformat(t.ventana_hasta or "")
     tramo = Tramo(t.empresa, desde, hasta)
     if r.error is not None:
         tramo.motivo = r.error
-        return tramo, [(r.etapa or "EXTRACCION", f"{tramo.nombre}: {r.error}")]
-
-    filas = r.filas.get("ventas", [])
-    if not filas:
+        return tramo, [(r.etapa or "EXTRACCION", f"{tramo.nombre}: {r.error}")], True
+    if not r.filas.get("ventas"):
         conteo = (r.conteo_sap or {}).get("ventas", 0)
         if conteo:
             # No debería pasar: la consulta y el conteo son la misma, en la misma conexión.
             tramo.motivo = f"La consulta trajo 0 filas y el conteo de SAP da {conteo}; no se envía."
             log.error("%s: %s", tramo.nombre, tramo.motivo)
-            return tramo, [("VALIDACION", f"{tramo.nombre}: {tramo.motivo}")]
+            return tramo, [("VALIDACION", f"{tramo.nombre}: {tramo.motivo}")], True
         log.info("%s: sin ventas en SAP; no se envía.", tramo.nombre)
         tramo.estado = VACIO
-        return tramo, []
+        return tramo, [], True
+    return tramo, [], False
 
-    fallos: list[tuple[str, str]] = []
+
+def _enviar_tramo(
+    api: ApiCliente, carpeta: Carpeta, r: extraccion.Resultado
+) -> tuple[Tramo, list[tuple[str, str]]]:
+    tramo, fallos, terminado = revisar_extraido(r)
+    if terminado:
+        return tramo, fallos
+
+    t = r.trabajo
+    filas = r.filas["ventas"]
     try:
         carpeta.guardar_historico_ventas(t.empresa, tramo.desde, tramo.hasta, r.columnas["ventas"], filas)
     except OSError as exc:
