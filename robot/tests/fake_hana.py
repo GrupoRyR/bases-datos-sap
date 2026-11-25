@@ -10,7 +10,10 @@ los envoltorios de consultas.py:
 - `X."codigo_socio" IN (?, ...)`      -> filas de esos socios;
 - `X."lista_codigo" = N`              -> filas de la lista de precios N;
 - `<col> BETWEEN TO_DATE(...) AND TO_DATE(...)` (consultas.sql_rango, histórico de
-  VENTAS)                              -> filas con la columna de la ventana en el rango.
+  VENTAS)                              -> filas con la columna de la ventana en el rango;
+- `SELECT X."a", X."b" FROM (...) X` (consultas.sql_kilos) -> solo esas columnas, sacadas
+  de las filas por su etiqueta (tipo "kilos"). Una etiqueta que la consulta de adentro no
+  tiene falla como en HANA (invalid column name).
 
 La consulta de la ventana de VENTAS (consultas.SQL_VENTANA) devuelve, por empresa, los
 días de `HanaFalsa.ventanas[empresa]` en orden y, cuando se acaban, `HanaFalsa.ventana`
@@ -79,6 +82,7 @@ _RE_REGISTRO_DESDE = re.compile(r'X\."([^"]+)" >= \? AND X\."\1" < \?')
 _RE_REGISTRO_HASTA = re.compile(r'X\."([^"]+)" < \?')
 _RE_LISTA_PRECIOS = re.compile(r'X\."lista_codigo" = (\d+)')
 _RE_VENTANA_FIJA = re.compile(r"TO_DATE\('\d{4}-\d{2}-\d{2}', 'YYYY-MM-DD'\)")
+_RE_PROYECCION = re.compile(r'^SELECT ((?:X\."[^"]+"(?:, )?)+) FROM \(\n')
 _RE_RANGO = re.compile(
     r"BETWEEN TO_DATE\('(\d{4}-\d{2}-\d{2})', 'YYYY-MM-DD'\) AND TO_DATE\('(\d{4}-\d{2}-\d{2})', 'YYYY-MM-DD'\)"
 )
@@ -294,8 +298,11 @@ class _Cursor:
         if parte not in esquema.PARTES:
             self._otra(sql, parte, params)
             return
+        proyeccion = _RE_PROYECCION.match(sql.lstrip())
         if sql.lstrip().upper().startswith("SELECT COUNT(*)"):
             tipo = "contar"
+        elif proyeccion:
+            tipo = "kilos"
         elif 'X."actualizado_en_sap" >= ?' in sql:
             tipo = "cambios"
         elif 'X."codigo_socio" IN (' in sql:
@@ -325,6 +332,15 @@ class _Cursor:
         if tipo == "contar":
             self.description = [("COUNT(*)",)]
             self._filas = [(len(filas),)]
+            return
+        if proyeccion:
+            alias = re.findall(r'X\."([^"]+)"', proyeccion.group(1))
+            adentro = sql[proyeccion.end():]
+            for etiqueta in alias:
+                if f'AS "{etiqueta}"' not in adentro:
+                    raise RuntimeError(f'invalid column name: "{etiqueta}"')
+            self.description = [(a,) for a in alias]
+            self._filas = [tuple(f.get(a) for a in alias) for f in filas]
             return
         quitar = h.columnas_que_faltan.get((self.empresa, parte), set())
         alias = [c.hana for c in esquema.PARTES[parte].columnas if c.nombre not in quitar]

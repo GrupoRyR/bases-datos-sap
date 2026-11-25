@@ -99,6 +99,7 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 | `run_robot.py --catalogo` | Solo el catálogo de tablas y columnas | No |
 | `run_robot.py --carga-produccion --desde AAAA-MM-DD` | Una vez, a mano: PRODUCCION de Segurex desde esa fecha (ver «Producción») | Sí |
 | `run_robot.py --historico-ventas --desde AAAA-MM` | Una vez, a mano: VENTAS mes por mes antes de la ventana nocturna (ver «Histórico de ventas») | Sí |
+| `run_robot.py --kilos-ventas --desde AAAA-MM` | A mano: llena los kilos de VENTAS mes por mes, como el histórico. No corre hasta que la consulta de ventas traiga los kilos (ver «Kilos de ventas») | Sí |
 | `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
 | `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
@@ -106,10 +107,10 @@ Opciones de `run_robot.py`:
 
 - `--empresa SGX` o `--empresa SDC`: solo esa empresa (se puede repetir). Por defecto, las dos.
 - `--sin-vpn`: no maneja la VPN; úsalo si ya la conectaste a mano.
-- `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
-- `--desde` y `--hasta`: solo para `--carga-produccion` (`--desde AAAA-MM-DD`) y `--historico-ventas` (`--desde AAAA-MM`, `--hasta AAAA-MM`).
+- `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas`, `--kilos-ventas` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
+- `--desde` y `--hasta`: solo para `--carga-produccion` (`--desde AAAA-MM-DD`), `--historico-ventas` y `--kilos-ventas` (`--desde AAAA-MM`, `--hasta AAAA-MM`).
 
-Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
+Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas`, `--kilos-ventas` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
 
 Códigos de salida: `0` todo bien, `1` algún fallo, `2` configuración incompleta, `130` cancelado con Ctrl+C.
 
@@ -149,6 +150,25 @@ Al final, el log trae un resumen por empresa:
 - `fallidos`: meses que no se cargaron, con el motivo. Un tramo que falla no frena a los demás; la corrida que alcanzó a abrirse queda fallida y el mes sigue vacío en la app. Vuelve a correr el comando: los meses cargados responden «ya cargado» y solo se cargan los que faltan.
 
 Sale con `1` si algún tramo falló (y avisa por correo, como la nocturna) y con `0` si no. `robot\state\ultima_ejecucion.json` lista cada tramo con su estado, sin datos de SAP.
+
+## Kilos de ventas
+
+Llena la columna `kilos` de VENTAS en los meses que la app ya tiene. La corre **a mano** el coordinador o el usuario, no una tarea programada:
+
+```powershell
+.venv\Scripts\python.exe etl\run_robot.py --kilos-ventas --desde 2025-01
+```
+
+**Todavía no corre.** Los kilos son la columna «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados, y esa expresión aún no está en `queries\ventas\ventas.sql` (orden 016). Sin ella, el robot sale con `2` (configuración) antes de esperar el candado o subir la VPN, guarda el motivo en el estado y no envía nada: nunca manda kilos inventados ni vacíos.
+
+- Va como el histórico: un tramo por mes, de `--desde` a `--hasta`, hasta el día antes de la ventana nocturna. `--hasta AAAA-MM` y `--empresa SGX` o `--empresa SDC` funcionan igual. La ventana la da HANA cuando la VPN ya está arriba.
+- Con la VPN arriba trae de cada tramo solo la llave de la venta (`tipo_objeto`, `doc_entry`, `linea`), `fecha_contabilizacion` y `kilos`, con el `COUNT(*)` en la misma conexión. Luego baja la VPN y envía cada tramo como una corrida `kilos`: empresa por empresa, del mes más viejo al más nuevo.
+- No escribe CSV: el respaldo de esas ventas ya es el del histórico.
+- Un tramo sin ventas en SAP no se envía. Un kilo vacío en SAP hace fallar su tramo, no se envía como dato. Un tramo que falla no frena a los demás; si la corrida alcanzó a abrirse, queda fallida.
+
+Cuándo correrlo: con la columna de kilos ya en la consulta y la API de la corrida `kilos` desplegada, fuera de las franjas. Respeta las franjas de los otros robots y espera el candado, como el histórico. Antes de subir la VPN estima cuánto la va a tener arriba: 2 minutos fijos más 10 segundos por cada mes de cada empresa (`SEGUNDOS_FIJOS` y `SEGUNDOS_POR_TRAMO` en `etl\kilos.py`). Sale del histórico real del 24/11/2026, que tuvo la VPN arriba 78 segundos para 22 meses de las dos empresas, con mucha holgura: desde enero de 2025 son unos 9 minutos. Si no cabe antes de la siguiente franja, espera a que pase.
+
+Al final, el log trae un resumen por empresa: cuántos tramos quedaron `llenos`, `vacíos` (sin ventas en SAP) y `fallidos`, y cuáles, con el motivo de los fallidos y sin valores de SAP. Sale con `1` si algún tramo falló (y avisa por correo) y con `0` si no. `robot\state\ultima_ejecucion.json` lista cada tramo con su estado.
 
 ## Pedidos
 

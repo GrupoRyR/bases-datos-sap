@@ -45,6 +45,13 @@ COLUMNA_VENTANA = {
     "ventas": "fecha_contabilizacion",
     "produccion_terminado": "fecha", "produccion_carga_planta": "fecha", "produccion_costos": "fecha",
 }
+# PROVISIONAL (orden 015): la corrida `kilos` de VENTAS llena kilos en filas ya cargadas. Su
+# forma aún no está en el contrato; esta es la que supone el robot (etl/kilos.py): la parte
+# ventas en modo todo, el rango del tramo como un histórico, lotes con exactamente estas
+# columnas y conteo_sap al cerrar. Copia propia, para no repetir un error del cliente.
+COLUMNAS_KILOS = ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos"]
+# Tipos que llevan un rango (ventana_hasta) y no atienden solicitudes.
+TIPOS_CON_RANGO = ("historico", "kilos")
 # Contrato §7.1: partes que trae una corrida según la parte pedida.
 PARTES_POR_SOLICITUD = {
     ("CARTERA", None): {"cartera"},
@@ -346,10 +353,10 @@ class ApiFalsa:
             raise _rechazo("Conjunto desconocido.", "conjunto")
         if empresa not in ("SGX", "SDC"):
             raise _rechazo("Empresa desconocida.", "empresa")
-        if tipo not in ("completa", "solicitud", "historico"):
+        if tipo not in ("completa", "solicitud", *TIPOS_CON_RANGO):
             raise _rechazo("Tipo inválido.", "tipo")
-        if tipo == "historico" and conjunto != "VENTAS":
-            raise _rechazo("Solo VENTAS tiene corridas historico.", "tipo")
+        if tipo in TIPOS_CON_RANGO and conjunto != "VENTAS":
+            raise _rechazo(f"Solo VENTAS tiene corridas {tipo}.", "tipo")
         if not isinstance(partes, dict) or not partes:
             raise _rechazo("partes es obligatorio.", "partes")
         for parte, modo in partes.items():
@@ -357,14 +364,14 @@ class ApiFalsa:
                 raise _rechazo(f"Parte o modo inválido: {parte}.", f"partes.{parte}")
         # Contrato §4.1: Derivados no tiene lista de precios pública y puede omitir precios.
         omitibles = {"precios"} if (empresa, conjunto) == ("SDC", "MAESTROS") else set()
-        if tipo in ("completa", "historico") and (
+        if tipo in ("completa", *TIPOS_CON_RANGO) and (
             not set(PARTES[conjunto]) - omitibles <= set(partes) or set(partes.values()) != {"todo"}
         ):
             raise _rechazo("Una corrida completa lleva todas las partes en modo todo.", "partes")
         if not isinstance(solicitudes, list):
             raise _rechazo("solicitudes debe ser una lista.", "solicitudes")
-        if tipo == "historico" and solicitudes:
-            raise _rechazo("Una corrida historico no atiende solicitudes.", "solicitudes")
+        if tipo in TIPOS_CON_RANGO and solicitudes:
+            raise _rechazo(f"Una corrida {tipo} no atiende solicitudes.", "solicitudes")
         for sid in solicitudes:
             solicitud = self.solicitudes.get(sid)
             if (
@@ -410,16 +417,17 @@ class ApiFalsa:
         return 201, {"run_id": run_id, "estado": "abierta", "abierta_hasta": _hora_iso(self.reloj() + 1800)}
 
     def _ventana_hasta(self, tipo: str, datos: dict[str, Any], ventana_desde: str) -> str | None:
-        """Contrato §4.1 y §10.4: ventana_hasta va solo, y siempre, en una corrida historico."""
-        if tipo != "historico":
+        """Contrato §4.1 y §10.4: ventana_hasta va solo, y siempre, en una corrida historico (y,
+        PROVISIONAL, en una kilos, con las mismas reglas)."""
+        if tipo not in TIPOS_CON_RANGO:
             if "ventana_hasta" in datos:
-                raise _rechazo("Solo una corrida historico lleva ventana_hasta.", "ventana_hasta")
+                raise _rechazo("Solo una corrida historico o kilos lleva ventana_hasta.", "ventana_hasta")
             return None
         if not ventana_desde.endswith("-01"):
-            raise _rechazo("En una corrida historico es el primer día de un mes.", "ventana_desde")
+            raise _rechazo(f"En una corrida {tipo} es el primer día de un mes.", "ventana_desde")
         hasta = datos.get("ventana_hasta")
         if not isinstance(hasta, str) or not _RE_FECHA.fullmatch(hasta):
-            raise _rechazo("Una corrida historico lleva ventana_hasta AAAA-MM-DD.", "ventana_hasta")
+            raise _rechazo(f"Una corrida {tipo} lleva ventana_hasta AAAA-MM-DD.", "ventana_hasta")
         if hasta < ventana_desde or hasta[:7] != ventana_desde[:7]:
             raise _rechazo("Debe estar en el mismo mes de ventana_desde, desde ese día.", "ventana_hasta")
         if hasta >= self.inicio_ventana_nocturna():
@@ -441,7 +449,10 @@ class ApiFalsa:
             raise _rechazo("La parte no está en la corrida.", "parte")
         if not isinstance(columns, list) or not columns or len(set(columns)) != len(columns):
             raise _rechazo("columns inválidas.", "columns")
-        if self.columnas_por_parte and set(columns) != set(self.columnas_por_parte[parte]):
+        if corrida.tipo == "kilos":
+            if columns != COLUMNAS_KILOS:
+                raise _rechazo("Una corrida kilos lleva la llave, fecha_contabilizacion y kilos.", "columns")
+        elif self.columnas_por_parte and set(columns) != set(self.columnas_por_parte[parte]):
             raise _rechazo("columns no son las de la parte.", "columns")
         if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_FILAS:
             raise _rechazo(f"Un lote lleva de 1 a {MAX_FILAS} filas.", "rows")
@@ -466,11 +477,11 @@ class ApiFalsa:
             raise _rechazo("batches debe ser un entero.", "batches")
         if not isinstance(filas, dict) or not set(filas) <= set(corrida.partes):
             raise _rechazo("filas inválidas.", "filas")
-        con_conteo = corrida.tipo in ("completa", "historico")
+        con_conteo = corrida.tipo in ("completa", *TIPOS_CON_RANGO)
         if con_conteo and not isinstance(datos.get("conteo_sap"), dict):
-            raise _rechazo("conteo_sap es obligatorio en una corrida completa o historico.", "conteo_sap")
+            raise _rechazo("conteo_sap es obligatorio en una corrida completa, historico o kilos.", "conteo_sap")
         if not con_conteo and "conteo_sap" in datos:
-            raise _rechazo("conteo_sap solo va en una corrida completa o historico.", "conteo_sap")
+            raise _rechazo("conteo_sap solo va en una corrida completa, historico o kilos.", "conteo_sap")
 
         faltan = [n for n in range(1, batches + 1) if n not in corrida.lotes]
         recibidas = corrida.total_filas()
@@ -484,7 +495,7 @@ class ApiFalsa:
 
         corrida.conteo_sap = datos.get("conteo_sap")
         self._terminar(corrida, "cerrada")
-        if corrida.conjunto == "VENTAS":
+        if corrida.conjunto == "VENTAS" and corrida.tipo != "kilos":  # kilos no carga ventas nuevas
             self.ventas_cargadas.setdefault(corrida.empresa, set()).update(
                 f["fecha_contabilizacion"] for f in corrida.filas("ventas")
             )
