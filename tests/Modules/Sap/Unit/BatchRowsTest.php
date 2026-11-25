@@ -166,7 +166,7 @@ it('only lets the transition columns be left out', function () {
         'clientes' => ['contacto_principal'],
         'proveedores' => ['contacto_principal'],
         'contactos' => ['telefono_2'],
-        'ventas' => ['ganancia_bruta'],
+        'ventas' => ['ganancia_bruta', 'kilos'],
     ]);
 });
 
@@ -194,3 +194,22 @@ it('lets a partner header leave out contacto_principal and a contact header leav
     'proveedores' => [Part::Suppliers, 'contacto_principal'],
     'contactos' => [Part::Contacts, 'telefono_2'],
 ]);
+
+it('lets a VENTAS header leave out kilos, keeps a negative weight and checks it as a quantity', function () {
+    $body = RobotClient::batch(1, Part::Sales, [RobotClient::row(Part::Sales, ['kilos' => '-12.500000'])]);
+    $position = array_search('kilos', $body['columns'], true);
+    $columns = array_values(array_diff($body['columns'], ['kilos']));
+    $values = $body['rows'][0];
+    unset($values[$position]);
+
+    $without = BatchRows::check(Part::Sales, $columns, [array_values($values)]);
+    $with = BatchRows::check(Part::Sales, $body['columns'], $body['rows']);
+    $named = fn (array $row): array => array_combine(array_keys(Part::Sales->columns()), $row);
+
+    expect($without['errors'])->toBe([])
+        ->and($named($without['rows'][0])['kilos'])->toBeNull()
+        ->and($with['errors'])->toBe([])
+        ->and($named($with['rows'][0])['kilos'])->toBe('-12.500000')
+        ->and(checkOneSale(['kilos' => 12.5])['errors'])
+        ->toBe(['rows.0.kilos' => 'Debe ser una cantidad como texto, con punto y hasta 6 decimales.']);
+});

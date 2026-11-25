@@ -348,6 +348,9 @@ final class PartColumns
             Column::text('moneda', 10),
             Column::quantity('trm'),
             Column::text('comentarios'),
+            // Weight of the line ("Tot KG" of AnálisisVentas-1), negative on credit
+            // notes. Omittable until the robot sends it (contract section 4.2).
+            Column::quantity('kilos', omittable: true),
         ];
     }
 
