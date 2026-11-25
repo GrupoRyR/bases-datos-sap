@@ -11,10 +11,12 @@ use App\Modules\Sap\Domain\Values\SapTime;
  * Checks and normalizes the rows of a batch (docs/contrato-robot.md,
  * section 4.2). Columns may come in any order but must be exactly the
  * part's, without repeats, except an omittable column (ganancia_bruta of
- * VENTAS, contacto_principal of partners, telefono_2 of contacts), which
+ * VENTAS, kilos of VENTAS, contacto_principal of partners, telefono_2 of contacts), which
  * the header may leave out; rows come back as lists in the
  * part's column order, with text trimmed, times in the app timezone and
- * amounts as text, and null where the header left a column out.
+ * amounts as text, and null where the header left a column out. A run
+ * whose batches bring other columns than the part's (the reduced header of
+ * a kilos run, section 10.5) passes them as the expected columns.
  */
 final class BatchRows
 {
@@ -30,11 +32,12 @@ final class BatchRows
     private const QUANTITY = '/^-?\d{1,13}(\.\d{1,6})?$/';
 
     /**
+     * @param  array<string, Column>|null  $expected  The columns the batch must bring; the part's by default.
      * @return array{rows: list<list<mixed>>, errors: array<string, string>}
      */
-    public static function check(Part $part, mixed $columns, mixed $rows): array
+    public static function check(Part $part, mixed $columns, mixed $rows, ?array $expected = null): array
     {
-        $expected = $part->columns();
+        $expected ??= $part->columns();
         $columnError = self::columnError($expected, $columns);
 
         if ($columnError !== null) {
@@ -79,10 +82,11 @@ final class BatchRows
      * case-sensitive, like the SAP keys and the utf8mb4_bin key columns.
      *
      * @param  list<mixed>  $row
+     * @param  array<string, Column>|null  $expected  The columns the row was normalized to; the part's by default.
      */
-    public static function keyHash(Part $part, array $row): string
+    public static function keyHash(Part $part, array $row, ?array $expected = null): string
     {
-        $positions = array_flip(array_keys($part->columns()));
+        $positions = array_flip(array_keys($expected ?? $part->columns()));
 
         return hash('sha256', (string) json_encode(array_map(fn (string $key): mixed => $row[$positions[$key]], $part->key())));
     }

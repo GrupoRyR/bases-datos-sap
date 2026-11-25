@@ -42,9 +42,9 @@ final readonly class Column
         return new self($name, ColumnType::Decimal, $required, omittable: $omittable);
     }
 
-    public static function quantity(string $name, bool $required = false): self
+    public static function quantity(string $name, bool $required = false, bool $omittable = false): self
     {
-        return new self($name, ColumnType::Quantity, $required);
+        return new self($name, ColumnType::Quantity, $required, omittable: $omittable);
     }
 
     public static function boolean(string $name, bool $required = false): self

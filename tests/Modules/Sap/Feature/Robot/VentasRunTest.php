@@ -246,6 +246,26 @@ it('stores a null gross profit when the batch header leaves the column out', fun
         ->and((float) $line['total'])->toBe(1000.0);
 });
 
+it('stores the kilos of a line, negative on a credit note, and null when the header leaves them out', function () {
+    $run = sendVentas($this, [
+        saleLine(1, '2026-10-01', ['kilos' => '25.125000']),
+        saleLine(2, '2026-10-02', ['tipo_objeto' => 14, 'cantidad' => '-1.000000', 'kilos' => '-5.000000']),
+    ], ['tipo' => 'completa']);
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2], 'conteo_sap' => ['ventas' => 2]])->assertOk();
+
+    $kilos = fn (): array => DB::connection('ventas')->table('v_ventas')->orderBy('doc_entry')->pluck('kilos', 'doc_entry')
+        ->map(fn (mixed $value): ?float => $value === null ? null : (float) $value)->all();
+
+    expect($kilos())->toBe([1 => 25.125, 2 => -5.0]);
+
+    $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', ventasRun())->assertCreated()->json('run_id');
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/lotes", ventasBatchWithout([saleLine(3, '2026-10-03')], ['kilos']))->assertCreated();
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 1]])->assertOk();
+
+    // The request run replaced the window with the one line it brought, without kilos.
+    expect($kilos())->toBe([3 => null]);
+});
+
 it('still refuses a batch that misses or adds any other column', function (array $without, ?string $extra, string $message) {
     $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', ventasRun())->assertCreated()->json('run_id');
     $body = ventasBatchWithout([saleLine(1, '2026-10-01')], $without);

@@ -24,12 +24,34 @@ final class PartColumns
     /** The cost concepts of produccion_costos (contract section 12.2), exact ASCII texts. */
     private const COST_CONCEPTS = ['Mano de obra directa', 'Costo variable', 'Costo fijo', 'Material comprado', 'Material intermedio'];
 
+    /** The columns a kilos run brings of each sales line (contract section 10.5), in contract order. */
+    private const SALES_WEIGHTS = ['tipo_objeto', 'doc_entry', 'linea', 'fecha_contabilizacion', 'kilos'];
+
+    /** @var array<string, Column>|null */
+    private static ?array $salesWeights = null;
+
     /**
      * @return array<string, Column>
      */
     public static function for(Part $part): array
     {
         return self::$cache[$part->value] ??= self::build($part);
+    }
+
+    /**
+     * The reduced header of a kilos run (contract section 10.5): the key of
+     * the sales line, its posting date for the range and its weight, which
+     * here is not omittable, since filling it is the whole run. Its value may
+     * still be null, as in a full run, when SAP has no weight for the line.
+     *
+     * @return array<string, Column>
+     */
+    public static function salesWeights(): array
+    {
+        return self::$salesWeights ??= [
+            ...array_intersect_key(self::for(Part::Sales), array_flip(self::SALES_WEIGHTS)),
+            'kilos' => Column::quantity('kilos'),
+        ];
     }
 
     /**
@@ -348,6 +370,9 @@ final class PartColumns
             Column::text('moneda', 10),
             Column::quantity('trm'),
             Column::text('comentarios'),
+            // Weight of the line ("Tot KG" of AnálisisVentas-1), negative on credit
+            // notes. Omittable until the robot sends it (contract section 4.2).
+            Column::quantity('kilos', omittable: true),
         ];
     }
 
