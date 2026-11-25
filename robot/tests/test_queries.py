@@ -230,6 +230,12 @@ COLUMNA_GANANCIA = (
     '    ROUND(X."GrssProfit", 2) * X."Signo"                       AS "Ganancia bruta",\n'
 )
 SUBCONSULTA_GANANCIA = 'T1."VatSum", T1."GrssProfit",\n'
+# El marcador de dónde irá la columna de kilos (orden 016), solo un comentario por ahora.
+NOTA_KILOS = (
+    "    -- @kilos: aqui va la ultima columna de la consulta, la expresion de «Tot KG» de\n"
+    "    -- la consulta guardada «AnálisisVentas-1» (orden 016), con su coma antes y el\n"
+    '    -- alias "Kilos". Hasta entonces el robot no corre el modo de kilos de ventas.\n'
+)
 
 
 def test_ventas_es_la_consulta_del_gestor_mas_la_ganancia_bruta():
@@ -238,9 +244,11 @@ def test_ventas_es_la_consulta_del_gestor_mas_la_ganancia_bruta():
     assert texto.count(NOTA_GANANCIA) == 1
     assert texto.count(COLUMNA_GANANCIA) == 1
     assert texto.count(SUBCONSULTA_GANANCIA) == 2
+    assert texto.count(NOTA_KILOS) == 1
     # Quitadas esas adiciones, queda exactamente la consulta del gestor.
     gestor = (
         texto.replace(NOTA_GANANCIA, "")
+        .replace(NOTA_KILOS, "")
         .replace(COLUMNA_GANANCIA, "")
         .replace(SUBCONSULTA_GANANCIA, 'T1."VatSum",\n')
         .encode("utf-8")

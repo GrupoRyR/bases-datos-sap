@@ -116,6 +116,9 @@ SELECT
     X."DocCur"                                                 AS "Moneda",
     X."DocRate"                                                AS "TRM",
     X."Comments"                                               AS "Comentarios"
+    -- @kilos: aqui va la ultima columna de la consulta, la expresion de «Tot KG» de
+    -- la consulta guardada «AnálisisVentas-1» (orden 016), con su coma antes y el
+    -- alias "Kilos". Hasta entonces el robot no corre el modo de kilos de ventas.
 FROM (
     -- Facturas y notas debito: signo positivo.
     SELECT
