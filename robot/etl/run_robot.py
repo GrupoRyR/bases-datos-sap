@@ -415,6 +415,8 @@ def main(
         try:
             desde_mes = historico.mes(args.desde)
             hasta_mes = historico.mes(args.hasta) if args.hasta is not None else None
+            if args.kilos_ventas:
+                kilos.revisar_desde(desde_mes)
             # Con la ventana estimada (reloj del PC): los tramos de verdad salen de la de HANA.
             plan = historico.tramos(desde_mes, hasta_mes, historico.inicio_ventana_estimado(ahora().date()))
         except historico.RangoInvalido as exc:

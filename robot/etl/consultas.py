@@ -155,10 +155,11 @@ def sql_rango(sql: str, desde: date, hasta: date) -> str:
 
 
 # Kilos de VENTAS (orden 016): la columna «Tot KG» de la consulta guardada «AnálisisVentas-1»
-# de Derivados va al final del SELECT de ventas.sql, con esta etiqueta y signo negativo en
-# las notas crédito, como "Cantidad". Hasta que la expresión llegue, la consulta no la trae y
-# todo lo que necesita kilos falla cerrado (exigir_kilos): nunca se envían kilos inventados
-# ni un NULL como si fuera un dato.
+# de Derivados va al final del SELECT de ventas.sql, donde está el marcador `-- @kilos`, con
+# esta etiqueta y signo negativo en las notas crédito, como "Cantidad". Hasta que la
+# expresión llegue, la consulta no la trae y todo lo que necesita kilos falla cerrado
+# (exigir_kilos): nunca se envían kilos inventados ni una columna entera en NULL. Ya con la
+# expresión, una línea sin peso en SAP sí va en NULL: la API la guarda así (contrato §10.5).
 MARCADOR_KILOS = "@kilos"
 ALIAS_KILOS = "Kilos"
 # El envoltorio la nombra entre comillas (X."Kilos"): en HANA eso distingue mayúsculas, así
@@ -187,13 +188,13 @@ def exigir_kilos(sql: str) -> None:
 
 def columnas_kilos() -> tuple[Columna, ...]:
     """Columnas de los kilos de VENTAS, en orden: la llave de la parte ventas, su columna de
-    la ventana (fecha_contabilizacion) y kilos. Todas obligatorias: un kilo vacío no se
-    envía como si fuera un dato."""
+    la ventana (fecha_contabilizacion) y kilos (contrato §10.5). La llave y la fecha son
+    obligatorias; kilos puede llegar vacío si SAP no tiene peso para la línea."""
     ventas = PARTES["ventas"]
     propias = tuple(
         c for c in ventas.columnas if c.nombre in ventas.llave or c.nombre == ventas.columna_ventana
     )
-    return (*propias, Columna(ALIAS_KILOS, "kilos", CANTIDAD, requerida=True))
+    return (*propias, Columna(ALIAS_KILOS, "kilos", CANTIDAD))
 
 
 def sql_kilos(sql: str, desde: date, hasta: date) -> str:

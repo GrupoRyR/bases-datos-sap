@@ -159,12 +159,14 @@ Llena la columna `kilos` de VENTAS en los meses que la app ya tiene. La corre **
 .venv\Scripts\python.exe etl\run_robot.py --kilos-ventas --desde 2025-01
 ```
 
-**Todavía no corre.** Los kilos son la columna «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados, y esa expresión aún no está en `queries\ventas\ventas.sql` (orden 016). Sin ella, el robot sale con `2` (configuración) antes de esperar el candado o subir la VPN, guarda el motivo en el estado y no envía nada: nunca manda kilos inventados ni vacíos.
+**Todavía no corre.** Los kilos son la columna «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados, y esa expresión aún no está en `queries\ventas\ventas.sql` (va donde dice `-- @kilos`, orden 016). Sin ella, el robot sale con `2` (configuración) antes de esperar el candado o subir la VPN, guarda el motivo en el estado y no envía nada: nunca manda kilos inventados.
 
-- Va como el histórico: un tramo por mes, de `--desde` a `--hasta`, hasta el día antes de la ventana nocturna. `--hasta AAAA-MM` y `--empresa SGX` o `--empresa SDC` funcionan igual. La ventana la da HANA cuando la VPN ya está arriba.
+- Va como el histórico: un tramo por mes, de `--desde` a `--hasta`, hasta el día antes de la ventana nocturna. `--desde` va desde `2025-01` (contrato §10.5); uno anterior no corre. `--hasta AAAA-MM` y `--empresa SGX` o `--empresa SDC` funcionan igual. La ventana la da HANA cuando la VPN ya está arriba.
 - Con la VPN arriba trae de cada tramo solo la llave de la venta (`tipo_objeto`, `doc_entry`, `linea`), `fecha_contabilizacion` y `kilos`, con el `COUNT(*)` en la misma conexión. Luego baja la VPN y envía cada tramo como una corrida `kilos`: empresa por empresa, del mes más viejo al más nuevo.
 - No escribe CSV: el respaldo de esas ventas ya es el del histórico.
-- Un tramo sin ventas en SAP no se envía. Un kilo vacío en SAP hace fallar su tramo, no se envía como dato. Un tramo que falla no frena a los demás; si la corrida alcanzó a abrirse, queda fallida.
+- Un tramo sin ventas en SAP no se envía. Una línea sin peso en SAP va con `kilos` vacío y la app lo guarda vacío. Un tramo que falla no frena a los demás; si la corrida alcanzó a abrirse, queda fallida.
+- La app solo cambia `kilos` de las líneas que ya tiene. Si las del tramo no cuadran con las suyas, el cierre falla y el motivo dice cuántas `sobran` (llegaron y la app no las tiene) y cuántas `faltan` (la app las tiene y no llegaron). Suele querer decir que ese mes cambió en SAP después del histórico.
+- Repetir un mes no hace daño: vuelve a escribir los mismos kilos. Si algo falló, vuelve a correr el comando.
 
 Cuándo correrlo: con la columna de kilos ya en la consulta y la API de la corrida `kilos` desplegada, fuera de las franjas. Respeta las franjas de los otros robots y espera el candado, como el histórico. Antes de subir la VPN estima cuánto la va a tener arriba: 2 minutos fijos más 10 segundos por cada mes de cada empresa (`SEGUNDOS_FIJOS` y `SEGUNDOS_POR_TRAMO` en `etl\kilos.py`). Sale del histórico real del 24/11/2026, que tuvo la VPN arriba 78 segundos para 22 meses de las dos empresas, con mucha holgura: desde enero de 2025 son unos 9 minutos. Si no cabe antes de la siguiente franja, espera a que pase.
 

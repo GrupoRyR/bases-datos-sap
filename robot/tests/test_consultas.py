@@ -488,9 +488,10 @@ def test_columnas_de_los_kilos_son_la_llave_la_fecha_y_kilos():
     columnas = consultas.columnas_kilos()
     assert [c.nombre for c in columnas] == ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos"]
     assert [c.hana for c in columnas] == ["Tipo objeto", "DocEntry", "Línea", "Fecha contabilización", "Kilos"]
-    # La llave es la de VENTAS y todas son obligatorias: un kilo vacío no se envía como dato.
+    # La llave es la de VENTAS. La llave y la fecha son obligatorias; kilos no: una línea sin
+    # peso en SAP va en null y la API lo guarda así (contrato §10.5).
     assert set(PARTES["ventas"].llave) < {c.nombre for c in columnas}
-    assert all(c.requerida for c in columnas)
+    assert [c.requerida for c in columnas] == [True, True, True, True, False]
 
 
 def test_sql_kilos_trae_solo_la_llave_la_fecha_y_kilos_con_el_rango():

@@ -9,7 +9,8 @@ antes de la ventana nocturna, con la misma planeación y las mismas dos fases
     FASE 2 - sin VPN:  por tramo, del más viejo al más nuevo y empresa por empresa, una
                        corrida `kilos` en la API
 Un tramo sin ventas en SAP no se envía (`vacío`); uno que falla (`falló`) no frena a los
-demás.
+demás. Repetir un mes no hace daño: la API vuelve a escribir los mismos kilos (no hay 409
+por un rango ya cargado, como en el histórico).
 
 No escribe CSV: los tramos quedan en memoria hasta que baja la VPN, como en el histórico,
 y el respaldo de esas ventas ya es el CSV del histórico (VENTAS\\<EMPRESA>\\historico). Si
@@ -32,7 +33,7 @@ import esquema
 import extraccion
 import hana
 import historico
-from api import ApiCliente
+from api import ApiCliente, ApiRechazo
 from config import Config, EmpresaHana
 from historico import FALLO, VACIO, Tramo
 from registro import obtener
@@ -52,17 +53,21 @@ SEGUNDOS_POR_TRAMO = 10
 
 LLENO = "lleno"
 
-# --- PROVISIONAL (orden 015) -------------------------------------------------------------
-# La corrida `kilos` aún no está en el contrato (docs/contrato-robot.md): la define la orden
-# 015 de Datos y API. Hasta entonces su forma vive solo aquí, para alinearla en un solo lugar:
-# - conjunto VENTAS, tipo "kilos", la parte ventas en modo todo y sin solicitudes;
-# - ventana_desde y ventana_hasta del tramo, como el histórico (envio._iniciar);
-# - lotes de la parte ventas con las columnas de consultas.columnas_kilos(): la llave,
-#   fecha_contabilizacion y kilos, en ese orden;
+# --- La corrida `kilos` (contrato §4.1 a §4.3 y §10.5) -------------------------------------
+# Su forma vive solo aquí:
+# - conjunto VENTAS, tipo "kilos", la parte ventas en modo todo, sin solicitudes y sin
+#   fecha_corte;
+# - ventana_desde es el día 1 del mes, desde PRIMER_MES, y ventana_hasta un día de ese mes
+#   anterior a la ventana nocturna, como el histórico (envio._iniciar); si no, 422;
+# - lotes de la parte ventas con exactamente las columnas de consultas.columnas_kilos(): la
+#   llave, fecha_contabilizacion y kilos. kilos puede ir null en una fila, nunca faltar;
 # - cierre con conteo_sap {"ventas": N}, el COUNT(*) del tramo (el tipo está en
-#   trabajos.TIPOS_CON_CONTEO por eso);
-# - un 409 al iniciar es un fallo del tramo: no hay «ya cargado» como en el histórico.
+#   trabajos.TIPOS_CON_CONTEO por eso). Si N no es lo recibido, 422 en conteo_sap.ventas;
+#   si las llaves no cuadran con MySQL, 422 en filas.ventas con los conteos `sobran` y
+#   `faltan` (motivo_de_rechazo los pone en el motivo del tramo). La corrida queda fallida;
+# - no hay 409 por un rango ya cargado: un 409 es un fallo del tramo como cualquier otro.
 TIPO = "kilos"
+PRIMER_MES = date(2025, 1, 1)
 _VENTAS = esquema.PARTES["ventas"]
 PARTE_KILOS = esquema.Parte(
     _VENTAS.nombre, _VENTAS.conjunto, _VENTAS.consulta, consultas.columnas_kilos(), _VENTAS.llave,
@@ -80,7 +85,29 @@ def trabajo_kilos_ventas(empresa: str, desde: date, hasta: date) -> Trabajo:
         ventana_fija=desde.isoformat(),
         ventana_hasta=hasta.isoformat(),
     )
-# --- fin de lo PROVISIONAL ---------------------------------------------------------------
+
+
+def revisar_desde(desde_mes: date) -> None:
+    """Lanza historico.RangoInvalido si --desde es anterior a PRIMER_MES (la API daría 422)."""
+    if desde_mes < PRIMER_MES:
+        raise historico.RangoInvalido(
+            f"--kilos-ventas va desde {PRIMER_MES:%Y-%m} (contrato §10.5); llegó --desde {desde_mes:%Y-%m}."
+        )
+
+
+def motivo_de_rechazo(exc: BaseException) -> str:
+    """El motivo de un tramo que falló al enviarse, con los conteos `sobran` y `faltan` si la
+    API los dio al cerrar (líneas que no cuadran con MySQL). Son conteos, no valores de SAP."""
+    motivo = str(exc)
+    causa = exc.__cause__
+    while causa is not None and not isinstance(causa, ApiRechazo):
+        causa = causa.__cause__
+    datos = causa.datos if isinstance(causa, ApiRechazo) and isinstance(causa.datos, dict) else {}
+    sobran, faltan = datos.get("sobran"), datos.get("faltan")
+    if all(isinstance(n, int) and not isinstance(n, bool) for n in (sobran, faltan)):
+        motivo = f"{motivo.rstrip('.')} (sobran {sobran} y faltan {faltan} líneas)."
+    return motivo
+# --- fin de la forma de la corrida `kilos` ---------------------------------------------------
 
 
 def revisar_consulta() -> None:
@@ -127,8 +154,8 @@ def _enviar_tramo(api: ApiCliente, r: extraccion.Resultado) -> tuple[Tramo, list
     try:
         envio.enviar_resultado(api, r)
     except envio.FalloEnvio as exc:
-        tramo.motivo = str(exc)
-        fallos.append((exc.etapa, f"{tramo.nombre}: {exc}"))
+        tramo.motivo = motivo_de_rechazo(exc)
+        fallos.append((exc.etapa, f"{tramo.nombre}: {tramo.motivo}"))
     else:
         tramo.estado = LLENO
     return tramo, fallos

@@ -45,11 +45,12 @@ COLUMNA_VENTANA = {
     "ventas": "fecha_contabilizacion",
     "produccion_terminado": "fecha", "produccion_carga_planta": "fecha", "produccion_costos": "fecha",
 }
-# PROVISIONAL (orden 015): la corrida `kilos` de VENTAS llena kilos en filas ya cargadas. Su
-# forma aún no está en el contrato; esta es la que supone el robot (etl/kilos.py): la parte
-# ventas en modo todo, el rango del tramo como un histórico, lotes con exactamente estas
-# columnas y conteo_sap al cerrar. Copia propia, para no repetir un error del cliente.
-COLUMNAS_KILOS = ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos"]
+# Contrato §10.5: la corrida `kilos` de VENTAS llena kilos en líneas ya cargadas. La parte
+# ventas en modo todo, el rango del tramo como un histórico (desde 2025-01-01), lotes con
+# exactamente estas columnas en cualquier orden (kilos puede ir null) y conteo_sap al cerrar.
+# Copia propia, para no repetir un error del cliente.
+COLUMNAS_KILOS = frozenset({"tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos"})
+PRIMER_DIA_KILOS = "2025-01-01"
 # Tipos que llevan un rango (ventana_hasta) y no atienden solicitudes.
 TIPOS_CON_RANGO = ("historico", "kilos")
 # Contrato §7.1: partes que trae una corrida según la parte pedida.
@@ -190,6 +191,9 @@ class ApiFalsa:
         self.estado_solicitudes: dict[int, str] = {}
         self._nonces: set[tuple[str, str]] = set()
         self._fallas: dict[str, list[_Falla]] = {}
+        # Contrato §10.5: (empresa, ventana_desde) -> (sobran, faltan) de una corrida kilos cuyas
+        # llaves no cuadran con MySQL; su cierre responde 422 en filas.ventas. Las pruebas lo llenan.
+        self.descuadres_kilos: dict[tuple[str, str], tuple[int, int]] = {}
         # Días con VENTAS ya cargadas por empresa (fecha_contabilizacion): una corrida historico
         # con alguno en su rango responde 409 sin abrir nada (contrato §10.4). Las pruebas
         # pueden llenarlo; cada corrida de VENTAS cerrada suma los suyos.
@@ -417,14 +421,16 @@ class ApiFalsa:
         return 201, {"run_id": run_id, "estado": "abierta", "abierta_hasta": _hora_iso(self.reloj() + 1800)}
 
     def _ventana_hasta(self, tipo: str, datos: dict[str, Any], ventana_desde: str) -> str | None:
-        """Contrato §4.1 y §10.4: ventana_hasta va solo, y siempre, en una corrida historico (y,
-        PROVISIONAL, en una kilos, con las mismas reglas)."""
+        """Contrato §4.1, §10.4 y §10.5: ventana_hasta va solo, y siempre, en una corrida
+        historico o kilos, con las mismas reglas."""
         if tipo not in TIPOS_CON_RANGO:
             if "ventana_hasta" in datos:
                 raise _rechazo("Solo una corrida historico o kilos lleva ventana_hasta.", "ventana_hasta")
             return None
         if not ventana_desde.endswith("-01"):
             raise _rechazo(f"En una corrida {tipo} es el primer día de un mes.", "ventana_desde")
+        if tipo == "kilos" and ventana_desde < PRIMER_DIA_KILOS:
+            raise _rechazo(f"Una corrida kilos va desde {PRIMER_DIA_KILOS}.", "ventana_desde")
         hasta = datos.get("ventana_hasta")
         if not isinstance(hasta, str) or not _RE_FECHA.fullmatch(hasta):
             raise _rechazo(f"Una corrida {tipo} lleva ventana_hasta AAAA-MM-DD.", "ventana_hasta")
@@ -450,7 +456,7 @@ class ApiFalsa:
         if not isinstance(columns, list) or not columns or len(set(columns)) != len(columns):
             raise _rechazo("columns inválidas.", "columns")
         if corrida.tipo == "kilos":
-            if columns != COLUMNAS_KILOS:
+            if len(columns) != len(COLUMNAS_KILOS) or set(columns) != COLUMNAS_KILOS:
                 raise _rechazo("Una corrida kilos lleva la llave, fecha_contabilizacion y kilos.", "columns")
         elif self.columnas_por_parte and set(columns) != set(self.columnas_por_parte[parte]):
             raise _rechazo("columns no son las de la parte.", "columns")
@@ -493,6 +499,8 @@ class ApiFalsa:
             self._terminar(corrida, "fallida", f"Parte todo sin filas: {', '.join(vacias)}")
             raise _rechazo("Una parte todo llegó sin filas.", f"filas.{vacias[0]}")
 
+        if corrida.tipo == "kilos":
+            self._revisar_kilos(corrida, datos.get("conteo_sap") or {}, recibidas)
         corrida.conteo_sap = datos.get("conteo_sap")
         self._terminar(corrida, "cerrada")
         if corrida.conjunto == "VENTAS" and corrida.tipo != "kilos":  # kilos no carga ventas nuevas
@@ -516,6 +524,20 @@ class ApiFalsa:
                 for p in corrida.partes
             }
         return 200, respuesta
+
+    def _revisar_kilos(self, corrida: Corrida, conteo_sap: dict[str, Any], recibidas: dict[str, int]) -> None:
+        """Contrato §10.5: el conteo de SAP y las llaves de MySQL deben cuadrar; si no, 422 y
+        la corrida queda fallida sin cambiar nada."""
+        if conteo_sap.get("ventas") != recibidas.get("ventas", 0):
+            self._terminar(corrida, "fallida", "conteo_sap no cuadra")
+            raise _rechazo("conteo_sap no es igual a las filas recibidas.", "conteo_sap.ventas")
+        descuadre = self.descuadres_kilos.get((corrida.empresa, corrida.ventana_desde or ""))
+        if descuadre:
+            sobran, faltan = descuadre
+            self._terminar(corrida, "fallida", "las líneas no cuadran con MySQL")
+            mensaje = f"Las líneas no cuadran con MySQL: sobran {sobran} y faltan {faltan}."
+            raise _Error(422, {"message": mensaje, "errors": {"filas.ventas": [mensaje]},
+                               "sobran": sobran, "faltan": faltan})
 
     def _fallar(self, corrida: Corrida, datos: dict[str, Any], cuerpo: bytes) -> tuple[int, dict[str, Any]]:
         error = datos.get("error")

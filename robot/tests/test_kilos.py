@@ -19,7 +19,7 @@ import config
 import esquema
 import historico
 import kilos
-from api import ApiCliente
+from api import ApiCliente, ApiRechazo
 from fake_api import COLUMNAS_KILOS
 from fake_hana import QUERIES, VpnFalsa, fila, revisar_fases
 from test_historico import TRAMOS_JUNIO, _no_dormir, _Reloj
@@ -110,7 +110,7 @@ def test_con_la_consulta_sin_kilos_un_tramo_tampoco_se_extrae(entorno):
     assert e.servidor.peticiones == []
 
 
-# --- La corrida kilos (forma PROVISIONAL, orden 015) ---------------------------------------
+# --- La corrida kilos (contrato §10.5) -----------------------------------------------------
 
 
 def test_trabajo_de_un_tramo_es_una_corrida_kilos_de_ventas_con_su_rango():
@@ -118,20 +118,57 @@ def test_trabajo_de_un_tramo_es_una_corrida_kilos_de_ventas_con_su_rango():
         empresa="SGX", conjunto="VENTAS", tipo="kilos", partes={"ventas": "todo"},
         ventana_fija="2025-01-01", ventana_hasta="2025-01-31",
     )
-    assert kilos.PARTE_KILOS.nombres == LLAVE_FECHA_KILOS == COLUMNAS_KILOS
+    assert kilos.PARTE_KILOS.nombres == LLAVE_FECHA_KILOS
+    assert set(LLAVE_FECHA_KILOS) == COLUMNAS_KILOS
+    assert kilos.PRIMER_MES == date(2025, 1, 1)
     assert kilos.PARTE_KILOS.llave == esquema.PARTES["ventas"].llave
 
 
-def test_la_api_falsa_rechaza_un_lote_kilos_con_otras_columnas(escenario):
-    api: ApiCliente = escenario.cliente
-    run_id = api.iniciar_corrida(
+def _abrir_kilos(api: ApiCliente, ventana_desde: str = "2026-06-01", ventana_hasta: str = "2026-06-30") -> int:
+    return api.iniciar_corrida(
         conjunto="VENTAS", empresa="SGX", tipo="kilos", partes={"ventas": "todo"}, solicitudes=[],
         fecha_corte=None, extraida_en="2026-10-26T02:00:05-05:00",
-        ventana_desde="2026-06-01", ventana_hasta="2026-06-30",
+        ventana_desde=ventana_desde, ventana_hasta=ventana_hasta,
     )["run_id"]
-    with pytest.raises(Exception, match="422"):
-        api.enviar_lote(run_id, batch=1, parte="ventas", columns=esquema.PARTES["ventas"].nombres,
-                        rows=[[None] * len(esquema.PARTES["ventas"].nombres)])
+
+
+@pytest.mark.parametrize("columnas", [
+    esquema.PARTES["ventas"].nombres,                                    # el encabezado completo de §10
+    ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion"],      # sin kilos
+    ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos", "cantidad"],
+])
+def test_un_lote_kilos_lleva_exactamente_las_cinco_columnas(escenario, columnas):
+    api: ApiCliente = escenario.cliente
+    run_id = _abrir_kilos(api)
+    with pytest.raises(ApiRechazo) as exc:
+        api.enviar_lote(run_id, batch=1, parte="ventas", columns=columnas, rows=[[None] * len(columnas)])
+    assert exc.value.status == 422 and "columns" in exc.value.errors
+
+
+def test_un_lote_kilos_acepta_las_cinco_en_cualquier_orden_y_kilos_null(escenario):
+    api: ApiCliente = escenario.cliente
+    run_id = _abrir_kilos(api)
+    columnas = ["kilos", "linea", "fecha_contabilizacion", "doc_entry", "tipo_objeto"]
+    api.enviar_lote(run_id, batch=1, parte="ventas", columns=columnas, rows=[[None, 0, "2026-06-10", 7, 13]])
+    respuesta = api.cerrar_corrida(run_id, batches=1, filas={"ventas": 1}, conteo_sap={"ventas": 1})
+    assert respuesta["estado"] == "cerrada"
+    assert escenario.servidor.corridas[run_id].filas("ventas")[0]["kilos"] is None
+
+
+def test_una_corrida_kilos_no_empieza_antes_de_2025(escenario):
+    with pytest.raises(ApiRechazo) as exc:
+        _abrir_kilos(escenario.cliente, "2024-12-01", "2024-12-31")
+    assert exc.value.status == 422 and "ventana_desde" in exc.value.errors
+
+
+def test_si_el_conteo_de_sap_no_cuadra_el_cierre_falla_y_la_corrida_queda_fallida(escenario):
+    api: ApiCliente = escenario.cliente
+    run_id = _abrir_kilos(api)
+    api.enviar_lote(run_id, batch=1, parte="ventas", columns=LLAVE_FECHA_KILOS, rows=[[13, 7, 0, "2026-06-10", "1.5"]])
+    with pytest.raises(ApiRechazo) as exc:
+        api.cerrar_corrida(run_id, batches=1, filas={"ventas": 1}, conteo_sap={"ventas": 2})
+    assert exc.value.status == 422 and "conteo_sap.ventas" in exc.value.errors
+    assert escenario.servidor.corridas[run_id].estado == "fallida"
 
 
 # --- run_robot.py --kilos-ventas con la columna (de prueba) --------------------------------
@@ -261,15 +298,45 @@ def test_si_falla_la_red_al_iniciar_un_tramo_sigue_con_el_siguiente(con_kilos, c
     assert [t["estado"] for t in _estado()["tramos"]] == ["falló", "lleno", "lleno", "lleno"]
 
 
-def test_kilos_vacios_en_sap_no_se_envian_como_dato(con_kilos, correos):
+def test_un_kilo_vacio_en_sap_se_envia_como_null(con_kilos, correos):
+    # SAP no tiene peso para esa línea: la API guarda null (contrato §10.5). La columna de la
+    # consulta sí tiene que existir; lo que puede venir vacío es el valor de una fila.
     e = con_kilos
     _ventas(e, "SDC", date(2026, 9, 10), kilos_por_fila=None)
-    assert _main(e, "--kilos-ventas", "--desde", "2026-09", "--empresa", "SDC", dormir=_no_dormir) == 1
-    assert e.servidor.peticiones == []
-    [tramo] = _estado()["tramos"]
-    assert tramo["estado"] == "falló"
-    assert tramo["motivo"] == "Parte ventas, fila 1: la columna obligatoria kilos llegó vacía."
-    assert [etapa for etapa, _ in correos[0]] == ["VALIDACION"]
+    e.hana.datos["SDC"]["ventas"].append(fila("ventas", 2, fecha_contabilizacion=date(2026, 9, 11),
+                                              Kilos=Decimal("-3.25")))
+    assert _main(e, "--kilos-ventas", "--desde", "2026-09", "--empresa", "SDC", dormir=_no_dormir) == 0
+    [corrida] = e.servidor.corridas.values()
+    assert corrida.estado == "cerrada"
+    assert [f["kilos"] for f in corrida.filas("ventas")] == [None, "-3.250000"]
+    assert [t["estado"] for t in _estado()["tramos"]] == ["lleno"]
+    assert correos == []
+
+
+def test_repetir_un_mes_no_hace_dano(con_kilos, correos):
+    # A diferencia del histórico, no hay 409 por un rango ya cargado: se vuelven a escribir.
+    e = con_kilos
+    _datos_de_junio(e)
+    assert _main(e, "--kilos-ventas", "--desde", "2026-09", dormir=_no_dormir) == 0
+    assert _main(e, "--kilos-ventas", "--desde", "2026-09", dormir=_no_dormir) == 0
+    assert [c[4] for c in _corridas(e)] == ["cerrada"] * 4
+    assert [t["estado"] for t in _estado()["tramos"]] == ["lleno", "lleno"]
+
+
+def test_si_las_lineas_no_cuadran_con_mysql_falla_el_tramo_con_los_conteos(con_kilos, correos, caplog):
+    e = con_kilos
+    _datos_de_junio(e)
+    e.servidor.descuadres_kilos[("SGX", "2026-06-01")] = (2, 1)
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert _main(e, "--kilos-ventas", "--desde", "2026-06", "--empresa", "SGX", dormir=_no_dormir) == 1
+    assert [c[4] for c in _corridas(e)] == ["fallida", "cerrada", "cerrada"]
+    motivo = "La API rechazó la petición (422) en filas.ventas (sobran 2 y faltan 1 líneas)."
+    tramos = _estado()["tramos"]
+    assert [t["estado"] for t in tramos] == ["falló", "lleno", "vacío", "lleno"]
+    assert tramos[0]["motivo"] == motivo
+    assert f"Kilos de VENTAS SGX: fallidos: 2026-06-01 a 2026-06-30 ({motivo})." in caplog.messages
+    assert "Kilos de VENTAS SGX: 4 tramos; 2 llenos, 1 vacíos y 1 fallidos." in caplog.messages
+    assert correos == [[("API", f"VENTAS SGX 2026-06-01 a 2026-06-30: {motivo}")]]
 
 
 def test_si_falla_la_vpn_no_envia_nada(con_kilos, correos):
@@ -379,6 +446,8 @@ def test_la_nocturna_y_el_historico_no_mandan_kilos(entorno, correos):
 @pytest.mark.parametrize("argumentos, texto", [
     (["--kilos-ventas"], "--kilos-ventas necesita --desde AAAA-MM"),
     (["--kilos-ventas", "--desde", "2025-01-01"], "AAAA-MM"),
+    (["--kilos-ventas", "--desde", "2024-12"], "--kilos-ventas va desde 2025-01"),
+    (["--kilos-ventas", "--desde", "2024-12", "--hasta", "2025-03"], "--kilos-ventas va desde 2025-01"),
     (["--kilos-ventas", "--desde", "2025-01", "--hasta", "2026-11"], "ventana nocturna"),
     (["--kilos-ventas", "--desde", "2025-03", "--hasta", "2025-02"], "--hasta"),
     (["--kilos-ventas", "--historico-ventas", "--desde", "2025-01"], "not allowed"),

@@ -44,8 +44,8 @@ class Trabajo:
 
 _ORDEN = list(esquema.PARTES)
 
-# Contrato §4.3: las corridas que cierran con el COUNT(*) de SAP (conteo_sap). "kilos" es
-# PROVISIONAL (orden 015): su forma está en kilos.py.
+# Contrato §4.3: las corridas que cierran con el COUNT(*) de SAP (conteo_sap). La forma de
+# la corrida kilos (§10.5) está en kilos.py.
 TIPOS_CON_CONTEO = ("completa", "historico", "kilos")
 
 # Contrato §12: la API acepta ventana_desde de PRODUCCION desde este día hasta mañana.
