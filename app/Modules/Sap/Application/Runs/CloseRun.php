@@ -3,6 +3,7 @@
 namespace App\Modules\Sap\Application\Runs;
 
 use App\Modules\Sap\Application\Apply\ApplyCartera;
+use App\Modules\Sap\Application\Apply\ApplyKilos;
 use App\Modules\Sap\Application\Apply\ApplyMaestros;
 use App\Modules\Sap\Application\Apply\ApplyPedidos;
 use App\Modules\Sap\Application\Apply\ApplyProduccion;
@@ -21,6 +22,8 @@ use Illuminate\Support\Facades\DB;
  * that every declared batch and row arrived, then writes the dataset in
  * one transaction and records what was applied. Until this commits the
  * apps keep seeing the previous data; if anything fails, nothing changes.
+ * A kilos run (section 10.5) only writes kilos, and only when its lines are
+ * exactly the company's stored lines of the range.
  */
 final class CloseRun
 {
@@ -31,6 +34,7 @@ final class CloseRun
         private readonly ApplyVentas $ventas,
         private readonly ApplyPedidos $pedidos,
         private readonly ApplyProduccion $produccion,
+        private readonly ApplyKilos $kilos,
         private readonly CountRun $counts,
     ) {}
 
@@ -46,9 +50,10 @@ final class CloseRun
 
         // Under a lock on the run, so a late batch, its expiry or a second
         // close cannot change what is counted and applied. Returns the full
-        // parts that came empty, or the parts of a historical run whose SAP
-        // count differs, instead of applying anything.
-        [$empty, $mismatched] = DB::transaction(function () use ($run, $appliedAt, $batches, $declared, $sapCounts): array {
+        // parts that came empty, the parts of a historical or kilos run whose
+        // SAP count differs, or the lines of a kilos run that do not match
+        // MySQL, instead of applying anything.
+        [$empty, $mismatched, $unmatched] = DB::transaction(function () use ($run, $appliedAt, $batches, $declared, $sapCounts): array {
             $current = Run::query()->whereKey($run->id)->lockForUpdate()->firstOrFail();
 
             if ($current->estado !== RunState::Open) {
@@ -59,24 +64,31 @@ final class CloseRun
             $empty = array_keys(array_filter($rows, fn (int $count, string $part): bool => $count === 0 && $run->partes[$part] === PartMode::Full->value, ARRAY_FILTER_USE_BOTH));
 
             if ($empty !== []) {
-                return [$empty, []];
+                return [$empty, [], null];
             }
 
             // A historical month is loaded once (contract section 10.4): one
             // that does not match SAP is never applied, since it could not be
-            // loaded again.
-            $mismatched = $run->tipo === RunType::Historical
+            // loaded again. Neither is a kilos month (section 10.5), which
+            // would leave lines without their weight.
+            $mismatched = $run->tipo->isPastMonth()
                 ? array_keys(array_filter($rows, fn (int $count, string $part): bool => $count !== ($sapCounts[$part] ?? null), ARRAY_FILTER_USE_BOTH))
                 : [];
 
             if ($mismatched !== []) {
-                return [[], $mismatched];
+                return [[], $mismatched, null];
+            }
+
+            $unmatched = $run->tipo === RunType::Weights ? $this->kilos->unmatched($run) : null;
+
+            if ($unmatched !== null && ($unmatched['sobran'] > 0 || $unmatched['faltan'] > 0)) {
+                return [[], [], $unmatched];
             }
 
             DB::connection($run->conjunto->connection())->transaction(fn () => match ($run->conjunto) {
                 Dataset::Maestros => $this->maestros->apply($run, $appliedAt),
                 Dataset::Cartera => $this->cartera->apply($run, $appliedAt),
-                Dataset::Ventas => $this->ventas->apply($run, $appliedAt),
+                Dataset::Ventas => $run->tipo === RunType::Weights ? $this->kilos->apply($run) : $this->ventas->apply($run, $appliedAt),
                 Dataset::Pedidos => $this->pedidos->apply($run, $appliedAt),
                 Dataset::Produccion => $this->produccion->apply($run, $appliedAt),
             });
@@ -89,7 +101,7 @@ final class CloseRun
                 'aplicada_en' => $appliedAt,
             ]);
 
-            return [[], []];
+            return [[], [], null];
         });
 
         if ($empty !== []) {
@@ -98,6 +110,10 @@ final class CloseRun
 
         if ($mismatched !== []) {
             $this->failMismatched($run, $mismatched, $declared, $sapCounts ?? []);
+        }
+
+        if ($unmatched !== null) {
+            $this->failUnmatched($run, $unmatched);
         }
 
         return $run;
@@ -147,7 +163,7 @@ final class CloseRun
         if ($run->tipo->isWhole()) {
             $sapCounts = $this->counts($run, $input['conteo_sap'] ?? null, 'conteo_sap', $errors);
         } elseif (($input['conteo_sap'] ?? null) !== null) {
-            $errors['conteo_sap'] = 'Solo una corrida completa o historico envía el conteo de SAP.';
+            $errors['conteo_sap'] = 'Solo una corrida completa, historico o kilos envía el conteo de SAP.';
         }
 
         if ($errors !== []) {
@@ -194,8 +210,9 @@ final class CloseRun
     }
 
     /**
-     * A historical run whose rows do not match the SAP count fails (422)
-     * and its range stays empty, ready to be loaded again.
+     * A historical or kilos run whose rows do not match the SAP count fails
+     * (422) and changes nothing: a historical range stays empty, ready to be
+     * loaded again, and a kilos range keeps the weights it had.
      *
      * @param  list<string>  $parts
      * @param  array<string, int>  $rows
@@ -205,10 +222,34 @@ final class CloseRun
     {
         $run->finish(RunState::Failed, 'El conteo de SAP no cuadra con las filas recibidas: '.implode(', ', $parts).'.');
 
-        throw RobotRequestRejected::invalid('El conteo de SAP no cuadra con las filas recibidas; la carga histórica falló y el rango sigue vacío.', array_combine(
+        $outcome = $run->tipo === RunType::Weights
+            ? 'la corrida kilos falló y no se cambió ninguna línea'
+            : 'la carga histórica falló y el rango sigue vacío';
+
+        throw RobotRequestRejected::invalid("El conteo de SAP no cuadra con las filas recibidas; {$outcome}.", array_combine(
             array_map(fn (string $part): string => "conteo_sap.{$part}", $parts),
             array_map(fn (string $part): string => "SAP contó {$sapCounts[$part]} filas y llegaron {$rows[$part]}.", $parts),
         ));
+    }
+
+    /**
+     * A kilos run whose lines are not exactly the company's stored lines of
+     * the range fails (422) and writes no kilos. The answer gives only how
+     * many lines are extra and how many are missing, never their values.
+     *
+     * @param  array{sobran: int, faltan: int}  $unmatched
+     */
+    private function failUnmatched(Run $run, array $unmatched): never
+    {
+        ['sobran' => $extra, 'faltan' => $missing] = $unmatched;
+
+        $run->finish(RunState::Failed, "Las líneas no cuadran con las de MySQL en el rango: sobran {$extra}, faltan {$missing}.");
+
+        throw new RobotRequestRejected(422, 'Las líneas recibidas no cuadran con las de MySQL en el rango; la corrida kilos falló y no se cambió ninguna línea.', [
+            'sobran' => $extra,
+            'faltan' => $missing,
+            'errors' => ['filas.ventas' => ["Sobran {$extra} líneas que no están en MySQL y faltan {$missing} del rango que no llegaron."]],
+        ]);
     }
 
     /**

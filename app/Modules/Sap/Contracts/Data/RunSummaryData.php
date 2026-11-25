@@ -6,7 +6,7 @@ use Carbon\CarbonImmutable;
 
 /**
  * A run of the robot in short (docs/contrato-robot.md, section 4). type is
- * "completa", "solicitud" or "historico"; state is "abierta", "cerrada", "fallida" or
+ * "completa", "solicitud", "historico" or "kilos"; state is "abierta", "cerrada", "fallida" or
  * "vencida". startedAt is when the robot opened it.
  */
 final readonly class RunSummaryData

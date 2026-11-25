@@ -54,7 +54,7 @@ final class ReceiveBatch
             $this->refuse($run, ['rows' => 'Un lote trae entre 1 y 1.000 filas.']);
         }
 
-        $checked = BatchRows::check($part, $input['columns'] ?? null, $rows);
+        $checked = BatchRows::check($part, $input['columns'] ?? null, $rows, $run->columnsOf($part));
 
         if ($checked['errors'] !== []) {
             $this->refuse($run, $checked['errors']);
@@ -98,7 +98,7 @@ final class ReceiveBatch
             return [];
         }
 
-        $position = array_search($column, array_keys($part->columns()), true);
+        $position = array_search($column, array_keys($run->columnsOf($part)), true);
         $errors = [];
 
         foreach ($rows as $index => $row) {
@@ -184,7 +184,8 @@ final class ReceiveBatch
      */
     private function storeKeys(Run $run, Part $part, array $rows): void
     {
-        $hashes = array_map(fn (array $row): string => BatchRows::keyHash($part, $row), $rows);
+        $expected = $run->columnsOf($part);
+        $hashes = array_map(fn (array $row): string => BatchRows::keyHash($part, $row, $expected), $rows);
         $seen = [];
 
         foreach (array_chunk(array_unique($hashes), 500) as $chunk) {

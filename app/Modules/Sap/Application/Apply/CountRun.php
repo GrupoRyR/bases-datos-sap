@@ -4,7 +4,6 @@ namespace App\Modules\Sap\Application\Apply;
 
 use App\Modules\Sap\Contracts\Enums\Dataset;
 use App\Modules\Sap\Contracts\Enums\Part;
-use App\Modules\Sap\Domain\Runs\RunType;
 use App\Modules\Sap\Models\Run;
 use Illuminate\Support\Facades\DB;
 
@@ -43,9 +42,9 @@ final class CountRun
             ];
         }
 
-        // A historical load covers past months, not the day it ran: only the
-        // nightly run stands for the daily count (contract section 10.4).
-        if ($run->tipo === RunType::Historical) {
+        // A historical or kilos load covers a past month, not the day it ran:
+        // only the nightly run stands for the daily count (sections 10.4 and 10.5).
+        if ($run->tipo->isPastMonth()) {
             return $counts;
         }
 

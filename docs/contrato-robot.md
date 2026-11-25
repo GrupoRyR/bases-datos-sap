@@ -9,7 +9,7 @@ Versión 1. Lo implementan dos sesiones en paralelo: «Datos y API» (el servido
 | Empresa | Empresa de SAP | `SGX` (esquema `SEGUREX`), `SDC` (esquema `HBT_SDERIVADOS`) |
 | Conjunto | Grupo de datos con su propia base MySQL | `MAESTROS` (`maestros_sap`), `CARTERA` (`cartera_sap`), `VENTAS` (`ventas_sap`), `PEDIDOS` (también en `ventas_sap`, §11), `PRODUCCION` (también en `ventas_sap`, solo `SGX`, §12) |
 | Parte | Tabla lógica dentro de un conjunto (§5, §6, §10, §11 y §12) | `clientes`, `proveedores`, `direcciones`, `contactos`, `articulos`, `grupos_articulos`, `marcas`, `precios`, `vendedores`, `grupos_clientes`, `condiciones_pago`, `municipios`, `cartera`, `ventas`, `pedidos`, `produccion_terminado`, `produccion_carga_planta`, `produccion_costos`, `produccion_despiece`, `produccion_rutas`, `produccion_costeo_teorico` |
-| Corrida | Un envío completo del robot: iniciar, lotes y cerrar (§4) | Tipo `completa`, `solicitud` o `historico` (solo `VENTAS`, §10.4) |
+| Corrida | Un envío completo del robot: iniciar, lotes y cerrar (§4) | Tipo `completa`, `solicitud`, `historico` (solo `VENTAS`, §10.4) o `kilos` (solo `VENTAS`, §10.5) |
 | Lote | Hasta 1.000 filas de una sola parte | Numerados desde 1 en cada corrida |
 | Solicitud | Pedido de actualización de una app o del panel (§7) | Estados en §7.2 |
 
@@ -82,7 +82,7 @@ Una corrida lleva un conjunto de una empresa. Los datos de una corrida no se ven
 }
 ```
 
-- `tipo`: `completa` (la nocturna de las 02:00), `solicitud` (atiende solicitudes) o `historico` (carga manual de un mes de `VENTAS` anterior a la ventana nocturna, §10.4). `historico` solo existe en `VENTAS`: en los demás conjuntos, 422. Trae todas las partes en modo `todo`, como la `completa`, y no atiende solicitudes.
+- `tipo`: `completa` (la nocturna de las 02:00), `solicitud` (atiende solicitudes), `historico` (carga manual de un mes de `VENTAS` anterior a la ventana nocturna, §10.4) o `kilos` (llena solo `kilos` de las líneas de `VENTAS` ya cargadas de un mes anterior a la ventana nocturna, §10.5). `historico` y `kilos` solo existen en `VENTAS`: en los demás conjuntos, 422. Traen todas las partes en modo `todo`, como la `completa`, y no atienden solicitudes.
 - `partes`: cada parte que traerá la corrida y su modo:
   - `todo`: llegan todas las filas que hay en SAP. Al cerrar, las filas de esa parte y empresa que no llegaron quedan inactivas (`activo = false`). Nunca se borran.
   - `cambios`: llegan solo las filas que cambiaron (§5.1). Al cerrar, no se inactiva nada por ausencia.
@@ -90,8 +90,8 @@ Una corrida lleva un conjunto de una empresa. Los datos de una corrida no se ven
 - `empresa`: `SGX` o `SDC`. `PRODUCCION` es solo de `SGX`: una corrida de `SDC` da 422 (§12).
 - `solicitudes`: ids de las solicitudes que atiende (§7). Vacío en una corrida `completa` sin solicitudes. Cada id debe estar `tomada`, ser de la misma empresa y conjunto, y pedir partes incluidas en `partes`; si no, 422.
 - `fecha_corte`: solo en `CARTERA`; en los demás conjuntos, 422 (también en `PEDIDOS` y `PRODUCCION`, §11 y §12). En la `completa` nocturna, el día anterior; en una `solicitud`, hoy.
-- `ventana_desde`: solo en `VENTAS` y `PRODUCCION`, donde es obligatoria; en los demás conjuntos, 422 (también en `PEDIDOS`, §11). El primer día de la ventana que trajo la consulta, calculado en HANA (§10.1). En `VENTAS` va entre hoy menos 40 días y mañana (§10.1), salvo en una corrida `historico`, donde es el primer día de un mes (§10.4); en `PRODUCCION`, entre `2026-01-01` y mañana (§12.3).
-- `ventana_hasta`: el último día que trae una corrida `historico` (§10.4), obligatorio en ella. En cualquier otro tipo, 422.
+- `ventana_desde`: solo en `VENTAS` y `PRODUCCION`, donde es obligatoria; en los demás conjuntos, 422 (también en `PEDIDOS`, §11). El primer día de la ventana que trajo la consulta, calculado en HANA (§10.1). En `VENTAS` va entre hoy menos 40 días y mañana (§10.1), salvo en una corrida `historico` o `kilos`, donde es el primer día de un mes (§10.4 y §10.5); en `PRODUCCION`, entre `2026-01-01` y mañana (§12.3).
+- `ventana_hasta`: el último día que trae una corrida `historico` o `kilos` (§10.4 y §10.5), obligatorio en ellas. En cualquier otro tipo, 422.
 - `extraida_en`: cuándo terminó la consulta a SAP.
 
 Respuesta 201: `{"run_id": 42, "estado": "abierta", "abierta_hasta": "2026-10-23T11:11:30-05:00"}`.
@@ -112,7 +112,7 @@ Una corrida abierta que pasa **30 minutos sin recibir lotes** queda `vencida`, s
 ```
 
 - `batch`: entero desde 1, consecutivo en la corrida (no por parte). Hasta **1.000 filas** por lote y una sola parte.
-- `columns`: exactamente las columnas de la parte (§5, §6, §10, §11 o §12), en cualquier orden y sin repetir. Cada fila de `rows` es una lista con un valor por columna, en ese orden. **Excepciones de transición:** un lote de `VENTAS` puede omitir `ganancia_bruta` y `kilos` (§10); uno de `clientes` o `proveedores`, `contacto_principal`, y uno de `contactos`, `telefono_2` (§5.2). La API acepta ambos encabezados, con y sin esa columna, y guarda `null` cuando falta. Cualquier otra columna que falte o sobre sigue dando 422. Existen porque el robot del PC de TI se actualiza después del servidor y la corrida de las 02:00 no debe fallar entre los dos.
+- `columns`: exactamente las columnas de la parte (§5, §6, §10, §11 o §12), en cualquier orden y sin repetir; en una corrida `kilos`, solo las cinco de §10.5. Cada fila de `rows` es una lista con un valor por columna, en ese orden. **Excepciones de transición:** un lote de `VENTAS` puede omitir `ganancia_bruta` y `kilos` (§10); uno de `clientes` o `proveedores`, `contacto_principal`, y uno de `contactos`, `telefono_2` (§5.2). La API acepta ambos encabezados, con y sin esa columna, y guarda `null` cuando falta. Cualquier otra columna que falte o sobre sigue dando 422. Existen porque el robot del PC de TI se actualiza después del servidor y la corrida de las 02:00 no debe fallar entre los dos.
 - Valores: enteros como número JSON; montos como texto decimal con punto, hasta 2 decimales y sin separador de miles (`"1234567.89"`), con `-` si son negativos; cantidades y tasas (solo en `VENTAS`, `PEDIDOS` y `PRODUCCION`, §10, §11 y §12) igual que los montos pero con hasta 6 decimales (`"2.500000"`); booleanos como `true`/`false`; fechas `"AAAA-MM-DD"`; horas ISO 8601 con zona; texto hasta 4.000 caracteres, recortado; `null` si falta. Las columnas obligatorias no pueden llegar nulas ni vacías.
 - Una llave (§5, §6, §10, §11 y §12) no puede repetirse en la corrida, ni dentro del lote ni entre lotes.
 
@@ -123,7 +123,7 @@ Respuestas:
 | 201 | Lote nuevo aceptado | `{"batch": 3, "rows": 1000}` |
 | 200 | Mismo `batch` reenviado con el mismo cuerpo (mismo SHA-256) | `{"batch": 3, "rows": 1000, "duplicate": true}` |
 | 409 | Mismo `batch` con otro cuerpo, o corrida que ya no está abierta | `{"message": ..., "estado": "cerrada"}` |
-| 422 | Parte que no está en `partes`, columnas o valores inválidos, llave repetida, fila anterior a `ventana_desde` (§10.1 y §12.3) o posterior a `ventana_hasta` (§10.4) | `{"message": ..., "errors": {"rows.12.codigo": [...]}}`, máximo 50 llaves |
+| 422 | Parte que no está en `partes`, columnas o valores inválidos, llave repetida, fila anterior a `ventana_desde` (§10.1 y §12.3) o posterior a `ventana_hasta` (§10.4 y §10.5) | `{"message": ..., "errors": {"rows.12.codigo": [...]}}`, máximo 50 llaves |
 
 Un 422 no cierra la corrida: el robot corrige o la marca fallida (§4.4). Ante un error de red o un 5xx, el robot reenvía el mismo lote tal cual (mismo cuerpo, firma nueva) hasta 3 veces con espera creciente.
 
@@ -138,7 +138,7 @@ Un 422 no cierra la corrida: el robot corrige o la marca fallida (§4.4). Ante u
 ```
 
 - `batches` y `filas`: lo que el robot envió. Si la API no tiene todos los lotes del 1 al `batches` o las filas no cuadran, responde 409 con `{"faltan": [4, 5]}` y la corrida sigue abierta para que el robot los reenvíe.
-- `conteo_sap`: **obligatorio en una corrida `completa` o `historico`** y prohibido en las de `solicitud`. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y, solo en la `completa`, arma con él el conteo diario del plan §6. Por cada parte calcula cuatro números: `sap` (el `conteo_sap` que envió el robot), `recibidas` (todas las filas que llegaron en los lotes), `activas_recibidas` (las recibidas con `activo = true`; en una parte sin columna `activo`, como `direcciones`, `cartera`, `ventas`, `pedidos` o las de `PRODUCCION`, todas las recibidas cuentan como activas) y `activas_mysql` (las filas de la empresa en MySQL después de aplicar: las de `activo = true` en MAESTROS, todas las líneas en CARTERA, en VENTAS las de la ventana (§10.2) o, en una `historico`, las del rango (§10.4), todas las líneas en PEDIDOS (§11.3) y, en PRODUCCION, las de la ventana en las partes de movimiento y todas en los maestros (§12.3)). SAP envía también las filas inactivas, que quedan en MySQL con `activo = false`: por eso `activas_mysql` se compara con `activas_recibidas` y no con `recibidas`.
+- `conteo_sap`: **obligatorio en una corrida `completa`, `historico` o `kilos`** y prohibido en las de `solicitud`. Por cada parte, el `COUNT(*)` en SAP con los mismos filtros de la extracción, hecho en la misma conexión justo después de extraer. La API lo guarda y, solo en la `completa`, arma con él el conteo diario del plan §6. Por cada parte calcula cuatro números: `sap` (el `conteo_sap` que envió el robot), `recibidas` (todas las filas que llegaron en los lotes), `activas_recibidas` (las recibidas con `activo = true`; en una parte sin columna `activo`, como `direcciones`, `cartera`, `ventas`, `pedidos` o las de `PRODUCCION`, todas las recibidas cuentan como activas) y `activas_mysql` (las filas de la empresa en MySQL después de aplicar: las de `activo = true` en MAESTROS, todas las líneas en CARTERA, en VENTAS las de la ventana (§10.2) o, en una `historico` o `kilos`, las del rango (§10.4 y §10.5), todas las líneas en PEDIDOS (§11.3) y, en PRODUCCION, las de la ventana en las partes de movimiento y todas en los maestros (§12.3)). SAP envía también las filas inactivas, que quedan en MySQL con `activo = false`: por eso `activas_mysql` se compara con `activas_recibidas` y no con `recibidas`.
 - `cuadra` es verdadero cuando `sap == recibidas` **y** `activas_mysql == activas_recibidas`. En CARTERA, VENTAS, PEDIDOS y PRODUCCION `activas_recibidas == recibidas`, así que la regla no cambia.
 - Al cerrar, la API aplica en una transacción: inserta o actualiza por llave, pone `sincronizado_en` y, en las partes `todo`, inactiva lo que no llegó. En `CARTERA` reemplaza la cartera actual de la empresa y, en la corrida `completa`, guarda además la foto del día con `fecha_corte` (§6). En `VENTAS` reemplaza solo la ventana de la empresa (§10.2). En `PEDIDOS` reemplaza todos los pedidos de la empresa (§11.3). En `PRODUCCION` reemplaza la ventana en las partes de movimiento y todas las filas en los maestros (§12.3).
 - Una parte `todo` con 0 filas no se aplica y la corrida falla (422): una lectura vacía de SAP nunca vacía una tabla.
@@ -154,7 +154,7 @@ Respuesta 200:
 }
 ```
 
-`conteo` solo viene en una corrida `completa` o `historico`. En la `completa`, que no cuadre no hace fallar la corrida: queda registrado para el panel y cuenta contra los 14 días de estabilidad. En la `historico`, que `sap` no sea igual a `recibidas` sí la hace fallar sin aplicar nada (§10.4), y no entra en el conteo diario ni en la estabilidad.
+`conteo` solo viene en una corrida `completa`, `historico` o `kilos`. En la `completa`, que no cuadre no hace fallar la corrida: queda registrado para el panel y cuenta contra los 14 días de estabilidad. En la `historico` y la `kilos`, que `sap` no sea igual a `recibidas` sí la hace fallar sin aplicar nada (§10.4 y §10.5), y no entran en el conteo diario ni en la estabilidad.
 
 ### 4.4 Fallar: `POST /api/robot/v1/corridas/{run_id}/fallar`
 
@@ -327,7 +327,7 @@ Una sola parte, `ventas`, siempre en modo `todo`. Una fila por línea de factura
 
 - **Signo.** Las notas crédito llegan con `cantidad`, `costo_total`, `total`, `iva`, `ganancia_bruta` y `kilos` negativos: la suma de `total` es la venta neta. Los precios y costos unitarios van sin signo.
 - **`ganancia_bruta`** (`GrssProfit` de `INV1`/`RIN1`) es opcional en el encabezado del lote (§4.2): hasta que el robot la envíe, la API la guarda `null`. El margen es `SUM(ganancia_bruta) / SUM(total)`; `costo_total` no sirve para márgenes (plan §4).
-- **`kilos`**: el peso de la línea en kilos, con hasta 6 decimales y el signo de `cantidad`. La expresión de SAP la pone el robot: es la columna «Tot KG» de la consulta guardada «AnálisisVentas-1». Es opcional en el encabezado del lote (§4.2): hasta que el robot la envíe, la API la guarda `null`. Las líneas cargadas antes se llenan con la corrida `kilos`.
+- **`kilos`**: el peso de la línea en kilos, con hasta 6 decimales y el signo de `cantidad`. La expresión de SAP la pone el robot: es la columna «Tot KG» de la consulta guardada «AnálisisVentas-1». Es opcional en el encabezado del lote (§4.2): hasta que el robot la envíe, la API la guarda `null`. Las líneas cargadas antes, de 2025 en adelante, se llenan con la corrida `kilos` (§10.5).
 - **Llave.** `tipo_objeto` + `doc_entry` + `linea`, única por empresa. No puede repetirse en la corrida (§4.2).
 - **`id_pedido_app`** (`OINV.U_SGX_IdPedidoApp`) solo existe en `SGX`. Para `SDC` el robot cambia la expresión marcada `-- @id_pedido_app` por `CAST(NULL AS NVARCHAR(254))`, así que en Derivados siempre llega `null`. Las notas crédito también lo traen `null`.
 - Las apps leen la vista `v_ventas`, en `ventas_sap`.
@@ -363,6 +363,18 @@ Carga una vez, a mano, los meses anteriores a la ventana nocturna que `v_ventas`
 - **Cierre.** En una transacción, la API inserta las filas recibidas, con `sincronizado_en`, sin borrar nada. El mes queda completo o vacío, nunca a medias. Mientras la corrida está abierta, ninguna otra corrida de `VENTAS` de la empresa puede abrir (§4.1), así que el rango sigue vacío hasta el cierre.
 - **Nunca vacía.** Un cierre con 0 filas falla (§4.3) y el rango queda vacío.
 - **Conteo.** `conteo_sap.ventas` es el `COUNT(*)` del rango, en la misma conexión, justo después de extraer. **Si no es igual a las filas recibidas, el cierre falla (422 en `conteo_sap.ventas`), la corrida queda `fallida` y no se aplica nada:** un mes cargado a medias no se podría volver a cargar. Si cuadra, la respuesta trae `conteo` con `cuadra`, como en la `completa`; `activas_mysql` son las filas de la empresa en el rango. No entra en el conteo diario ni en la estabilidad.
+
+### 10.5 Corrida `kilos`
+
+Llena, a mano y mes por mes, `kilos` de las líneas de `VENTAS` que ya están cargadas y lo traen `null` porque llegaron antes de que el robot lo enviara (§10). La consulta es la de §10, con el filtro de `DocDate` del rango y solo las columnas de abajo. La corrida `completa`, las de `solicitud` y la `historico` no cambian.
+
+- **Rango.** Las mismas reglas de la `historico` (§10.4): `ventana_desde` es el día 1 de un mes, desde `2025-01-01`; `ventana_hasta` es un día de ese mismo mes, desde `ventana_desde`, y anterior al día en que empieza hoy la ventana nocturna (§10.1), calculado en el servidor con hoy en Bogotá. Si no, 422. Lleva `partes: {"ventas": "todo"}` y no atiende solicitudes.
+- **Rango ya cargado.** A diferencia de la `historico`, la apertura no mira si el rango tiene filas: no hay 409. Repetir un mes no hace daño: vuelve a escribir los mismos kilos.
+- **Lotes.** `columns` trae exactamente `tipo_objeto`, `doc_entry`, `linea`, `fecha_contabilizacion` y `kilos`, en cualquier orden. Cualquier otra columna, el encabezado completo de §10 incluido, o la falta de una de ellas da 422. Aquí `kilos` no se puede omitir del encabezado, pero su valor puede llegar `null`, como en la `completa`, si SAP no tiene peso para la línea: la API guarda `null`. Una fila con `fecha_contabilizacion` fuera del rango da 422, y la llave no puede repetirse en la corrida (§4.2).
+- **Cierre.** En una transacción, la API cambia **solo `kilos`** de las líneas de la empresa con esa llave y `fecha_contabilizacion` dentro del rango. No inserta, no borra y no toca ninguna otra columna, ni siquiera `sincronizado_en`: el resto del histórico congelado de Comisiones (§10.2) queda igual.
+- **Conteo.** `conteo_sap.ventas` es el `COUNT(*)` del rango, como en la `historico`. Si no es igual a las filas recibidas, el cierre falla (422 en `conteo_sap.ventas`), la corrida queda `fallida` y no cambia ninguna línea.
+- **Las líneas cuadran con MySQL.** Si alguna llave recibida no existe en MySQL para la empresa dentro del rango (`sobran`) o alguna línea de la empresa en el rango no llegó (`faltan`), el cierre falla (422 en `filas.ventas`, con `sobran` y `faltan` en el cuerpo), la corrida queda `fallida` y no cambia ninguna línea. El mensaje da solo esos dos conteos, nunca valores de SAP. Si cuadra, la respuesta trae `conteo` con `cuadra`, como en la `historico`.
+- **Panel.** No entra en el conteo diario ni en la estabilidad, y no cuenta como última actualización ni como última corrida del conjunto.
 
 ## 11. PEDIDOS
 
