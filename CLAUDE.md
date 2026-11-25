@@ -12,6 +12,11 @@ Central store of SAP Business One master data for the Grupo RYR apps (Segurex SG
 
 - Write only inside the zone your session owns (plan §9 and the table below). If you need anything else, stop and ask the user.
 - Never connect to SAP, the Sophos VPN, GoDaddy or any real database, and never send real email. Tests use fakes.
+- One exception, for the coordinator session only (user decision, 2026-11-25): it may run the robot's read-only modes against SAP on the TI PC, today `run_robot.py --catalogo` and `--diagnostico`, plus any later mode the robot documents as read-only (for example, reading the text of a saved query in `OUQR`).
+  - The robot raises the VPN and uses its own `.env`. The coordinator never reads the `.env` or any credential, and never connects to HANA with its own scripts or ad-hoc queries.
+  - Only outside the blocked slots and away from the 02:00 run. The robot's lock and slot checks are never bypassed, so never with `--forzar`.
+  - Nothing is written to SAP. The password columns of `OUSR` and the ID number, salary and bank fields of `OHEM` stay excluded.
+  - Each run is reported to the user with its outcome. Extracted data stays in `BASES_SAP_CSV_DIR`, never in the repo or in chat.
 - Never read or edit any `.env`. Propose `.env.example` lines; the user copies them in.
 - Never commit data extracted from SAP. CSV output lives outside the repo, in `BASES_SAP_CSV_DIR`.
 - Never select password columns from `OUSR`, nor ID number, salary or bank fields from `OHEM`. List columns one by one; never `SELECT *` on SAP tables.
