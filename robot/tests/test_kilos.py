@@ -16,6 +16,7 @@ import pytest
 
 import bloqueo
 import config
+import consultas
 import esquema
 import historico
 import kilos
@@ -51,10 +52,11 @@ def _ventas(e, empresa: str, *dias: date, kilos_por_fila: Decimal | None = Decim
 
 
 def _datos_de_junio(e) -> None:
-    # Segurex: nada en agosto (tramo vacío), una fila el 24/09 (ya es la ventana) y otra en mayo.
-    _ventas(e, "SGX", date(2026, 5, 31), date(2026, 6, 1), date(2026, 6, 30), date(2026, 7, 15),
+    # Derivados: nada en agosto (tramo vacío), una fila el 24/09 (ya es la ventana) y otra en
+    # mayo. Segurex también tiene ventas, pero el modo de kilos no lo consulta (solo SDC).
+    _ventas(e, "SDC", date(2026, 5, 31), date(2026, 6, 1), date(2026, 6, 30), date(2026, 7, 15),
             date(2026, 9, 23), date(2026, 9, 24))
-    _ventas(e, "SDC", date(2026, 6, 10), date(2026, 7, 10), date(2026, 8, 10), date(2026, 9, 10))
+    _ventas(e, "SGX", date(2026, 6, 10), date(2026, 7, 10), date(2026, 8, 10), date(2026, 9, 10))
 
 
 def _corridas(e):
@@ -108,6 +110,23 @@ def test_con_la_consulta_sin_kilos_un_tramo_tampoco_se_extrae(entorno):
     assert [etapa for etapa, _ in fallos] == ["CONFIGURACION"]
     assert [x.tipo for x in e.hana.de("SDC")] == ["ventana"]  # la consulta de kilos no corrió
     assert e.servidor.peticiones == []
+
+
+# --- Solo Derivados ------------------------------------------------------------------------
+
+
+def test_los_kilos_son_solo_de_derivados():
+    # La expresión de «Tot KG» es de «AnálisisVentas-1», de Derivados: en Segurex no está
+    # confirmado que NumInSale sean kilos. Una sola lista manda en las dos cosas.
+    assert kilos.EMPRESAS == consultas.EMPRESAS_CON_KILOS == ("SDC",)
+
+
+def test_ejecutar_no_corre_en_una_empresa_sin_kilos(entorno):
+    e = entorno
+    with pytest.raises(ValueError, match="solo de SDC"):
+        kilos.ejecutar(e.cfg, ["SDC", "SGX"], date(2026, 6, 1), None, api=e.cliente, robot_vpn=e.vpn,
+                       conectar=e.hana.conectar, ahora=e.ahora)
+    assert e.vpn.conexiones == 0 and e.hana.ejecutadas == [] and e.servidor.peticiones == []
 
 
 # --- La corrida kilos (contrato §10.5) -----------------------------------------------------
@@ -188,13 +207,14 @@ def test_kilos_llena_cada_tramo_en_orden(con_kilos, correos, caplog, monkeypatch
         assert _main(e, "--kilos-ventas", "--desde", "2026-06", dormir=_no_dormir) == 0
     revisar_fases(e.linea)
     assert e.vpn.conexiones == 1
-    # Empresa por empresa y del mes más viejo al más nuevo; agosto de Segurex no tiene ventas.
+    # Sin --empresa, solo Derivados, del mes más viejo al más nuevo; agosto no tiene ventas.
+    # Segurex ni se consulta: ahí no está confirmado que haya kilos.
     assert _corridas(e) == [
-        ("SGX", "kilos", "2026-06-01", "2026-06-30", "cerrada"),
-        ("SGX", "kilos", "2026-07-01", "2026-07-31", "cerrada"),
-        ("SGX", "kilos", "2026-09-01", "2026-09-23", "cerrada"),
-        *[("SDC", "kilos", desde, hasta, "cerrada") for desde, hasta in TRAMOS_JUNIO],
+        ("SDC", "kilos", "2026-06-01", "2026-06-30", "cerrada"),
+        ("SDC", "kilos", "2026-07-01", "2026-07-31", "cerrada"),
+        ("SDC", "kilos", "2026-09-01", "2026-09-23", "cerrada"),
     ]
+    assert not e.hana.de("SGX")
     for corrida in e.servidor.corridas.values():
         assert (corrida.conjunto, corrida.partes, corrida.solicitudes) == ("VENTAS", {"ventas": "todo"}, [])
         assert corrida.conteo_sap == corrida.total_filas()
@@ -211,39 +231,37 @@ def test_kilos_llena_cada_tramo_en_orden(con_kilos, correos, caplog, monkeypatch
     ]
     inicio = e.servidor.peticiones_a("iniciar")[0].datos
     assert {k: v for k, v in inicio.items() if k != "extraida_en"} == {
-        "conjunto": "VENTAS", "empresa": "SGX", "tipo": "kilos", "partes": {"ventas": "todo"},
+        "conjunto": "VENTAS", "empresa": "SDC", "tipo": "kilos", "partes": {"ventas": "todo"},
         "solicitudes": [], "fecha_corte": None,
         "ventana_desde": "2026-06-01", "ventana_hasta": "2026-06-30",
     }
-    # En HANA: la ventana una vez por empresa y, por tramo, la consulta de kilos con su rango
-    # y su conteo, en la misma conexión.
-    for empresa in ("SGX", "SDC"):
-        pasos = e.hana.de(empresa)
-        assert [p.tipo for p in pasos] == ["ventana"] + ["kilos", "contar"] * 4
-        assert len({p.conexion for p in pasos}) == 1
-        for (desde, hasta), (consulta, contar) in zip(TRAMOS_JUNIO, zip(pasos[1::2], pasos[2::2])):
-            rango = f"BETWEEN TO_DATE('{desde}', 'YYYY-MM-DD') AND TO_DATE('{hasta}', 'YYYY-MM-DD')"
-            assert consulta.sql.startswith('SELECT X."Tipo objeto", X."DocEntry", X."Línea", '
-                                           'X."Fecha contabilización", X."Kilos" FROM (')
-            assert rango in consulta.sql and consulta.sql in contar.sql
+    # En HANA: la ventana una vez y, por tramo, la consulta de kilos con su rango y su conteo,
+    # en la misma conexión.
+    pasos = e.hana.de("SDC")
+    assert [p.tipo for p in pasos] == ["ventana"] + ["kilos", "contar"] * 4
+    assert len({p.conexion for p in pasos}) == 1
+    for (desde, hasta), (consulta, contar) in zip(TRAMOS_JUNIO, zip(pasos[1::2], pasos[2::2])):
+        rango = f"BETWEEN TO_DATE('{desde}', 'YYYY-MM-DD') AND TO_DATE('{hasta}', 'YYYY-MM-DD')"
+        assert consulta.sql.startswith('SELECT X."Tipo objeto", X."DocEntry", X."Línea", '
+                                       'X."Fecha contabilización", X."Kilos" FROM (')
+        assert rango in consulta.sql and consulta.sql in contar.sql
     # En Derivados el id del pedido de la app va en NULL, como en la nocturna.
     assert 'CAST(T0."U_SGX_IdPedidoApp"' not in e.hana.de("SDC", "kilos")[0].sql
-    assert 'CAST(T0."U_SGX_IdPedidoApp"' in e.hana.de("SGX", "kilos")[0].sql
     # No escribe CSV.
     assert not any(evento[0] == "csv" for evento in e.linea)
     assert not (e.csv_dir / "VENTAS").exists()
-    # Resumen por empresa.
-    assert "Kilos de VENTAS SGX: 4 tramos; 3 llenos, 1 vacíos y 0 fallidos." in caplog.messages
-    assert ("Kilos de VENTAS SGX: llenos: 2026-06-01 a 2026-06-30, 2026-07-01 a 2026-07-31, "
+    # Resumen de la empresa.
+    assert "Kilos de VENTAS SDC: 4 tramos; 3 llenos, 1 vacíos y 0 fallidos." in caplog.messages
+    assert ("Kilos de VENTAS SDC: llenos: 2026-06-01 a 2026-06-30, 2026-07-01 a 2026-07-31, "
             "2026-09-01 a 2026-09-23.") in caplog.messages
-    assert "Kilos de VENTAS SGX: vacíos (sin ventas en SAP): 2026-08-01 a 2026-08-31." in caplog.messages
-    assert "Kilos de VENTAS SDC: 4 tramos; 4 llenos, 0 vacíos y 0 fallidos." in caplog.messages
+    assert "Kilos de VENTAS SDC: vacíos (sin ventas en SAP): 2026-08-01 a 2026-08-31." in caplog.messages
+    assert not any("Kilos de VENTAS SGX" in m for m in caplog.messages)
     assert correos == []
     estado = _estado()
     assert (estado["estado"], estado["modo"], estado["fallos"]) == ("OK", "kilos ventas", [])
-    assert [t["estado"] for t in estado["tramos"]] == ["lleno", "lleno", "vacío", "lleno"] + ["lleno"] * 4
+    assert [t["estado"] for t in estado["tramos"]] == ["lleno", "lleno", "vacío", "lleno"]
     assert "12.5" not in json.dumps(estado) and "Socio" not in json.dumps(estado)
-    assert len(renovaciones) >= 8
+    assert len(renovaciones) >= 4
     assert not (config.STATE_DIR / "robot.lock").exists()
 
 
@@ -266,13 +284,13 @@ def test_un_tramo_que_falla_no_frena_los_demas(con_kilos, correos, caplog):
     with caplog.at_level(logging.INFO, logger="bases_sap"):
         assert _main(e, "--kilos-ventas", "--desde", "2026-06", dormir=_no_dormir) == 1
     corridas = _corridas(e)
-    assert corridas[0] == ("SGX", "kilos", "2026-06-01", "2026-06-30", "fallida")
-    assert [c[4] for c in corridas[1:]] == ["cerrada"] * 6
+    assert corridas[0] == ("SDC", "kilos", "2026-06-01", "2026-06-30", "fallida")
+    assert [c[4] for c in corridas[1:]] == ["cerrada"] * 2
     [aviso] = correos
-    assert aviso == [("API", "VENTAS SGX 2026-06-01 a 2026-06-30: La API rechazó la petición (422) en rows.0.kilos.")]
-    assert ("Kilos de VENTAS SGX: fallidos: 2026-06-01 a 2026-06-30 (La API rechazó la petición (422) "
+    assert aviso == [("API", "VENTAS SDC 2026-06-01 a 2026-06-30: La API rechazó la petición (422) en rows.0.kilos.")]
+    assert ("Kilos de VENTAS SDC: fallidos: 2026-06-01 a 2026-06-30 (La API rechazó la petición (422) "
             "en rows.0.kilos.).") in caplog.messages
-    assert "Kilos de VENTAS SGX: 4 tramos; 2 llenos, 1 vacíos y 1 fallidos." in caplog.messages
+    assert "Kilos de VENTAS SDC: 4 tramos; 2 llenos, 1 vacíos y 1 fallidos." in caplog.messages
     estado = _estado()
     assert estado["estado"] == "ERROR" and estado["tramos"][0]["estado"] == "falló"
 
@@ -282,9 +300,9 @@ def test_un_409_al_iniciar_es_un_tramo_fallido_y_sigue_con_los_demas(con_kilos, 
     _datos_de_junio(e)
     e.servidor.programar_fallas("iniciar", status=409, datos={"message": "Ya tiene kilos."})
     assert _main(e, "--kilos-ventas", "--desde", "2026-06", "--empresa", "SDC", dormir=_no_dormir) == 1
-    assert [c[2] for c in _corridas(e)] == ["2026-07-01", "2026-08-01", "2026-09-01"]
+    assert [c[2] for c in _corridas(e)] == ["2026-07-01", "2026-09-01"]
     tramos = _estado()["tramos"]
-    assert [t["estado"] for t in tramos] == ["falló", "lleno", "lleno", "lleno"]
+    assert [t["estado"] for t in tramos] == ["falló", "lleno", "vacío", "lleno"]
     assert tramos[0]["motivo"] == "La API rechazó la petición (409)."
     assert "ya cargado" not in json.dumps(tramos)
 
@@ -294,8 +312,8 @@ def test_si_falla_la_red_al_iniciar_un_tramo_sigue_con_el_siguiente(con_kilos, c
     _datos_de_junio(e)
     e.servidor.programar_fallas("iniciar", veces=4, red=True)
     assert _main(e, "--kilos-ventas", "--desde", "2026-06", "--empresa", "SDC", dormir=lambda s: None) == 1
-    assert [c[2] for c in _corridas(e)] == ["2026-07-01", "2026-08-01", "2026-09-01"]
-    assert [t["estado"] for t in _estado()["tramos"]] == ["falló", "lleno", "lleno", "lleno"]
+    assert [c[2] for c in _corridas(e)] == ["2026-07-01", "2026-09-01"]
+    assert [t["estado"] for t in _estado()["tramos"]] == ["falló", "lleno", "vacío", "lleno"]
 
 
 def test_un_kilo_vacio_en_sap_se_envia_como_null(con_kilos, correos):
@@ -319,24 +337,24 @@ def test_repetir_un_mes_no_hace_dano(con_kilos, correos):
     _datos_de_junio(e)
     assert _main(e, "--kilos-ventas", "--desde", "2026-09", dormir=_no_dormir) == 0
     assert _main(e, "--kilos-ventas", "--desde", "2026-09", dormir=_no_dormir) == 0
-    assert [c[4] for c in _corridas(e)] == ["cerrada"] * 4
-    assert [t["estado"] for t in _estado()["tramos"]] == ["lleno", "lleno"]
+    assert [c[4] for c in _corridas(e)] == ["cerrada"] * 2
+    assert [t["estado"] for t in _estado()["tramos"]] == ["lleno"]
 
 
 def test_si_las_lineas_no_cuadran_con_mysql_falla_el_tramo_con_los_conteos(con_kilos, correos, caplog):
     e = con_kilos
     _datos_de_junio(e)
-    e.servidor.descuadres_kilos[("SGX", "2026-06-01")] = (2, 1)
+    e.servidor.descuadres_kilos[("SDC", "2026-06-01")] = (2, 1)
     with caplog.at_level(logging.INFO, logger="bases_sap"):
-        assert _main(e, "--kilos-ventas", "--desde", "2026-06", "--empresa", "SGX", dormir=_no_dormir) == 1
+        assert _main(e, "--kilos-ventas", "--desde", "2026-06", "--empresa", "SDC", dormir=_no_dormir) == 1
     assert [c[4] for c in _corridas(e)] == ["fallida", "cerrada", "cerrada"]
     motivo = "La API rechazó la petición (422) en filas.ventas (sobran 2 y faltan 1 líneas)."
     tramos = _estado()["tramos"]
     assert [t["estado"] for t in tramos] == ["falló", "lleno", "vacío", "lleno"]
     assert tramos[0]["motivo"] == motivo
-    assert f"Kilos de VENTAS SGX: fallidos: 2026-06-01 a 2026-06-30 ({motivo})." in caplog.messages
-    assert "Kilos de VENTAS SGX: 4 tramos; 2 llenos, 1 vacíos y 1 fallidos." in caplog.messages
-    assert correos == [[("API", f"VENTAS SGX 2026-06-01 a 2026-06-30: {motivo}")]]
+    assert f"Kilos de VENTAS SDC: fallidos: 2026-06-01 a 2026-06-30 ({motivo})." in caplog.messages
+    assert "Kilos de VENTAS SDC: 4 tramos; 2 llenos, 1 vacíos y 1 fallidos." in caplog.messages
+    assert correos == [[("API", f"VENTAS SDC 2026-06-01 a 2026-06-30: {motivo}")]]
 
 
 def test_si_falla_la_vpn_no_envia_nada(con_kilos, correos):
@@ -363,19 +381,19 @@ def test_duracion_estimada_de_los_kilos_es_por_segundos_y_mucho_menor_que_la_del
 
 
 def test_a_las_4_30_cabe_antes_de_la_franja_de_las_5_y_no_espera(con_kilos, correos):
-    # 21 meses de dos empresas: 2 minutos más 42 tramos de 10 s, 9 minutos; terminan antes de
-    # las 04:45, cuando empieza la franja de las 05:00. El histórico esperaba hasta las 06:16.
+    # 21 meses de Derivados: 2 minutos más 21 tramos de 10 s, 5 minutos y medio; terminan antes
+    # de las 04:45, cuando empieza la franja de las 05:00. El histórico esperaba hasta las 06:16.
     e = con_kilos
     reloj = _Reloj(datetime(2026, 10, 26, 4, 30, tzinfo=config.BOGOTA), e.vpn)
     assert _main(e, "--kilos-ventas", "--desde", "2025-01", ahora=reloj.ahora, dormir=reloj.dormir) == 0
-    assert kilos.duracion_estimada(21, 2) == timedelta(minutes=9)
+    assert kilos.duracion_estimada(21, 1) == timedelta(minutes=5, seconds=30)
     assert reloj.esperas == []
     assert e.vpn.conexiones == 1
 
 
 def test_si_no_alcanza_antes_de_la_siguiente_franja_espera_a_que_pase(con_kilos, correos, caplog):
-    # A las 04:40 los 9 minutos terminan a las 04:49, dentro de la franja de las 05:00: espera
-    # a que pase (05:16) y ahí sí caben antes de la de las 06:00 (05:45).
+    # A las 04:40 los 5 minutos y medio terminan a las 04:45:30, dentro de la franja de las
+    # 05:00: espera a que pase (05:16) y ahí sí caben antes de la de las 06:00 (05:45).
     e = con_kilos
     reloj = _Reloj(datetime(2026, 10, 26, 4, 40, tzinfo=config.BOGOTA), e.vpn)
     with caplog.at_level(logging.INFO, logger="bases_sap"):
@@ -383,7 +401,7 @@ def test_si_no_alcanza_antes_de_la_siguiente_franja_espera_a_que_pase(con_kilos,
                      dormir=reloj.dormir) == 0
     assert reloj.esperas == [36 * 60]
     assert e.vpn.conexiones == 1
-    assert any("La fase con VPN de los kilos tarda unos 9 minutos y no cabe antes de la franja" in m
+    assert any("La fase con VPN de los kilos tarda unos 5 minutos y no cabe antes de la franja" in m
                for m in caplog.messages)
 
 
@@ -393,7 +411,7 @@ def test_dentro_de_una_franja_espera_a_que_pase(con_kilos, correos):
     reloj = _Reloj(datetime(2026, 10, 26, 11, 50, tzinfo=config.BOGOTA), e.vpn)
     assert _main(e, "--kilos-ventas", "--desde", "2026-06", ahora=reloj.ahora, dormir=reloj.dormir) == 0
     assert reloj.esperas == [56 * 60]  # hasta las 12:46, pasadas las franjas de las 12:00 y 12:30
-    assert len(e.servidor.corridas) == 7
+    assert len(e.servidor.corridas) == 3
 
 
 def test_con_el_candado_tomado_espera_como_el_historico(con_kilos, correos, candado_ajeno):
@@ -409,7 +427,7 @@ def test_con_el_candado_tomado_espera_como_el_historico(con_kilos, correos, cand
 
     assert _main(e, "--kilos-ventas", "--desde", "2026-09", dormir=dormir) == 0
     assert esperas == [10, 10]
-    assert len(e.servidor.corridas) == 2
+    assert len(e.servidor.corridas) == 1
 
 
 def test_sin_candado_en_20_minutos_avisa_y_no_corre(con_kilos, correos, candado_ajeno):
@@ -452,6 +470,8 @@ def test_la_nocturna_y_el_historico_no_mandan_kilos(entorno, correos):
     (["--kilos-ventas", "--desde", "2025-03", "--hasta", "2025-02"], "--hasta"),
     (["--kilos-ventas", "--historico-ventas", "--desde", "2025-01"], "not allowed"),
     (["--completa", "--desde", "2025-01"], "--desde va solo con --carga-produccion, --historico-ventas o --kilos"),
+    (["--kilos-ventas", "--desde", "2025-01", "--empresa", "SGX"], "--kilos-ventas es solo de SDC"),
+    (["--kilos-ventas", "--desde", "2025-01", "--empresa", "SDC", "--empresa", "SGX"], "NumInSale"),
 ])
 def test_argumentos_invalidos_no_corren(entorno, capsys, argumentos, texto):
     with pytest.raises(SystemExit) as exc:

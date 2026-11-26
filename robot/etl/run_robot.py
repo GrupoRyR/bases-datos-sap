@@ -35,8 +35,9 @@ Uso:
                                                    # ventana nocturna (historico.py, contrato §10.4)
     python run_robot.py --kilos-ventas --desde 2025-01 [--hasta 2026-06]
                                                    # a mano: llena los kilos de VENTAS mes por mes,
-                                                   # como el histórico (kilos.py, orden 016). No
-                                                   # corre hasta que ventas.sql traiga los kilos
+                                                   # como el histórico (kilos.py, orden 016). Solo
+                                                   # SDC. No corre hasta que ventas.sql traiga los
+                                                   # kilos
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
@@ -307,8 +308,8 @@ def _parser() -> argparse.ArgumentParser:
                            "día antes de la ventana nocturna. Se corre una vez, a mano.")
     modo.add_argument("--kilos-ventas", action="store_true",
                       help="Kilos de VENTAS: llena kilos en los meses de --desde a --hasta, uno por corrida, "
-                           "como el histórico. Se corre a mano. No corre mientras queries/ventas/ventas.sql "
-                           "no traiga la columna de kilos.")
+                           "como el histórico. Se corre a mano y solo en SDC (sin --empresa, solo SDC). No "
+                           "corre mientras queries/ventas/ventas.sql no traiga la columna de kilos.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
@@ -399,6 +400,11 @@ def main(
         parser.error("--desde va solo con --carga-produccion, --historico-ventas o --kilos-ventas.")
     if args.hasta is not None and not por_meses:
         parser.error("--hasta va solo con --historico-ventas o --kilos-ventas.")
+    if args.kilos_ventas:
+        try:
+            empresas = kilos.empresas_de_kilos(args.empresa)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.carga_produccion:
         if args.desde is None:
             parser.error("--carga-produccion necesita --desde AAAA-MM-DD.")

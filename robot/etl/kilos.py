@@ -8,8 +8,9 @@ antes de la ventana nocturna, con la misma planeación y las mismas dos fases
                        kilos) y su COUNT(*) en la misma conexión
     FASE 2 - sin VPN:  por tramo, del más viejo al más nuevo y empresa por empresa, una
                        corrida `kilos` en la API
-Un tramo sin ventas en SAP no se envía (`vacío`); uno que falla (`falló`) no frena a los
-demás. Repetir un mes no hace daño: la API vuelve a escribir los mismos kilos (no hay 409
+Solo corre en las empresas de consultas.EMPRESAS_CON_KILOS (hoy Derivados): sin --empresa
+va solo con ellas y run_robot rechaza las demás. Un tramo sin ventas en SAP no se envía
+(`vacío`); uno que falla (`falló`) no frena a los demás. Repetir un mes no hace daño: la API vuelve a escribir los mismos kilos (no hay 409
 por un rango ya cargado, como en el histórico).
 
 No escribe CSV: los tramos quedan en memoria hasta que baja la VPN, como en el histórico,
@@ -47,11 +48,31 @@ log = obtener("kilos")
 # a HANA, y 1 a 2 s por tramo (SGX 22 tramos en 42 s, SDC 22 en 22 s). La consulta de kilos
 # es la misma de ventas con menos columnas, así que no debería tardar más. Va con holgura:
 # 2 minutos fijos (unas 8 veces lo medido, por si la VPN reintenta) y 10 s por tramo de cada
-# empresa (unas 5 veces el tramo más lento). Desde enero de 2025 da unos 9 minutos.
+# empresa (unas 5 veces el tramo más lento). Desde enero de 2025, solo Derivados, da unos 5
+# minutos y medio.
 SEGUNDOS_FIJOS = 120
 SEGUNDOS_POR_TRAMO = 10
 
 LLENO = "lleno"
+
+# Empresas donde corre el modo: las que tienen la expresión de kilos de verdad en ventas.sql.
+EMPRESAS = consultas.EMPRESAS_CON_KILOS
+
+
+def empresas_de_kilos(pedidas: list[str] | None) -> list[str]:
+    """Las empresas del modo: EMPRESAS si no se pidió ninguna; las pedidas si todas tienen
+    kilos. Lanza ValueError si alguna no los tiene (run_robot lo muestra como error del
+    parser y ejecutar() lo vuelve a exigir antes de subir la VPN)."""
+    if not pedidas:
+        return list(EMPRESAS)
+    sin_kilos = [e for e in pedidas if e not in EMPRESAS]
+    if sin_kilos:
+        raise ValueError(
+            f"--kilos-ventas es solo de {', '.join(EMPRESAS)}: los kilos salen de «AnálisisVentas-1» "
+            f"de Derivados y en {', '.join(sin_kilos)} no está confirmado que OITM.NumInSale sean "
+            "kilos (ventas.sql los trae en NULL)."
+        )
+    return list(dict.fromkeys(pedidas))
 
 # --- La corrida `kilos` (contrato §4.1 a §4.3 y §10.5) -------------------------------------
 # Su forma vive solo aquí:
@@ -176,9 +197,11 @@ def ejecutar(
 ) -> tuple[list[Tramo], list[tuple[str, str]]]:
     """Las dos fases de los kilos. Devuelve los tramos y los fallos como (etapa, mensaje).
 
+    Lanza ValueError, sin subir la VPN, si una empresa no tiene kilos (empresas_de_kilos).
     `renovar()` corre después de cada tramo extraído y enviado: run_robot renueva ahí el
     candado, como en el histórico.
     """
+    empresas_de_kilos(empresas)
     lista, fallos = historico.dos_fases(
         cfg, empresas, desde_mes, hasta_mes, trabajo=trabajo_kilos_ventas,
         enviar=lambda r: _enviar_tramo(api, r), extraer=_extraer_tramo, etapa="KILOS",

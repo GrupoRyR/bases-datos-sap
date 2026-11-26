@@ -162,6 +162,9 @@ def sql_rango(sql: str, desde: date, hasta: date) -> str:
 # expresión, una línea sin peso en SAP sí va en NULL: la API la guarda así (contrato §10.5).
 MARCADOR_KILOS = "@kilos"
 ALIAS_KILOS = "Kilos"
+# Empresas donde la expresión de kilos es de verdad: «AnálisisVentas-1» es de Derivados y en
+# Segurex no está confirmado que OITM.NumInSale sean kilos. El modo de kilos solo corre en ellas.
+EMPRESAS_CON_KILOS = ("SDC",)
 # El envoltorio la nombra entre comillas (X."Kilos"): en HANA eso distingue mayúsculas, así
 # que la etiqueta va exacta; solo AS puede ir en minúsculas.
 _RE_ALIAS_KILOS = re.compile(r'\b(?i:AS)\s+"' + re.escape(ALIAS_KILOS) + '"')
