@@ -120,7 +120,10 @@ SELECT
     -- (Quantity * OITM.NumInSale), con el signo de "Cantidad". Sin articulo o sin
     -- NumInSale sale NULL. Solo Derivados: en Segurex el robot cambia la expresion
     -- marcada por un NULL, porque alli no esta confirmado que NumInSale sean kilos.
-    CAST(X."Quantity" * T4."NumInSale" * X."Signo" AS DECIMAL(19, 6)) AS "Kilos" -- @kilos
+    CAST(X."Quantity" * T4."NumInSale" * X."Signo" AS DECIMAL(19, 6)) AS "Kilos", -- @kilos
+    -- Codigo de la direccion de envio del documento (ShipToCode de OINV/ORIN); en
+    -- Derivados es el CEDI. Lo tienen las dos empresas.
+    X."ShipToCode"                                             AS "Código envío"
 FROM (
     -- Facturas y notas debito: signo positivo.
     SELECT
@@ -128,7 +131,7 @@ FROM (
         T0."DocEntry", T0."DocNum", T0."DocSubType", T0."CANCELED", T0."DocStatus",
         T0."DocDate", T0."TaxDate", T0."SlpCode", T0."CardCode", T0."CardName",
         T0."NumAtCard", T0."Address2", T0."DiscPrcnt", T0."DocCur", T0."DocRate",
-        T0."Comments",
+        T0."Comments", T0."ShipToCode",
         T1."LineNum", T1."ItemCode", T1."Dscription", T1."Quantity", T1."Price",
         T1."PriceBefDi", T1."StockPrice", T1."LineTotal", T1."VatSum", T1."GrssProfit",
         T1."TaxOnly", T1."BaseType", T1."BaseRef",
@@ -146,7 +149,7 @@ FROM (
         T0."DocEntry", T0."DocNum", T0."DocSubType", T0."CANCELED", T0."DocStatus",
         T0."DocDate", T0."TaxDate", T0."SlpCode", T0."CardCode", T0."CardName",
         T0."NumAtCard", T0."Address2", T0."DiscPrcnt", T0."DocCur", T0."DocRate",
-        T0."Comments",
+        T0."Comments", T0."ShipToCode",
         T1."LineNum", T1."ItemCode", T1."Dscription", T1."Quantity", T1."Price",
         T1."PriceBefDi", T1."StockPrice", T1."LineTotal", T1."VatSum", T1."GrssProfit",
         T1."TaxOnly", T1."BaseType", T1."BaseRef",

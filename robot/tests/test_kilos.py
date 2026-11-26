@@ -29,9 +29,9 @@ from test_run_robot import _estado, _main
 from trabajos import Trabajo
 
 LLAVE_FECHA_KILOS = ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos"]
-EXPRESION_KILOS = 'CAST(X."Quantity" * T4."NumInSale" * X."Signo" AS DECIMAL(19, 6)) AS "Kilos" -- @kilos'
-# La columna de kilos de ventas.sql con su coma y su nota (la consulta de antes de la orden 016).
-_ADICION_KILOS = re.compile(r',\n(?:    --[^\n]*\n)*    CAST\([^\n]*\) AS "Kilos" -- @kilos(?=\n)')
+EXPRESION_KILOS = 'CAST(X."Quantity" * T4."NumInSale" * X."Signo" AS DECIMAL(19, 6)) AS "Kilos", -- @kilos'
+# La columna de kilos de ventas.sql con su nota (la consulta de antes de la orden 016).
+_ADICION_KILOS = re.compile(r'(?:    --[^\n]*\n)*    CAST\([^\n]*\) AS "Kilos", -- @kilos\n')
 
 
 @pytest.fixture
@@ -448,9 +448,10 @@ def test_sin_candado_en_20_minutos_avisa_y_no_corre(entorno, correos, candado_aj
 # --- La nocturna y el histórico mandan kilos de último -------------------------------------
 
 
-def test_la_nocturna_y_el_historico_mandan_kilos_de_ultimo(entorno, correos):
-    # Contrato §10: kilos es la última de las 36 columnas. En Segurex va null (la consulta
-    # trae un NULL); en Derivados, lo que da SAP.
+def test_la_nocturna_y_el_historico_mandan_kilos_y_codigo_envio_al_final(entorno, correos):
+    # Contrato §10: kilos y codigo_envio son las dos últimas de las 37 columnas. Los kilos van
+    # null en Segurex (la consulta trae un NULL) y en Derivados son lo que da SAP; el código de
+    # envío sale de SAP en las dos empresas.
     e = entorno
     assert _main(e, "--completa") == 0  # los datos de prueba traen ventas de octubre
     for empresa in ("SGX", "SDC"):
@@ -460,9 +461,11 @@ def test_la_nocturna_y_el_historico_mandan_kilos_de_ultimo(entorno, correos):
     assert [(c.empresa, c.tipo) for c in ventas] == [
         ("SGX", "completa"), ("SDC", "completa"), ("SGX", "historico"), ("SDC", "historico")]
     nombres = esquema.PARTES["ventas"].nombres
-    assert len(nombres) == 36 and nombres[-1] == "kilos"
+    assert len(nombres) == 37 and nombres[-2:] == ["kilos", "codigo_envio"]
     for corrida in ventas:
         assert {tuple(lote.columns) for lote in corrida.lotes.values()} == {tuple(nombres)}
+        envios = [f["codigo_envio"] for f in corrida.filas("ventas")]
+        assert envios and all(v.startswith("codigo_envio-") for v in envios)
         valores = [f["kilos"] for f in corrida.filas("ventas")]
         if corrida.empresa == "SGX":
             assert valores and all(v is None for v in valores)
@@ -471,7 +474,7 @@ def test_la_nocturna_y_el_historico_mandan_kilos_de_ultimo(entorno, correos):
         else:
             assert valores == ["-2.500000"]
     # La consulta de Segurex lleva el NULL; la de Derivados, la expresión.
-    for empresa, esperado in (("SGX", 'CAST(NULL AS DECIMAL(19, 6)) AS "Kilos" -- @kilos'),
+    for empresa, esperado in (("SGX", 'CAST(NULL AS DECIMAL(19, 6)) AS "Kilos", -- @kilos'),
                               ("SDC", EXPRESION_KILOS)):
         consultadas = [x for x in e.hana.de(empresa, parte="ventas") if x.tipo == "todo"]
         assert consultadas and all(esperado in x.sql for x in consultadas)

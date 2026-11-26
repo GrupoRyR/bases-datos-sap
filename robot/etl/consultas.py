@@ -157,9 +157,9 @@ def sql_rango(sql: str, desde: date, hasta: date) -> str:
 
 
 # Kilos de VENTAS (orden 016): la columna «Tot KG» de la consulta guardada «AnálisisVentas-1»
-# de Derivados (INV1.Quantity * OITM.NumInSale, y por -1 en RIN1) es la última del SELECT de
-# ventas.sql, con esta etiqueta, el signo de "Cantidad" y el marcador `-- @kilos` al final de
-# la línea. Una línea sin artículo o sin NumInSale va en NULL: la API la guarda así (contrato
+# de Derivados (INV1.Quantity * OITM.NumInSale, y por -1 en RIN1) va en el SELECT de
+# ventas.sql antes del código de envío, con esta etiqueta, el signo de "Cantidad" y el
+# marcador `-- @kilos` al final de la línea (después de la coma). Una línea sin artículo o sin NumInSale va en NULL: la API la guarda así (contrato
 # §10 y §10.5). Si la consulta no trae la columna, todo lo que necesita kilos falla cerrado
 # (exigir_kilos y sql_ventas): nunca se envían kilos inventados.
 MARCADOR_KILOS = "@kilos"
@@ -171,7 +171,7 @@ EMPRESAS_CON_KILOS = ("SDC",)
 KILOS_NULO = "CAST(NULL AS DECIMAL(19, 6))"
 KILOS_VENTAS = CampoMarcado(
     MARCADOR_KILOS, ALIAS_KILOS, KILOS_NULO,
-    re.compile(r'CAST\([^\n]*?\)(?=[ \t]+AS[ \t]+"Kilos"[ \t]*--[ \t]*@kilos)'),
+    re.compile(r'CAST\([^\n]*?\)(?=[ \t]+AS[ \t]+"Kilos",?[ \t]*--[ \t]*@kilos)'),
     EMPRESAS_CON_KILOS,
 )
 # El envoltorio la nombra entre comillas (X."Kilos"): en HANA eso distingue mayúsculas, así

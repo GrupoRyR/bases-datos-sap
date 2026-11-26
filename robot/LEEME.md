@@ -121,7 +121,8 @@ Cada corrida de VENTAS (la nocturna o una solicitud) trae el mes en curso más l
 - El primer día de la ventana (`ventana_desde`) lo calcula HANA con la misma expresión de la consulta, en la misma conexión, antes y después de extraer. Nunca se usa el reloj del PC.
 - Si cambió entre las dos lecturas (la extracción cruzó la medianoche), se repite la extracción una vez; si vuelve a cambiar, esa corrida falla.
 - Si alguna fila trae una `fecha_contabilizacion` anterior a `ventana_desde`, la corrida falla antes de enviar nada.
-- `kilos` es la última columna: el peso de la línea, con el signo de `cantidad` (ver «Kilos de ventas»). Solo Derivados lo trae; en Segurex va vacío.
+- `kilos` es el peso de la línea, con el signo de `cantidad` (ver «Kilos de ventas»). Solo Derivados lo trae; en Segurex va vacío.
+- `codigo_envio` es la última columna: el código de la dirección de envío del documento (`ShipToCode` de la factura o la nota crédito; en Derivados, el CEDI). Lo traen las dos empresas; va vacío si el documento no tiene dirección de envío.
 - `ganancia_bruta` es la ganancia de cada línea según SAP (`GrssProfit`), con signo negativo en las notas crédito. No se calcula con el costo de inventario (`costo_total`), que se desvía cerca de 0,5 % de lo que muestra SAP. Para revisarla, suma `ganancia_bruta` del 01 al 16/11/2026 en el CSV de `VENTAS\<empresa>`: SGX 294.070.622,59 y SDC 604.768.247,13.
 - Si la extracción falla antes de que HANA dé la ventana (por ejemplo, no conectó la VPN), la corrida no se puede abrir para marcarla fallida: el fallo va al correo y sus solicitudes vencen solas en la app.
 
@@ -160,7 +161,7 @@ Llena la columna `kilos` de VENTAS en los meses que la app ya tiene. La corre **
 .venv\Scripts\python.exe etl\run_robot.py --kilos-ventas --desde 2025-01
 ```
 
-Los kilos son la columna «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados: en las facturas, `INV1.Quantity * OITM.NumInSale`, y en las notas crédito lo mismo por `-1`. En `queries\ventas\ventas.sql` es la última columna, `"Kilos"`, marcada con `-- @kilos`: `X."Quantity" * T4."NumInSale" * X."Signo"`, con el mismo signo de `cantidad` y `OITM` unida por el artículo sin perder líneas. Una línea sin artículo o sin `NumInSale` sale con `kilos` vacío. La nocturna, las solicitudes y el histórico también la envían.
+Los kilos son la columna «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados: en las facturas, `INV1.Quantity * OITM.NumInSale`, y en las notas crédito lo mismo por `-1`. En `queries\ventas\ventas.sql` es la columna `"Kilos"`, antes del código de envío, marcada con `-- @kilos`: `X."Quantity" * T4."NumInSale" * X."Signo"`, con el mismo signo de `cantidad` y `OITM` unida por el artículo sin perder líneas. Una línea sin artículo o sin `NumInSale` sale con `kilos` vacío. La nocturna, las solicitudes y el histórico también la envían.
 
 - **Solo Derivados.** En Segurex no está confirmado que `NumInSale` sean kilos, así que el robot cambia la expresión marcada por un `NULL` y Segurex envía `kilos` vacío.
 - **Puede no cuadrar con el informe de SAP.** «AnálisisVentas-1» solo toma las facturas de las series 4, 118 y 120; `ventas.sql` no filtra por serie (trae todas las facturas y notas crédito). Los totales de kilos de un mes pueden ser mayores que los del informe.
