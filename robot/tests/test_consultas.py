@@ -133,6 +133,9 @@ def test_leer_parte_de_las_demas_partes_queda_igual():
 
 VENTAS_REAL = Path(__file__).resolve().parent.parent / "queries" / "ventas" / "ventas.sql"
 EXPRESION_SGX = 'CAST(T0."U_SGX_IdPedidoApp" AS NVARCHAR(254))'
+# «Tot KG» de «AnálisisVentas-1» (Derivados), adaptada a ventas.sql (contrato §10).
+EXPRESION_KILOS = 'CAST(X."Quantity" * T4."NumInSale" * X."Signo" AS DECIMAL(19, 6))'
+KILOS_NULO = "CAST(NULL AS DECIMAL(19, 6))"
 
 
 def _ventas_real() -> str:
@@ -168,13 +171,55 @@ def test_ventas_sin_un_solo_marcador_reconocible_falla(texto: str, empresa: str)
         consultas.sql_id_pedido_app(texto, empresa)
 
 
+def test_ventas_de_derivados_trae_los_kilos_y_el_id_de_la_app_en_null():
+    sql = _ventas_real()
+    cambiada = consultas.sql_ventas(sql, "SDC")
+    assert f'{EXPRESION_KILOS} AS "Kilos" -- @kilos' in cambiada
+    # Solo cambia el id del pedido de la app: los kilos son de verdad en Derivados.
+    assert cambiada == consultas.sql_id_pedido_app(sql, "SDC")
+
+
+def test_ventas_de_segurex_trae_el_id_de_la_app_y_los_kilos_en_null():
+    sql = _ventas_real()
+    cambiada = consultas.sql_ventas(sql, "SGX")
+    assert f'{KILOS_NULO} AS "Kilos" -- @kilos' in cambiada
+    # NumInSale solo queda nombrado en comentarios: en Segurex no se lee.
+    assert "NumInSale" not in re.sub(r"--[^\n]*", "", cambiada)
+    assert EXPRESION_SGX in cambiada
+    # Solo cambia esa expresión: el resto del archivo queda igual.
+    assert cambiada == sql.replace(EXPRESION_KILOS, KILOS_NULO)
+
+
+def test_las_empresas_con_kilos_son_las_de_la_consulta_de_ventas():
+    assert consultas.EMPRESAS_CON_KILOS == ("SDC",)
+    assert consultas.KILOS_NULO == KILOS_NULO
+
+
+_ID_VENTAS = 'CAST(T0."U" AS NVARCHAR(254)) AS "IdPedidoApp" -- @id_pedido_app\n'
+
+
+@pytest.mark.parametrize("empresa", ["SGX", "SDC"])
+@pytest.mark.parametrize("texto", [
+    "SELECT " + _ID_VENTAS + 'FROM "OINV" T0',                                  # sin kilos
+    "SELECT " + _ID_VENTAS + 'CAST(1 AS DECIMAL(19, 6)) AS "Kilos"\nFROM "OINV" T0',  # sin marcador
+    "SELECT " + _ID_VENTAS + 'X."K" AS "Kilos" -- @kilos\nFROM "OINV" T0',      # sin CAST
+    "SELECT " + _ID_VENTAS + 'CAST(1 AS DECIMAL(19, 6)) AS "Otro" -- @kilos\nFROM "OINV" T0',
+    "SELECT " + _ID_VENTAS + 'CAST(1 AS DECIMAL(19, 6)) AS "Kilos" -- @kilos\n'
+    'UNION ALL SELECT CAST(1 AS DECIMAL(19, 6)) AS "Kilos" -- @kilos\nFROM "OINV" T0',
+])
+def test_ventas_sin_un_solo_marcador_de_kilos_reconocible_falla(texto: str, empresa: str):
+    with pytest.raises(ConfigError, match="@kilos"):
+        consultas.sql_ventas(texto, empresa)
+
+
 @pytest.mark.parametrize("codigo", ["SGX", "SDC"])
 def test_leer_parte_de_ventas_pone_lo_de_cada_empresa(monkeypatch, codigo: str):
     monkeypatch.setattr(config, "QUERIES_DIR", VENTAS_REAL.parent.parent)
     empresa = EmpresaHana(codigo, "usuario", "clave", "ESQUEMA")
     sql = consultas.leer_parte(PARTES["ventas"], empresa)
     assert (EXPRESION_SGX in sql) == (codigo == "SGX")
-    assert sql == consultas.sql_id_pedido_app(_ventas_real().rstrip(), codigo)
+    assert (EXPRESION_KILOS in sql) == (codigo == "SDC")
+    assert sql == consultas.sql_ventas(_ventas_real().rstrip(), codigo)
 
 
 def test_leer_parte_de_ventas_sin_marcador_no_corre():
@@ -384,7 +429,7 @@ def _sqlite_con_ventas() -> sqlite3.Connection:
         CREATE TABLE "RIN1" ({lineas});
         CREATE TABLE "OCRD" ("CardCode" TEXT, "LicTradNum" TEXT, "City" TEXT, "GroupCode" INT);
         CREATE TABLE "OSLP" ("SlpCode" INT, "SlpName" TEXT);
-        CREATE TABLE "OITM" ("ItemCode" TEXT, "ItmsGrpCod" INT, "FirmCode" INT);
+        CREATE TABLE "OITM" ("ItemCode" TEXT, "ItmsGrpCod" INT, "FirmCode" INT, "NumInSale" REAL);
         CREATE TABLE "OITB" ("ItmsGrpCod" INT, "ItmsGrpNam" TEXT);
         CREATE TABLE "OMRC" ("FirmCode" INT, "FirmName" TEXT);
         CREATE TABLE "OCRG" ("GroupCode" INT, "GroupName" TEXT);
@@ -392,15 +437,18 @@ def _sqlite_con_ventas() -> sqlite3.Connection:
     return con
 
 
-def _documento(con: sqlite3.Connection, tabla: str, doc_entry: int, dia: date) -> None:
+def _documento(
+    con: sqlite3.Connection, tabla: str, doc_entry: int, dia: date, *, cantidad: float = 1,
+    articulo: str = "A1",
+) -> None:
     lineas = {"OINV": "INV1", "ORIN": "RIN1"}[tabla]
     valores = [doc_entry, doc_entry, "--", "N", "O", dia.isoformat(), dia.isoformat(), 1, "C1", "Cliente",
                None, None, 0, "COP", 1]
     extra = [None] if tabla == "OINV" else []
     marcas = ", ".join("?" for _ in range(16 + len(extra)))
     con.execute(f'INSERT INTO "{tabla}" VALUES ({marcas})', valores + [None] + extra)
-    con.execute(f'INSERT INTO "{lineas}" VALUES (?, 0, \'A1\', \'Art\', 1, 10, 10, 5, 10, 1.9, 5, \'N\', -1, NULL)',
-                (doc_entry,))
+    con.execute(f'INSERT INTO "{lineas}" VALUES (?, 0, ?, \'Art\', ?, 10, 10, 5, 10, 1.9, 5, \'N\', -1, NULL)',
+                (doc_entry, articulo, cantidad))
 
 
 def test_la_consulta_con_el_rango_trae_solo_los_dias_del_rango_y_su_conteo_cuadra():
@@ -429,9 +477,11 @@ def test_la_consulta_con_el_rango_trae_solo_los_dias_del_rango_y_su_conteo_cuadr
     assert conteo == len(filas) == 4
 
 
-# --- Kilos de VENTAS (orden 016): la columna que falta y su consulta -------------------
+# --- Kilos de VENTAS (orden 016): la columna y su consulta ----------------------------
 
 CON_COMENTARIOS = '    X."Comments"                                               AS "Comentarios"\n'
+# La columna de kilos con su coma y su nota, para armar una copia SIN kilos (falla cerrado).
+_ADICION_KILOS = re.compile(r',\n(?:    --[^\n]*\n)*    CAST\([^\n]*\) AS "Kilos" -- @kilos(?=\n)')
 
 
 def _alias_del_select(sql: str) -> list[str]:
@@ -441,25 +491,30 @@ def _alias_del_select(sql: str) -> list[str]:
     return re.findall(r'AS "([^"]+)"', seleccion)
 
 
-def _con_kilos(sql: str, expresion: str = 'IFNULL(X."Quantity", 0) * X."Signo"') -> str:
-    """ventas.sql con una columna de kilos DE PRUEBA al final del SELECT. La expresión de
-    verdad («Tot KG» de «AnálisisVentas-1») todavía no existe: solo vive en las pruebas."""
-    assert sql.count(CON_COMENTARIOS) == 1
-    return sql.replace(CON_COMENTARIOS, CON_COMENTARIOS[:-1] + f',\n    {expresion} AS "Kilos"\n')
+def _sin_kilos(sql: str) -> str:
+    """ventas.sql SIN la columna de kilos, como estaba antes de la orden 016."""
+    sin, cambios = _ADICION_KILOS.subn("", sql)
+    assert cambios == 1 and sin.count(CON_COMENTARIOS) == 1
+    return sin
 
 
-def test_la_consulta_de_ventas_aun_no_trae_kilos_y_su_select_no_cambia():
+def test_la_consulta_de_ventas_trae_kilos_al_final_del_select():
     sql = _ventas()
-    with pytest.raises(ConfigError, match="kilos"):
-        consultas.exigir_kilos(sql)
-    # La nocturna, las solicitudes y el histórico siguen con las mismas columnas, en orden.
+    consultas.exigir_kilos(sql)
+    # La nocturna, las solicitudes y el histórico traen las columnas del esquema, en orden,
+    # con kilos de último.
     assert _alias_del_select(sql) == [c.hana for c in PARTES["ventas"].columnas]
-    assert consultas.ALIAS_KILOS not in _alias_del_select(sql)
+    assert _alias_del_select(sql)[-1] == consultas.ALIAS_KILOS
 
 
-def test_exigir_kilos_acepta_la_consulta_con_la_columna():
-    consultas.exigir_kilos(_con_kilos(_ventas()))
-    consultas.exigir_kilos(consultas.sql_id_pedido_app(_con_kilos(_ventas()), "SDC"))
+@pytest.mark.parametrize("empresa", ["SGX", "SDC"])
+def test_exigir_kilos_acepta_la_consulta_de_cada_empresa(empresa: str):
+    consultas.exigir_kilos(consultas.sql_ventas(_ventas(), empresa))
+
+
+def test_sin_la_columna_de_kilos_exigir_kilos_falla():
+    with pytest.raises(ConfigError, match="no trae la columna de kilos"):
+        consultas.exigir_kilos(_sin_kilos(_ventas()))
 
 
 @pytest.mark.parametrize("reemplazo", [
@@ -467,7 +522,7 @@ def test_exigir_kilos_acepta_la_consulta_con_la_columna():
     CON_COMENTARIOS[:-1] + ' -- , X."Peso" AS "Kilos"\n',          # al final de la última columna
 ])
 def test_exigir_kilos_no_cuenta_los_kilos_de_un_comentario(reemplazo: str):
-    sql = _ventas().replace(CON_COMENTARIOS, reemplazo)
+    sql = _sin_kilos(_ventas()).replace(CON_COMENTARIOS, reemplazo)
     assert 'AS "Kilos"' in sql
     with pytest.raises(ConfigError, match="kilos"):
         consultas.exigir_kilos(sql)
@@ -476,12 +531,14 @@ def test_exigir_kilos_no_cuenta_los_kilos_de_un_comentario(reemplazo: str):
 def test_exigir_kilos_pide_la_etiqueta_exacta():
     # El envoltorio la nombra entre comillas (X."Kilos"), y en HANA eso distingue mayúsculas.
     with pytest.raises(ConfigError, match="Kilos"):
-        consultas.exigir_kilos(_ventas().replace(CON_COMENTARIOS, CON_COMENTARIOS[:-1] + ',\n    1 AS "kilos"\n'))
+        consultas.exigir_kilos(
+            _sin_kilos(_ventas()).replace(CON_COMENTARIOS, CON_COMENTARIOS[:-1] + ',\n    1 AS "kilos"\n')
+        )
 
 
 def test_sql_kilos_sin_la_columna_no_corre():
     with pytest.raises(ConfigError, match="kilos"):
-        consultas.sql_kilos(_ventas(), *ENERO)
+        consultas.sql_kilos(_sin_kilos(_ventas()), *ENERO)
 
 
 def test_columnas_de_los_kilos_son_la_llave_la_fecha_y_kilos():
@@ -494,8 +551,13 @@ def test_columnas_de_los_kilos_son_la_llave_la_fecha_y_kilos():
     assert [c.requerida for c in columnas] == [True, True, True, True, False]
 
 
+def test_columnas_de_los_kilos_salen_del_esquema_de_ventas():
+    ventas = {c.nombre: c for c in PARTES["ventas"].columnas}
+    assert list(consultas.columnas_kilos()) == [ventas[c.nombre] for c in consultas.columnas_kilos()]
+
+
 def test_sql_kilos_trae_solo_la_llave_la_fecha_y_kilos_con_el_rango():
-    sql = _con_kilos(_ventas())
+    sql = consultas.sql_ventas(_ventas(), "SDC")
     kilos = consultas.sql_kilos(sql, *ENERO)
     assert kilos.startswith(
         'SELECT X."Tipo objeto", X."DocEntry", X."Línea", X."Fecha contabilización", X."Kilos" FROM (\n'
@@ -506,16 +568,48 @@ def test_sql_kilos_trae_solo_la_llave_la_fecha_y_kilos_con_el_rango():
     assert "X.*" not in kilos
 
 
-def test_sql_kilos_en_sqlite_trae_el_rango_con_signo_y_su_conteo_cuadra():
+def _ventas_con_kilos_en_sqlite() -> sqlite3.Connection:
+    """Una factura y una nota crédito de 2 unidades del artículo A1 (NumInSale 1,5), una
+    factura de un artículo que no está en OITM y otra fuera del rango."""
     con = _sqlite_con_ventas()
+    con.execute('INSERT INTO "OITM" VALUES (\'A1\', 10, 3, 1.5)')
     desde, hasta = ENERO
-    _documento(con, "OINV", 1, desde - timedelta(days=1))  # el día antes: no sale
-    _documento(con, "OINV", 2, desde)
-    _documento(con, "ORIN", 3, date(2025, 1, 20))  # nota crédito: kilos negativos
-    _documento(con, "OINV", 4, hasta + timedelta(days=1))  # el día después: no sale
-    sql = consultas.sql_kilos(_con_kilos(_ventas()), desde, hasta)
+    _documento(con, "OINV", 1, desde - timedelta(days=1), cantidad=2)  # el día antes: no sale
+    _documento(con, "OINV", 2, desde, cantidad=2)
+    _documento(con, "ORIN", 3, date(2025, 1, 20), cantidad=2)  # nota crédito: kilos negativos
+    _documento(con, "OINV", 4, date(2025, 1, 25), cantidad=2, articulo="ZZ")  # sin artículo en OITM
+    _documento(con, "OINV", 5, hasta + timedelta(days=1), cantidad=2)  # el día después: no sale
+    return con
+
+
+def test_ventas_de_derivados_en_sqlite_trae_los_kilos_con_signo_y_sin_perder_lineas():
+    con = _ventas_con_kilos_en_sqlite()
+    cursor = con.execute(consultas.sql_rango(consultas.sql_ventas(_ventas(), "SDC"), *ENERO))
+    nombres = [d[0] for d in cursor.description]
+    filas = [dict(zip(nombres, f)) for f in cursor.fetchall()]
+    assert nombres[-1] == "Kilos"
+    # Cantidad 2 por NumInSale 1,5: 3 kilos, negativos en la nota crédito. La línea cuyo
+    # artículo no está en OITM sale igual (LEFT JOIN), con kilos NULL.
+    assert [(f["DocEntry"], f["Cantidad"], f["Kilos"]) for f in filas] == [
+        (2, 2.0, 3.0), (3, -2.0, -3.0), (4, 2.0, None),
+    ]
+
+
+def test_ventas_de_segurex_en_sqlite_trae_las_mismas_lineas_con_kilos_null():
+    con = _ventas_con_kilos_en_sqlite()
+    cursor = con.execute(consultas.sql_rango(consultas.sql_ventas(_ventas(), "SGX"), *ENERO))
+    nombres = [d[0] for d in cursor.description]
+    filas = [dict(zip(nombres, f)) for f in cursor.fetchall()]
+    assert [(f["DocEntry"], f["Kilos"]) for f in filas] == [(2, None), (3, None), (4, None)]
+
+
+def test_sql_kilos_en_sqlite_trae_el_rango_con_signo_y_su_conteo_cuadra():
+    con = _ventas_con_kilos_en_sqlite()
+    sql = consultas.sql_kilos(consultas.sql_ventas(_ventas(), "SDC"), *ENERO)
     cursor = con.execute(sql)
     assert [d[0] for d in cursor.description] == [c.hana for c in consultas.columnas_kilos()]
-    assert cursor.fetchall() == [(13, 2, 0, "2025-01-01", 1.0), (14, 3, 0, "2025-01-20", -1.0)]
+    assert cursor.fetchall() == [
+        (13, 2, 0, "2025-01-01", 3.0), (14, 3, 0, "2025-01-20", -3.0), (13, 4, 0, "2025-01-25", None),
+    ]
     [(conteo,)] = con.execute(consultas.sql_contar(sql)).fetchall()
-    assert conteo == 2
+    assert conteo == 3

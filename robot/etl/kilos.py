@@ -17,9 +17,10 @@ No escribe CSV: los tramos quedan en memoria hasta que baja la VPN, como en el h
 y el respaldo de esas ventas ya es el CSV del histórico (VENTAS\\<EMPRESA>\\historico). Si
 un tramo falla, se vuelve a correr el comando.
 
-Mientras queries/ventas/ventas.sql no traiga la columna de kilos (la expresión de «Tot KG»
-de «AnálisisVentas-1»), el modo no corre: run_robot llama a revisar_consulta() antes de
-esperar el candado o subir la VPN, y cada tramo la vuelve a exigir (consultas.sql_kilos).
+Los kilos son la última columna de queries/ventas/ventas.sql, la expresión de «Tot KG» de
+«AnálisisVentas-1» (consultas.KILOS_VENTAS). Si la consulta no la trae, el modo no corre:
+run_robot llama a revisar_consulta() antes de esperar el candado o subir la VPN, y cada
+tramo la vuelve a exigir (consultas.sql_ventas y consultas.sql_kilos).
 """
 from __future__ import annotations
 

@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 
 import config
 from config import BOGOTA, EmpresaHana
-from esquema import CANTIDAD, PARTES, PRECIOS, Columna, Parte
+from esquema import PARTES, PRECIOS, Columna, Parte
 
 TROZO_SOCIOS = 500  # códigos por IN (...) en direcciones y contactos
 
@@ -36,13 +36,15 @@ _RE_ID_PEDIDO_APP = re.compile(
 
 @dataclass(frozen=True)
 class CampoMarcado:
-    """Expresión `CAST(...) AS "<alias>"` de un campo que solo existe en Segurex, con su
-    marcador al final de la línea; en las demás empresas se cambia por `nulo`."""
+    """Expresión `CAST(...) AS "<alias>"` de un campo que solo vale en algunas empresas
+    (`empresas`; por defecto, los campos de Segurex), con su marcador al final de la línea;
+    en las demás empresas se cambia por `nulo`."""
 
     marcador: str
     alias: str
     nulo: str
     patron: re.Pattern[str]
+    empresas: tuple[str, ...] = EMPRESAS_CON_CAMPOS_SGX
 
 
 def _campo_de_pedidos(marcador: str, alias: str, nulo: str) -> CampoMarcado:
@@ -155,16 +157,23 @@ def sql_rango(sql: str, desde: date, hasta: date) -> str:
 
 
 # Kilos de VENTAS (orden 016): la columna «Tot KG» de la consulta guardada «AnálisisVentas-1»
-# de Derivados va al final del SELECT de ventas.sql, donde está el marcador `-- @kilos`, con
-# esta etiqueta y signo negativo en las notas crédito, como "Cantidad". Hasta que la
-# expresión llegue, la consulta no la trae y todo lo que necesita kilos falla cerrado
-# (exigir_kilos): nunca se envían kilos inventados ni una columna entera en NULL. Ya con la
-# expresión, una línea sin peso en SAP sí va en NULL: la API la guarda así (contrato §10.5).
+# de Derivados (INV1.Quantity * OITM.NumInSale, y por -1 en RIN1) es la última del SELECT de
+# ventas.sql, con esta etiqueta, el signo de "Cantidad" y el marcador `-- @kilos` al final de
+# la línea. Una línea sin artículo o sin NumInSale va en NULL: la API la guarda así (contrato
+# §10 y §10.5). Si la consulta no trae la columna, todo lo que necesita kilos falla cerrado
+# (exigir_kilos y sql_ventas): nunca se envían kilos inventados.
 MARCADOR_KILOS = "@kilos"
 ALIAS_KILOS = "Kilos"
 # Empresas donde la expresión de kilos es de verdad: «AnálisisVentas-1» es de Derivados y en
-# Segurex no está confirmado que OITM.NumInSale sean kilos. El modo de kilos solo corre en ellas.
+# Segurex no está confirmado que OITM.NumInSale sean kilos. En las demás, la expresión marcada
+# cambia por KILOS_NULO (sql_ventas), y el modo de kilos solo corre en estas.
 EMPRESAS_CON_KILOS = ("SDC",)
+KILOS_NULO = "CAST(NULL AS DECIMAL(19, 6))"
+KILOS_VENTAS = CampoMarcado(
+    MARCADOR_KILOS, ALIAS_KILOS, KILOS_NULO,
+    re.compile(r'CAST\([^\n]*?\)(?=[ \t]+AS[ \t]+"Kilos"[ \t]*--[ \t]*@kilos)'),
+    EMPRESAS_CON_KILOS,
+)
 # El envoltorio la nombra entre comillas (X."Kilos"): en HANA eso distingue mayúsculas, así
 # que la etiqueta va exacta; solo AS puede ir en minúsculas.
 _RE_ALIAS_KILOS = re.compile(r'\b(?i:AS)\s+"' + re.escape(ALIAS_KILOS) + '"')
@@ -177,9 +186,8 @@ def _sin_comentarios(sql: str) -> str:
 def exigir_kilos(sql: str) -> None:
     """Falla con ConfigError si la consulta de ventas no trae la columna de kilos.
 
-    Busca `AS "Kilos"` en el código; los comentarios no cuentan (tampoco el marcador
-    `-- @kilos`, que solo dice dónde irá). El modo de kilos la llama antes de esperar el
-    candado o subir la VPN: sin la expresión de «Tot KG» no corre.
+    Busca `AS "Kilos"` en el código; los comentarios no cuentan. El modo de kilos la llama
+    antes de esperar el candado o subir la VPN: sin la expresión de «Tot KG» no corre.
     """
     if not _RE_ALIAS_KILOS.search(_sin_comentarios(sql)):
         raise config.ConfigError(
@@ -190,14 +198,14 @@ def exigir_kilos(sql: str) -> None:
 
 
 def columnas_kilos() -> tuple[Columna, ...]:
-    """Columnas de los kilos de VENTAS, en orden: la llave de la parte ventas, su columna de
-    la ventana (fecha_contabilizacion) y kilos (contrato §10.5). La llave y la fecha son
-    obligatorias; kilos puede llegar vacío si SAP no tiene peso para la línea."""
+    """Columnas de los kilos de VENTAS, las de la parte ventas, en su orden: la llave, su
+    columna de la ventana (fecha_contabilizacion) y kilos, la última (contrato §10.5). La
+    llave y la fecha son obligatorias; kilos puede llegar vacío si SAP no tiene peso."""
     ventas = PARTES["ventas"]
-    propias = tuple(
-        c for c in ventas.columnas if c.nombre in ventas.llave or c.nombre == ventas.columna_ventana
+    return tuple(
+        c for c in ventas.columnas
+        if c.nombre in ventas.llave or c.nombre in (ventas.columna_ventana, "kilos")
     )
-    return (*propias, Columna(ALIAS_KILOS, "kilos", CANTIDAD))
 
 
 def sql_kilos(sql: str, desde: date, hasta: date) -> str:
@@ -280,44 +288,61 @@ def sql_cuentas(sql: str, cuentas: tuple[str, ...]) -> str:
 
 
 def sql_id_pedido_app(sql: str, empresa: str) -> str:
-    """La consulta de ventas para una empresa: tal cual en Segurex; en las demás, con
-    la expresión marcada `-- @id_pedido_app` cambiada por un NULL (contrato §10).
+    """La consulta de ventas con solo el id del pedido de la app de la empresa: tal cual en
+    Segurex; en las demás, con la expresión marcada `-- @id_pedido_app` cambiada por un NULL
+    (contrato §10). Los kilos no cambian: la consulta de una empresa es sql_ventas.
 
     Si el marcador falta, se repite o la expresión no se reconoce, falla en vez de
     correr: sin él, Derivados pediría una columna que no tiene.
     """
-    return _sin_campos_sgx(sql, empresa, (ID_PEDIDO_APP_VENTAS,), "ventas")
+    return _campos_de_empresa(sql, empresa, (ID_PEDIDO_APP_VENTAS,), "ventas")
+
+
+def sql_ventas(sql: str, empresa: str) -> str:
+    """La consulta de ventas para una empresa (contrato §10): el id del pedido de la app
+    como en sql_id_pedido_app y los kilos tal cual en EMPRESAS_CON_KILOS; en las demás, la
+    expresión marcada `-- @kilos` cambia por KILOS_NULO.
+
+    Falla igual que sql_id_pedido_app si una de las dos marcas falta, se repite o su
+    expresión no se reconoce: sin la de kilos, Segurex leería NumInSale como kilos.
+    """
+    return _campos_de_empresa(sql, empresa, (ID_PEDIDO_APP_VENTAS, KILOS_VENTAS), "ventas")
 
 
 def sql_pedidos(sql: str, empresa: str) -> str:
     """La consulta de pedidos para una empresa: tal cual en Segurex; en las demás, con
     las expresiones marcadas `-- @id_pedido_app` y `-- @familia` cambiadas por un NULL
     (contrato §11.2). Falla igual que sql_id_pedido_app si una marca no se reconoce."""
-    return _sin_campos_sgx(sql, empresa, CAMPOS_SGX_PEDIDOS, "pedidos")
+    return _campos_de_empresa(sql, empresa, CAMPOS_SGX_PEDIDOS, "pedidos")
 
 
 def sql_de_empresa(parte: Parte, sql: str, empresa: str) -> str:
     """El texto de la consulta de una parte para una empresa, sin filtros: en VENTAS y
-    PEDIDOS, los campos que solo tiene Segurex cambian por NULL en las demás empresas."""
+    PEDIDOS, los campos que solo tiene Segurex cambian por NULL en las demás empresas, y en
+    VENTAS los kilos, que solo son de verdad en Derivados, cambian por NULL en Segurex."""
     if parte.conjunto == "VENTAS":
-        return sql_id_pedido_app(sql, empresa)
+        return sql_ventas(sql, empresa)
     if parte.conjunto == "PEDIDOS":
         return sql_pedidos(sql, empresa)
     return sql
 
 
-def _sin_campos_sgx(sql: str, empresa: str, campos: tuple[CampoMarcado, ...], que: str) -> str:
+def _campos_de_empresa(sql: str, empresa: str, campos: tuple[CampoMarcado, ...], que: str) -> str:
+    """La consulta con cada campo marcado cambiado por su NULL si la empresa no está en las
+    del campo. Todos los marcadores se revisan en todas las empresas."""
     cambiada = sql
     for campo in campos:
         marcadores = sql.count(campo.marcador)
-        cambiada, expresiones = campo.patron.subn(campo.nulo, cambiada)
+        nula, expresiones = campo.patron.subn(campo.nulo, cambiada)
         if marcadores != 1 or expresiones != 1:
             raise config.ConfigError(
                 f"La consulta de {que} debe tener exactamente una expresión "
                 f'CAST(...) AS "{campo.alias}" marcada con \'-- {campo.marcador}\' en la misma '
                 f"línea (marcadores: {marcadores}, expresiones: {expresiones}); no se corre."
             )
-    return sql if empresa in EMPRESAS_CON_CAMPOS_SGX else cambiada
+        if empresa not in campo.empresas:
+            cambiada = nula
+    return cambiada
 
 
 def leer_parte(parte: Parte, empresa: EmpresaHana) -> str:
@@ -328,8 +353,8 @@ def leer_parte(parte: Parte, empresa: EmpresaHana) -> str:
     queda con la pública, por número (HANA_<EMPRESA>_LISTA_PRECIOS); `cartera` trae
     todas las cuentas y se queda con las de la empresa (HANA_<EMPRESA>_CUENTAS_CARTERA).
     `ventas` es la consulta del gestor: en Derivados cambia la expresión marcada del id
-    del pedido de la app por un NULL (sql_id_pedido_app); `pedidos` cambia ahí el id del
-    pedido de la app y la familia (sql_pedidos).
+    del pedido de la app por un NULL y en Segurex la de los kilos (sql_ventas); `pedidos`
+    cambia en Derivados el id del pedido de la app y la familia (sql_pedidos).
     """
     sql = sql_de_empresa(parte, leer(parte.consulta, empresa.esquema), empresa.codigo)
     if parte.nombre == PRECIOS:

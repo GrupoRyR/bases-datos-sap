@@ -1,13 +1,14 @@
 """Kilos de VENTAS (orden 016): run_robot.py --kilos-ventas, con fakes.
 
-La consulta real (queries/ventas/ventas.sql) todavía no trae la columna de kilos: sin ella
-el modo no corre. Las pruebas que sí lo corren usan una copia de robot/queries en tmp con
-una columna de kilos DE PRUEBA (`con_kilos`); la expresión de verdad no existe aún.
+La consulta real (queries/ventas/ventas.sql) trae la columna de kilos: la expresión de
+«Tot KG» de «AnálisisVentas-1» en Derivados y un NULL en Segurex. Las pruebas de falla
+cerrada usan una copia de robot/queries en tmp SIN esa columna (`sin_kilos`).
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -27,19 +28,20 @@ from test_historico import TRAMOS_JUNIO, _no_dormir, _Reloj
 from test_run_robot import _estado, _main
 from trabajos import Trabajo
 
-COMENTARIOS = '    X."Comments"                                               AS "Comentarios"\n'
 LLAVE_FECHA_KILOS = ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos"]
+EXPRESION_KILOS = 'CAST(X."Quantity" * T4."NumInSale" * X."Signo" AS DECIMAL(19, 6)) AS "Kilos" -- @kilos'
+# La columna de kilos de ventas.sql con su coma y su nota (la consulta de antes de la orden 016).
+_ADICION_KILOS = re.compile(r',\n(?:    --[^\n]*\n)*    CAST\([^\n]*\) AS "Kilos" -- @kilos(?=\n)')
 
 
 @pytest.fixture
-def con_kilos(entorno, tmp_path, monkeypatch):
-    """El entorno con una copia de robot/queries cuya consulta de ventas trae kilos de prueba."""
-    copia = tmp_path / "queries_con_kilos"
+def sin_kilos(entorno, tmp_path, monkeypatch):
+    """El entorno con una copia de robot/queries cuya consulta de ventas NO trae kilos."""
+    copia = tmp_path / "queries_sin_kilos"
     shutil.copytree(QUERIES, copia)
     ventas = copia / "ventas" / "ventas.sql"
-    texto = ventas.read_text(encoding="utf-8")
-    assert texto.count(COMENTARIOS) == 1
-    texto = texto.replace(COMENTARIOS, COMENTARIOS[:-1] + ',\n    X."Quantity" * 0 AS "Kilos"\n')
+    texto, cambios = _ADICION_KILOS.subn("", ventas.read_text(encoding="utf-8"))
+    assert cambios == 1 and 'AS "Kilos"' not in texto
     ventas.write_bytes(texto.encode("utf-8"))
     monkeypatch.setattr(config, "QUERIES_DIR", copia)
     return entorno
@@ -74,9 +76,9 @@ def _sin_candado_ni_espera(monkeypatch) -> None:
 
 
 def test_sin_la_columna_de_kilos_sale_con_2_antes_de_esperar_o_subir_la_vpn(
-    entorno, correos, candado_ajeno, monkeypatch, caplog
+    sin_kilos, correos, candado_ajeno, monkeypatch, caplog
 ):
-    e = entorno
+    e = sin_kilos
     _datos_de_junio(e)
     candado_ajeno()  # ni siquiera espera a que otro proceso suelte el candado
     _sin_candado_ni_espera(monkeypatch)
@@ -90,23 +92,24 @@ def test_sin_la_columna_de_kilos_sale_con_2_antes_de_esperar_o_subir_la_vpn(
     assert any("no trae la columna de kilos" in m for m in caplog.messages)
 
 
-def test_sin_la_columna_de_kilos_tampoco_corre_con_forzar_ni_sin_vpn(entorno, correos, monkeypatch):
-    e = entorno
+def test_sin_la_columna_de_kilos_tampoco_corre_con_forzar_ni_sin_vpn(sin_kilos, correos, monkeypatch):
+    e = sin_kilos
     _sin_candado_ni_espera(monkeypatch)
     assert _main(e, "--kilos-ventas", "--desde", "2026-06", "--forzar", "--sin-vpn", dormir=_no_dormir) == 2
     assert e.hana.ejecutadas == [] and e.servidor.peticiones == []
 
 
-def test_con_la_consulta_sin_kilos_un_tramo_tampoco_se_extrae(entorno):
-    # Si la consulta cambiara entre la revisión y la extracción, cada tramo la vuelve a exigir.
-    e = entorno
+def test_con_la_consulta_sin_kilos_un_tramo_tampoco_se_extrae(sin_kilos):
+    # Si la consulta cambiara entre la revisión y la extracción, cada tramo la vuelve a exigir:
+    # sin la expresión marcada `-- @kilos` la consulta de la empresa ni se arma.
+    e = sin_kilos
     _datos_de_junio(e)
     tramos, fallos = kilos.ejecutar(
         e.cfg, ["SDC"], date(2026, 6, 1), date(2026, 6, 1), api=e.cliente, robot_vpn=e.vpn,
         conectar=e.hana.conectar, ahora=e.ahora,
     )
     assert [t.estado for t in tramos] == ["falló"]
-    assert "no trae la columna de kilos" in (tramos[0].motivo or "")
+    assert '"Kilos"' in (tramos[0].motivo or "") and "@kilos" in (tramos[0].motivo or "")
     assert [etapa for etapa, _ in fallos] == ["CONFIGURACION"]
     assert [x.tipo for x in e.hana.de("SDC")] == ["ventana"]  # la consulta de kilos no corrió
     assert e.servidor.peticiones == []
@@ -190,14 +193,14 @@ def test_si_el_conteo_de_sap_no_cuadra_el_cierre_falla_y_la_corrida_queda_fallid
     assert escenario.servidor.corridas[run_id].estado == "fallida"
 
 
-# --- run_robot.py --kilos-ventas con la columna (de prueba) --------------------------------
+# --- run_robot.py --kilos-ventas con la columna de ventas.sql ------------------------------
 # AHORA es el 26/10/2026 a las 02:00: HANA da la ventana desde el 24/09, así que con
 # --desde 2026-06 los tramos son junio, julio, agosto y septiembre hasta el 23 (el último,
 # parcial).
 
 
-def test_kilos_llena_cada_tramo_en_orden(con_kilos, correos, caplog, monkeypatch):
-    e = con_kilos
+def test_kilos_llena_cada_tramo_en_orden(entorno, correos, caplog, monkeypatch):
+    e = entorno
     _datos_de_junio(e)
     renovaciones: list[bool] = []
     original = bloqueo.Bloqueo.renovar
@@ -245,8 +248,10 @@ def test_kilos_llena_cada_tramo_en_orden(con_kilos, correos, caplog, monkeypatch
         assert consulta.sql.startswith('SELECT X."Tipo objeto", X."DocEntry", X."Línea", '
                                        'X."Fecha contabilización", X."Kilos" FROM (')
         assert rango in consulta.sql and consulta.sql in contar.sql
-    # En Derivados el id del pedido de la app va en NULL, como en la nocturna.
+    # En Derivados el id del pedido de la app va en NULL, como en la nocturna, y los kilos son
+    # la expresión de «Tot KG».
     assert 'CAST(T0."U_SGX_IdPedidoApp"' not in e.hana.de("SDC", "kilos")[0].sql
+    assert EXPRESION_KILOS in e.hana.de("SDC", "kilos")[0].sql
     # No escribe CSV.
     assert not any(evento[0] == "csv" for evento in e.linea)
     assert not (e.csv_dir / "VENTAS").exists()
@@ -265,8 +270,8 @@ def test_kilos_llena_cada_tramo_en_orden(con_kilos, correos, caplog, monkeypatch
     assert not (config.STATE_DIR / "robot.lock").exists()
 
 
-def test_kilos_de_una_empresa_y_con_hasta(con_kilos, correos):
-    e = con_kilos
+def test_kilos_de_una_empresa_y_con_hasta(entorno, correos):
+    e = entorno
     _datos_de_junio(e)
     argumentos = ("--kilos-ventas", "--desde", "2026-06", "--hasta", "2026-07", "--empresa", "SDC")
     assert _main(e, *argumentos, dormir=_no_dormir) == 0
@@ -277,8 +282,8 @@ def test_kilos_de_una_empresa_y_con_hasta(con_kilos, correos):
     assert not e.hana.de("SGX")
 
 
-def test_un_tramo_que_falla_no_frena_los_demas(con_kilos, correos, caplog):
-    e = con_kilos
+def test_un_tramo_que_falla_no_frena_los_demas(entorno, correos, caplog):
+    e = entorno
     _datos_de_junio(e)
     e.servidor.programar_fallas("lote", status=422, datos={"message": "x", "errors": {"rows.0.kilos": ["x"]}})
     with caplog.at_level(logging.INFO, logger="bases_sap"):
@@ -295,8 +300,8 @@ def test_un_tramo_que_falla_no_frena_los_demas(con_kilos, correos, caplog):
     assert estado["estado"] == "ERROR" and estado["tramos"][0]["estado"] == "falló"
 
 
-def test_un_409_al_iniciar_es_un_tramo_fallido_y_sigue_con_los_demas(con_kilos, correos):
-    e = con_kilos
+def test_un_409_al_iniciar_es_un_tramo_fallido_y_sigue_con_los_demas(entorno, correos):
+    e = entorno
     _datos_de_junio(e)
     e.servidor.programar_fallas("iniciar", status=409, datos={"message": "Ya tiene kilos."})
     assert _main(e, "--kilos-ventas", "--desde", "2026-06", "--empresa", "SDC", dormir=_no_dormir) == 1
@@ -307,8 +312,8 @@ def test_un_409_al_iniciar_es_un_tramo_fallido_y_sigue_con_los_demas(con_kilos, 
     assert "ya cargado" not in json.dumps(tramos)
 
 
-def test_si_falla_la_red_al_iniciar_un_tramo_sigue_con_el_siguiente(con_kilos, correos):
-    e = con_kilos
+def test_si_falla_la_red_al_iniciar_un_tramo_sigue_con_el_siguiente(entorno, correos):
+    e = entorno
     _datos_de_junio(e)
     e.servidor.programar_fallas("iniciar", veces=4, red=True)
     assert _main(e, "--kilos-ventas", "--desde", "2026-06", "--empresa", "SDC", dormir=lambda s: None) == 1
@@ -316,10 +321,10 @@ def test_si_falla_la_red_al_iniciar_un_tramo_sigue_con_el_siguiente(con_kilos, c
     assert [t["estado"] for t in _estado()["tramos"]] == ["falló", "lleno", "vacío", "lleno"]
 
 
-def test_un_kilo_vacio_en_sap_se_envia_como_null(con_kilos, correos):
+def test_un_kilo_vacio_en_sap_se_envia_como_null(entorno, correos):
     # SAP no tiene peso para esa línea: la API guarda null (contrato §10.5). La columna de la
     # consulta sí tiene que existir; lo que puede venir vacío es el valor de una fila.
-    e = con_kilos
+    e = entorno
     _ventas(e, "SDC", date(2026, 9, 10), kilos_por_fila=None)
     e.hana.datos["SDC"]["ventas"].append(fila("ventas", 2, fecha_contabilizacion=date(2026, 9, 11),
                                               Kilos=Decimal("-3.25")))
@@ -331,9 +336,9 @@ def test_un_kilo_vacio_en_sap_se_envia_como_null(con_kilos, correos):
     assert correos == []
 
 
-def test_repetir_un_mes_no_hace_dano(con_kilos, correos):
+def test_repetir_un_mes_no_hace_dano(entorno, correos):
     # A diferencia del histórico, no hay 409 por un rango ya cargado: se vuelven a escribir.
-    e = con_kilos
+    e = entorno
     _datos_de_junio(e)
     assert _main(e, "--kilos-ventas", "--desde", "2026-09", dormir=_no_dormir) == 0
     assert _main(e, "--kilos-ventas", "--desde", "2026-09", dormir=_no_dormir) == 0
@@ -341,8 +346,8 @@ def test_repetir_un_mes_no_hace_dano(con_kilos, correos):
     assert [t["estado"] for t in _estado()["tramos"]] == ["lleno"]
 
 
-def test_si_las_lineas_no_cuadran_con_mysql_falla_el_tramo_con_los_conteos(con_kilos, correos, caplog):
-    e = con_kilos
+def test_si_las_lineas_no_cuadran_con_mysql_falla_el_tramo_con_los_conteos(entorno, correos, caplog):
+    e = entorno
     _datos_de_junio(e)
     e.servidor.descuadres_kilos[("SDC", "2026-06-01")] = (2, 1)
     with caplog.at_level(logging.INFO, logger="bases_sap"):
@@ -357,8 +362,8 @@ def test_si_las_lineas_no_cuadran_con_mysql_falla_el_tramo_con_los_conteos(con_k
     assert correos == [[("API", f"VENTAS SDC 2026-06-01 a 2026-06-30: {motivo}")]]
 
 
-def test_si_falla_la_vpn_no_envia_nada(con_kilos, correos):
-    e = con_kilos
+def test_si_falla_la_vpn_no_envia_nada(entorno, correos):
+    e = entorno
     vpn = VpnFalsa(e.linea, fallar=True)
     e.hana.vpn = vpn
     assert _main(e, "--kilos-ventas", "--desde", "2026-06", vpn=vpn, dormir=_no_dormir) == 1
@@ -380,10 +385,10 @@ def test_duracion_estimada_de_los_kilos_es_por_segundos_y_mucho_menor_que_la_del
     assert kilos.duracion_estimada(22, 2) * 5 < historico.duracion_estimada(22, 2)
 
 
-def test_a_las_4_30_cabe_antes_de_la_franja_de_las_5_y_no_espera(con_kilos, correos):
+def test_a_las_4_30_cabe_antes_de_la_franja_de_las_5_y_no_espera(entorno, correos):
     # 21 meses de Derivados: 2 minutos más 21 tramos de 10 s, 5 minutos y medio; terminan antes
     # de las 04:45, cuando empieza la franja de las 05:00. El histórico esperaba hasta las 06:16.
-    e = con_kilos
+    e = entorno
     reloj = _Reloj(datetime(2026, 10, 26, 4, 30, tzinfo=config.BOGOTA), e.vpn)
     assert _main(e, "--kilos-ventas", "--desde", "2025-01", ahora=reloj.ahora, dormir=reloj.dormir) == 0
     assert kilos.duracion_estimada(21, 1) == timedelta(minutes=5, seconds=30)
@@ -391,10 +396,10 @@ def test_a_las_4_30_cabe_antes_de_la_franja_de_las_5_y_no_espera(con_kilos, corr
     assert e.vpn.conexiones == 1
 
 
-def test_si_no_alcanza_antes_de_la_siguiente_franja_espera_a_que_pase(con_kilos, correos, caplog):
+def test_si_no_alcanza_antes_de_la_siguiente_franja_espera_a_que_pase(entorno, correos, caplog):
     # A las 04:40 los 5 minutos y medio terminan a las 04:45:30, dentro de la franja de las
     # 05:00: espera a que pase (05:16) y ahí sí caben antes de la de las 06:00 (05:45).
-    e = con_kilos
+    e = entorno
     reloj = _Reloj(datetime(2026, 10, 26, 4, 40, tzinfo=config.BOGOTA), e.vpn)
     with caplog.at_level(logging.INFO, logger="bases_sap"):
         assert _main(e, "--kilos-ventas", "--desde", "2025-01", ahora=reloj.ahora,
@@ -405,8 +410,8 @@ def test_si_no_alcanza_antes_de_la_siguiente_franja_espera_a_que_pase(con_kilos,
                for m in caplog.messages)
 
 
-def test_dentro_de_una_franja_espera_a_que_pase(con_kilos, correos):
-    e = con_kilos
+def test_dentro_de_una_franja_espera_a_que_pase(entorno, correos):
+    e = entorno
     _datos_de_junio(e)
     reloj = _Reloj(datetime(2026, 10, 26, 11, 50, tzinfo=config.BOGOTA), e.vpn)
     assert _main(e, "--kilos-ventas", "--desde", "2026-06", ahora=reloj.ahora, dormir=reloj.dormir) == 0
@@ -414,8 +419,8 @@ def test_dentro_de_una_franja_espera_a_que_pase(con_kilos, correos):
     assert len(e.servidor.corridas) == 3
 
 
-def test_con_el_candado_tomado_espera_como_el_historico(con_kilos, correos, candado_ajeno):
-    e = con_kilos
+def test_con_el_candado_tomado_espera_como_el_historico(entorno, correos, candado_ajeno):
+    e = entorno
     _datos_de_junio(e)
     ruta = candado_ajeno()
     esperas: list[float] = []
@@ -430,8 +435,8 @@ def test_con_el_candado_tomado_espera_como_el_historico(con_kilos, correos, cand
     assert len(e.servidor.corridas) == 1
 
 
-def test_sin_candado_en_20_minutos_avisa_y_no_corre(con_kilos, correos, candado_ajeno):
-    e = con_kilos
+def test_sin_candado_en_20_minutos_avisa_y_no_corre(entorno, correos, candado_ajeno):
+    e = entorno
     candado_ajeno()
     esperas: list[float] = []
     assert _main(e, "--kilos-ventas", "--desde", "2026-09", dormir=esperas.append) == 1
@@ -440,21 +445,36 @@ def test_sin_candado_en_20_minutos_avisa_y_no_corre(con_kilos, correos, candado_
     assert [etapa for etapa, _ in correos[0]] == ["CANDADO"]
 
 
-# --- La nocturna y el histórico siguen igual ------------------------------------------------
+# --- La nocturna y el histórico mandan kilos de último -------------------------------------
 
 
-def test_la_nocturna_y_el_historico_no_mandan_kilos(entorno, correos):
+def test_la_nocturna_y_el_historico_mandan_kilos_de_ultimo(entorno, correos):
+    # Contrato §10: kilos es la última de las 36 columnas. En Segurex va null (la consulta
+    # trae un NULL); en Derivados, lo que da SAP.
     e = entorno
     assert _main(e, "--completa") == 0  # los datos de prueba traen ventas de octubre
     for empresa in ("SGX", "SDC"):
-        _ventas(e, empresa, date(2026, 9, 10))
+        _ventas(e, empresa, date(2026, 9, 10), kilos_por_fila=Decimal("-2.5"))
     assert _main(e, "--historico-ventas", "--desde", "2026-09", dormir=_no_dormir) == 0
     ventas = [c for c in e.servidor.corridas.values() if c.conjunto == "VENTAS"]
-    assert [c.tipo for c in ventas] == ["completa", "completa", "historico", "historico"]
+    assert [(c.empresa, c.tipo) for c in ventas] == [
+        ("SGX", "completa"), ("SDC", "completa"), ("SGX", "historico"), ("SDC", "historico")]
+    nombres = esquema.PARTES["ventas"].nombres
+    assert len(nombres) == 36 and nombres[-1] == "kilos"
     for corrida in ventas:
-        assert {tuple(lote.columns) for lote in corrida.lotes.values()} == {
-            tuple(esquema.PARTES["ventas"].nombres)}
-        assert "kilos" not in esquema.PARTES["ventas"].nombres
+        assert {tuple(lote.columns) for lote in corrida.lotes.values()} == {tuple(nombres)}
+        valores = [f["kilos"] for f in corrida.filas("ventas")]
+        if corrida.empresa == "SGX":
+            assert valores and all(v is None for v in valores)
+        elif corrida.tipo == "completa":
+            assert valores == ["1.500000", "2.500000"]  # los kilos de las filas de prueba
+        else:
+            assert valores == ["-2.500000"]
+    # La consulta de Segurex lleva el NULL; la de Derivados, la expresión.
+    for empresa, esperado in (("SGX", 'CAST(NULL AS DECIMAL(19, 6)) AS "Kilos" -- @kilos'),
+                              ("SDC", EXPRESION_KILOS)):
+        consultadas = [x for x in e.hana.de(empresa, parte="ventas") if x.tipo == "todo"]
+        assert consultadas and all(esperado in x.sql for x in consultadas)
     assert not any(x.tipo == "kilos" for x in e.hana.ejecutadas)
 
 

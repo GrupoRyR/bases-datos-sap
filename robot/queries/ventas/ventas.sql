@@ -115,10 +115,12 @@ SELECT
     ROUND(X."GrssProfit", 2) * X."Signo"                       AS "Ganancia bruta",
     X."DocCur"                                                 AS "Moneda",
     X."DocRate"                                                AS "TRM",
-    X."Comments"                                               AS "Comentarios"
-    -- @kilos: aqui va la ultima columna de la consulta, la expresion de «Tot KG» de
-    -- la consulta guardada «AnálisisVentas-1» (orden 016), con su coma antes y el
-    -- alias "Kilos". Hasta entonces el robot no corre el modo de kilos de ventas.
+    X."Comments"                                               AS "Comentarios",
+    -- Kilos: «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados
+    -- (Quantity * OITM.NumInSale), con el signo de "Cantidad". Sin articulo o sin
+    -- NumInSale sale NULL. Solo Derivados: en Segurex el robot cambia la expresion
+    -- marcada por un NULL, porque alli no esta confirmado que NumInSale sean kilos.
+    CAST(X."Quantity" * T4."NumInSale" * X."Signo" AS DECIMAL(19, 6)) AS "Kilos" -- @kilos
 FROM (
     -- Facturas y notas debito: signo positivo.
     SELECT

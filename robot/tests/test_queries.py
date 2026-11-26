@@ -230,25 +230,33 @@ COLUMNA_GANANCIA = (
     '    ROUND(X."GrssProfit", 2) * X."Signo"                       AS "Ganancia bruta",\n'
 )
 SUBCONSULTA_GANANCIA = 'T1."VatSum", T1."GrssProfit",\n'
-# El marcador de dónde irá la columna de kilos (orden 016), solo un comentario por ahora.
-NOTA_KILOS = (
-    "    -- @kilos: aqui va la ultima columna de la consulta, la expresion de «Tot KG» de\n"
-    "    -- la consulta guardada «AnálisisVentas-1» (orden 016), con su coma antes y el\n"
-    '    -- alias "Kilos". Hasta entonces el robot no corre el modo de kilos de ventas.\n'
+# Los kilos (orden 016): la última columna, con su coma después de "Comentarios" y su nota.
+# La expresión es «Tot KG» de «AnálisisVentas-1» (Derivados); en Segurex va un NULL.
+COLUMNA_KILOS = (
+    '    CAST(X."Quantity" * T4."NumInSale" * X."Signo" AS DECIMAL(19, 6)) AS "Kilos" -- @kilos'
+)
+ADICION_KILOS = (
+    ",\n"
+    "    -- Kilos: «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados\n"
+    '    -- (Quantity * OITM.NumInSale), con el signo de "Cantidad". Sin articulo o sin\n'
+    "    -- NumInSale sale NULL. Solo Derivados: en Segurex el robot cambia la expresion\n"
+    "    -- marcada por un NULL, porque alli no esta confirmado que NumInSale sean kilos.\n"
+    + COLUMNA_KILOS
 )
 
 
-def test_ventas_es_la_consulta_del_gestor_mas_la_ganancia_bruta():
+def test_ventas_es_la_consulta_del_gestor_mas_la_ganancia_bruta_y_los_kilos():
     texto = _texto(VENTAS)
-    # Cada adición aparece donde debe y una sola vez (la columna, la nota y las dos subconsultas).
+    # Cada adición aparece donde debe y una sola vez (la columna, la nota y las dos subconsultas;
+    # los kilos, justo después de "Comentarios" y antes del FROM).
     assert texto.count(NOTA_GANANCIA) == 1
     assert texto.count(COLUMNA_GANANCIA) == 1
     assert texto.count(SUBCONSULTA_GANANCIA) == 2
-    assert texto.count(NOTA_KILOS) == 1
+    assert texto.count('AS "Comentarios"' + ADICION_KILOS + "\nFROM (\n") == 1
     # Quitadas esas adiciones, queda exactamente la consulta del gestor.
     gestor = (
         texto.replace(NOTA_GANANCIA, "")
-        .replace(NOTA_KILOS, "")
+        .replace(ADICION_KILOS, "")
         .replace(COLUMNA_GANANCIA, "")
         .replace(SUBCONSULTA_GANANCIA, 'T1."VatSum",\n')
         .encode("utf-8")
@@ -276,6 +284,22 @@ def test_ventas_trae_las_etiquetas_del_esquema_y_un_solo_marcador():
         assert columna.hana in alias, columna.hana
     assert sql.count("-- @id_pedido_app") == 1
     assert 'CAST(T0."U_SGX_IdPedidoApp" AS NVARCHAR(254)) AS "IdPedidoApp" -- @id_pedido_app' in sql
+
+
+def test_ventas_kilos_es_la_ultima_columna_con_el_signo_de_la_cantidad():
+    sql = _texto(VENTAS)
+    assert _alias(sql[:sql.index("\nFROM (\n")])[-1] == "Kilos"  # la última del SELECT de afuera
+    assert sql.count("@kilos") == 1
+    assert sql.count(COLUMNA_KILOS + "\n") == 1
+    # OITM ya está unida una vez como T4 (LEFT JOIN, después del UNION: no se pierde ninguna
+    # línea) y el signo es el de "Cantidad". Sin IFNULL: sin artículo o sin NumInSale, NULL.
+    codigo = _sin_comentarios(sql)
+    assert codigo.count('LEFT JOIN "OITM" T4 ON T4."ItemCode"   = X."ItemCode"') == 1
+    assert codigo.count('"OITM"') == 1
+    assert 'IFNULL(X."Quantity", 0) * X."Signo"' in codigo
+    assert codigo.count('T4."NumInSale"') == 1
+    # Sin filtro de series: la consulta no mira la serie del documento.
+    assert '"Series"' not in codigo
 
 
 def test_ventas_filtra_la_ventana_con_la_expresion_que_usa_el_robot():

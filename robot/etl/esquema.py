@@ -248,6 +248,9 @@ _VENTAS = (
     Columna("Moneda", "moneda", TEXTO),
     Columna("TRM", "trm", CANTIDAD),
     Columna("Comentarios", "comentarios", TEXTO),
+    # Peso de la línea con el signo de cantidad (orden 016). Opcional: en Segurex la consulta
+    # lo trae en NULL, y en Derivados una línea sin artículo o sin NumInSale también.
+    Columna("Kilos", "kilos", CANTIDAD),
 )
 
 # Orden del contrato §11.2; el alias del SQL es el nombre del contrato (consulta propia).

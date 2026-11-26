@@ -15,6 +15,9 @@ los envoltorios de consultas.py:
   de las filas por su etiqueta (tipo "kilos"). Una etiqueta que la consulta de adentro no
   tiene falla como en HANA (invalid column name).
 
+Los kilos de VENTAS salen de las filas (`Kilos`) salvo cuando la consulta trae su NULL
+(consultas.KILOS_NULO, en Segurex): ahí van en None, como en HANA.
+
 La consulta de la ventana de VENTAS (consultas.SQL_VENTANA) devuelve, por empresa, los
 días de `HanaFalsa.ventanas[empresa]` en orden y, cuando se acaban, `HanaFalsa.ventana`
 (2026-09-24: el primer día de la ventana el 26 de octubre). Cada ejecución anota el
@@ -85,6 +88,9 @@ _RE_VENTANA_FIJA = re.compile(r"TO_DATE\('\d{4}-\d{2}-\d{2}', 'YYYY-MM-DD'\)")
 _RE_PROYECCION = re.compile(r'^SELECT ((?:X\."[^"]+"(?:, )?)+) FROM \(\n')
 _RE_RANGO = re.compile(
     r"BETWEEN TO_DATE\('(\d{4}-\d{2}-\d{2})', 'YYYY-MM-DD'\) AND TO_DATE\('(\d{4}-\d{2}-\d{2})', 'YYYY-MM-DD'\)"
+)
+_RE_KILOS_NULO = re.compile(
+    re.escape(consultas.KILOS_NULO) + r'\s+AS\s+"' + re.escape(consultas.ALIAS_KILOS) + '"'
 )
 
 
@@ -333,6 +339,8 @@ class _Cursor:
             self.description = [("COUNT(*)",)]
             self._filas = [(len(filas),)]
             return
+        if _RE_KILOS_NULO.search(sql):
+            filas = [{**f, consultas.ALIAS_KILOS: None} for f in filas]
         if proyeccion:
             alias = re.findall(r'X\."([^"]+)"', proyeccion.group(1))
             adentro = sql[proyeccion.end():]

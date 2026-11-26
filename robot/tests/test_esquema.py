@@ -18,6 +18,7 @@ from esquema import (
     MONTO,
     PARTES,
     TEXTO,
+    Columna,
     ColumnasInesperadas,
     LlaveRepetida,
     ValorInvalido,
@@ -72,6 +73,7 @@ COLUMNAS = {
         "oc_cliente", "ciudad_envio", "direccion_envio", "marca", "familia", "codigo_articulo",
         "descripcion", "cantidad", "costo_unitario", "costo_total", "precio_lista",
         "precio_unitario", "total", "iva", "ganancia_bruta", "moneda", "trm", "comentarios",
+        "kilos",
     ],
     # Contrato §11.2, en ese orden.
     "pedidos": [
@@ -221,6 +223,7 @@ def test_ventas_usa_las_etiquetas_del_gestor():
         "cantidad": "Cantidad", "costo_unitario": "Costo unitario", "costo_total": "Costo total",
         "precio_lista": "Precio lista", "precio_unitario": "Precio unitario", "total": "Total",
         "iva": "IVA", "ganancia_bruta": "Ganancia bruta", "moneda": "Moneda", "trm": "TRM", "comentarios": "Comentarios",
+        "kilos": "Kilos",
     }
 
 
@@ -291,7 +294,7 @@ def test_tipos_de_ventas():
     tipos = _tipos("ventas")
     enteros = {"tipo_objeto", "doc_entry", "numero_documento", "linea", "slp_code"}
     fechas = {"fecha_documento", "fecha_contabilizacion"}
-    cantidades = {"cantidad", "trm"}
+    cantidades = {"cantidad", "trm", "kilos"}
     montos = {"costo_unitario", "costo_total", "precio_lista", "precio_unitario", "total", "iva",
               "ganancia_bruta"}
     for nombre, tipo in tipos.items():
@@ -446,6 +449,22 @@ def test_ventas_ganancia_bruta_es_un_monto_con_signo_de_nota_credito():
     posicion = PARTES["ventas"].nombres.index("ganancia_bruta")
     assert [f[posicion] for f in listas] == ["1234.50", "-1234.50", None]
     assert posicion == PARTES["ventas"].nombres.index("iva") + 1
+
+
+def test_ventas_kilos_es_la_ultima_columna_una_cantidad_opcional_con_signo():
+    # Contrato §10: kilos va de último, con hasta 6 decimales y el signo de cantidad; puede
+    # llegar null (Segurex, o una línea sin artículo o sin NumInSale en Derivados).
+    ventas = PARTES["ventas"]
+    assert ventas.columnas[-1] == Columna("Kilos", "kilos", CANTIDAD)
+    assert len(ventas.columnas) == 36
+    alias = [c.hana for c in ventas.columnas]
+    filas = [
+        fila("ventas", 1, kilos=Decimal("3")),
+        fila("ventas", 2, kilos=Decimal("-1.2345675")),  # nota crédito
+        fila("ventas", 3, kilos=None),
+    ]
+    listas = preparar_filas(ventas, alias, [[f[a] for a in alias] for f in filas])
+    assert [f[-1] for f in listas] == ["3.000000", "-1.234568", None]
 
 
 def test_ventas_con_llave_repetida_falla():

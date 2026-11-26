@@ -36,8 +36,7 @@ Uso:
     python run_robot.py --kilos-ventas --desde 2025-01 [--hasta 2026-06]
                                                    # a mano: llena los kilos de VENTAS mes por mes,
                                                    # como el histórico (kilos.py, orden 016). Solo
-                                                   # SDC. No corre hasta que ventas.sql traiga los
-                                                   # kilos
+                                                   # SDC. No corre si ventas.sql no trae los kilos
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
@@ -309,7 +308,7 @@ def _parser() -> argparse.ArgumentParser:
     modo.add_argument("--kilos-ventas", action="store_true",
                       help="Kilos de VENTAS: llena kilos en los meses de --desde a --hasta, uno por corrida, "
                            "como el histórico. Se corre a mano y solo en SDC (sin --empresa, solo SDC). No "
-                           "corre mientras queries/ventas/ventas.sql no traiga la columna de kilos.")
+                           "corre si queries/ventas/ventas.sql no trae la columna de kilos.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
