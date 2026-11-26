@@ -304,13 +304,24 @@ def _extraer_partes(conn: Any, empresa_cfg: EmpresaHana, r: Resultado) -> None:
                     codigos.append(f[posicion])
 
 
+Extractor = Callable[[Any, EmpresaHana, Resultado, Callable[[], datetime]], None]
+
+
 def extraer_resultados(
-    conn: Any, empresa_cfg: EmpresaHana, resultados: list[Resultado], ahora: Callable[[], datetime]
+    conn: Any,
+    empresa_cfg: EmpresaHana,
+    resultados: list[Resultado],
+    ahora: Callable[[], datetime],
+    extraer: Extractor = _extraer_trabajo,
 ) -> None:
-    """Extrae cada resultado en esta conexión. Nunca lanza: un error falla solo su resultado."""
+    """Extrae cada resultado en esta conexión. Nunca lanza: un error falla solo su resultado.
+
+    `extraer(conn, empresa_cfg, resultado, ahora)` llena un resultado; por defecto, el de
+    las corridas de siempre. El complemento de ventas (complemento.py) pasa el suyo.
+    """
     for r in resultados:
         try:
-            _extraer_trabajo(conn, empresa_cfg, r, ahora)
+            extraer(conn, empresa_cfg, r, ahora)
         except Exception as exc:
             r.fallar(_etapa(exc), mensaje_seguro(exc))
             log.error("Falló la extracción de %s: %s", r.trabajo.nombre, exc)

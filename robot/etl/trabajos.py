@@ -23,7 +23,7 @@ class TrabajoInvalido(ValueError):
 class Trabajo:
     empresa: str
     conjunto: str
-    tipo: str  # completa | solicitud | historico
+    tipo: str  # completa | solicitud | historico | complemento (complemento.py)
     partes: dict[str, str]  # parte -> todo | cambios, en orden de envío
     desde: dict[str, str | None] = field(default_factory=dict)
     solicitudes: list[int] = field(default_factory=list)
@@ -44,8 +44,9 @@ class Trabajo:
 
 _ORDEN = list(esquema.PARTES)
 
-# Contrato §4.3: las corridas que cierran con el COUNT(*) de SAP (conteo_sap).
-TIPOS_CON_CONTEO = ("completa", "historico")
+# Contrato §4.3: las corridas que cierran con el COUNT(*) de SAP (conteo_sap). La forma de
+# la corrida complemento (§10.5) está en complemento.py.
+TIPOS_CON_CONTEO = ("completa", "historico", "complemento")
 
 # Contrato §12: la API acepta ventana_desde de PRODUCCION desde este día hasta mañana.
 PRIMER_DIA_PRODUCCION = date(2026, 1, 1)

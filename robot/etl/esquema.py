@@ -248,6 +248,13 @@ _VENTAS = (
     Columna("Moneda", "moneda", TEXTO),
     Columna("TRM", "trm", CANTIDAD),
     Columna("Comentarios", "comentarios", TEXTO),
+    # Peso de la línea con el signo de cantidad (orden 016). Opcional: en Segurex la consulta
+    # lo trae en NULL, y en Derivados una línea sin artículo o sin NumInSale también.
+    Columna("Kilos", "kilos", CANTIDAD),
+    # Código de la dirección de envío del documento (ShipToCode; en Derivados, el CEDI), en las
+    # dos empresas. Opcional: un documento sin dirección de envío lo trae vacío. La API lo
+    # corta a 50 caracteres (contrato §10).
+    Columna("Código envío", "codigo_envio", TEXTO),
 )
 
 # Orden del contrato §11.2; el alias del SQL es el nombre del contrato (consulta propia).
