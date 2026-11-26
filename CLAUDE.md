@@ -10,7 +10,7 @@ Central store of SAP Business One master data for the Grupo RYR apps (Segurex SG
 
 ## Hard rules
 
-- Write only inside the zone your session owns (plan §9 and the table below). If you need anything else, stop and ask the user.
+- Write only inside the zone your session owns (plan §9 and the table below). If you need anything else, stop and ask the coordinator; the coordinator asks the user only when the decision is the user's.
 - Never connect to SAP, the Sophos VPN, GoDaddy or any real database, and never send real email. Tests use fakes.
 - One exception, for the coordinator session only (user decision, 2026-11-25): it may run the robot's read-only modes against SAP on the TI PC, today `run_robot.py --catalogo` and `--diagnostico`, plus any later mode the robot documents as read-only (for example, reading the text of a saved query in `OUQR`).
   - The robot raises the VPN and uses its own `.env`. The coordinator never reads the `.env` or any credential, and never connects to HANA with its own scripts or ad-hoc queries.
@@ -24,7 +24,8 @@ Central store of SAP Business One master data for the Grupo RYR apps (Segurex SG
 - The app never deletes master rows; rows missing from a full run are marked inactive.
 - No secrets in the repository.
 - Push your branch and open a PR against `main`. Never push to `main`, force push or use `--no-verify`.
-- Merge your own PR only with `gh pr merge <number> --merge --delete-branch`, after running the `code-review` skill, syncing with `main`, passing local checks and getting green CI. The user approves every merge.
+- An agent never merges: it opens its PR against `main` and tells the coordinator the number and branch.
+- Only the coordinator merges into `main` (user decision, 2026-11-26), with `gh pr merge <number> --merge --delete-branch`, after the PR was reviewed with the `code-review` skill, synced with `main`, and has passing local checks, green CI and no secrets in the diff. It reports each merge to the user in one line. Every deploy still needs the user's yes.
 - Remote work (SSH, deploy, cPanel) only with the user's explicit authorization for that destination and operation.
 
 ## Module zones
@@ -36,7 +37,7 @@ Central store of SAP Business One master data for the Grupo RYR apps (Segurex SG
 | Robot | `robot/**` and its tests | — |
 | Panel | `app/Modules/Panel/**`, `tests/Modules/Panel/**` | `2026_11_03_` |
 
-Everything outside these zones (`bootstrap/`, `config/`, `routes/`, `app/Providers/`, `app/Support/`, `tests/TestCase.php`, `tests/Architecture/`, `composer.json`, lockfiles, `phpunit.xml`, `phpstan.neon`, `.github/`, `.githooks/`, `.claude/`) belongs to the base: ask the user before touching it.
+Everything outside these zones (`bootstrap/`, `config/`, `routes/`, `app/Providers/`, `app/Support/`, `tests/TestCase.php`, `tests/Architecture/`, `composer.json`, lockfiles, `phpunit.xml`, `phpstan.neon`, `.github/`, `.githooks/`, `.claude/`) belongs to the base: ask the coordinator, who gets the user's yes before anyone touches it.
 
 ## Provider hooks
 
@@ -49,7 +50,7 @@ Everything outside these zones (`bootstrap/`, `config/`, `routes/`, `app/Provide
 - A module uses another module only through that module's `App\Modules\<Other>\Contracts` namespace.
 - Core uses no other module. Sap may use Core contracts. Panel may use Core and Sap contracts.
 - `App\Support` uses no module except `App\Modules\Core\Contracts`. No `dd`, `dump`, `ray`, `var_dump` or `die` in `App`.
-- `tests/Architecture/ModulesTest.php` enforces all of this. If you need a contract from another module, ask its owner.
+- `tests/Architecture/ModulesTest.php` enforces all of this. If you need a contract from another module, ask the coordinator, who asks its owner.
 
 ## Migrations and connections
 
@@ -63,7 +64,7 @@ GitHub does not enforce rules on this private repository, so `main` is protected
 
 - `.claude/settings.json` denies pushes to `main`, force pushes, `--no-verify`, changing `core.hooksPath` and merges through `gh api`, and asks the user before any `gh pr merge`.
 - `.githooks/pre-push` rejects any push to `main`. The user enables it once per clone with `git config core.hooksPath .githooks`.
-- Never try to work around them. If one blocks you, stop and tell the user.
+- Never try to work around them. If one blocks you, stop and tell the coordinator.
 
 ## Conventions
 
