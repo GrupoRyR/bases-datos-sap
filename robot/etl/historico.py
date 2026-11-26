@@ -9,7 +9,7 @@ La planeación va sin red: los tramos y la ventana estimada con el reloj del PC.
 ventana de verdad la da HANA (consultas.SQL_VENTANA) cuando la VPN ya está arriba; la
 estimada solo sirve para calcular cuánto va a durar la fase con VPN.
 
-La ejecución (`ejecutar`, sobre `dos_fases`, que comparte con kilos.py) sigue las dos fases
+La ejecución (`ejecutar`, sobre `dos_fases`, que comparte con complemento.py) sigue las dos fases
 de siempre:
     FASE 1 - con VPN:  por empresa, la ventana de HANA, los tramos y, por tramo, la
                        consulta con su rango y su COUNT(*) en la misma conexión
@@ -166,7 +166,7 @@ def dos_fases(
     ahora: Callable[[], datetime] = config.ahora,
     renovar: Callable[[], Any] = lambda: None,
 ) -> tuple[list[Tramo], list[tuple[str, str]]]:
-    """Las dos fases de una carga por tramos: la del histórico y la de los kilos (kilos.py).
+    """Las dos fases de una carga por tramos: la del histórico y la del complemento (complemento.py).
 
     FASE 1, con VPN: por empresa, la ventana de HANA y los tramos; por tramo, el trabajo
     `trabajo(empresa, desde, hasta)` extraído con `extraer` (el de siempre si es None).

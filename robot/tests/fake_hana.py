@@ -11,8 +11,8 @@ los envoltorios de consultas.py:
 - `X."lista_codigo" = N`              -> filas de la lista de precios N;
 - `<col> BETWEEN TO_DATE(...) AND TO_DATE(...)` (consultas.sql_rango, histórico de
   VENTAS)                              -> filas con la columna de la ventana en el rango;
-- `SELECT X."a", X."b" FROM (...) X` (consultas.sql_kilos) -> solo esas columnas, sacadas
-  de las filas por su etiqueta (tipo "kilos"). Una etiqueta que la consulta de adentro no
+- `SELECT X."a", X."b" FROM (...) X` (consultas.sql_complemento) -> solo esas columnas,
+  sacadas de las filas por su etiqueta (tipo "complemento"). Una etiqueta que la consulta de adentro no
   tiene falla como en HANA (invalid column name).
 
 Los kilos de VENTAS salen de las filas (`Kilos`) salvo cuando la consulta trae su NULL
@@ -308,7 +308,7 @@ class _Cursor:
         if sql.lstrip().upper().startswith("SELECT COUNT(*)"):
             tipo = "contar"
         elif proyeccion:
-            tipo = "kilos"
+            tipo = "complemento"
         elif 'X."actualizado_en_sap" >= ?' in sql:
             tipo = "cambios"
         elif 'X."codigo_socio" IN (' in sql:

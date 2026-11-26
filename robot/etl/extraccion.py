@@ -317,7 +317,7 @@ def extraer_resultados(
     """Extrae cada resultado en esta conexión. Nunca lanza: un error falla solo su resultado.
 
     `extraer(conn, empresa_cfg, resultado, ahora)` llena un resultado; por defecto, el de
-    las corridas de siempre. Los kilos de ventas (kilos.py) pasan el suyo.
+    las corridas de siempre. El complemento de ventas (complemento.py) pasa el suyo.
     """
     for r in resultados:
         try:

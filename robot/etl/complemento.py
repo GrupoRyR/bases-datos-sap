@@ -1,26 +1,29 @@
-"""Kilos de VENTAS (orden 016): llena `kilos` en los meses que ya tiene la app, a mano.
+"""Complemento de VENTAS (orden 016): llena `kilos` y `codigo_envio` en los meses que ya
+tiene la app, a mano.
 
 Va como el histórico (historico.py): un tramo por mes, de --desde a --hasta, hasta el día
 antes de la ventana nocturna, con la misma planeación y las mismas dos fases
 (historico.dos_fases):
     FASE 1 - con VPN:  por empresa, la ventana de HANA, los tramos y, por tramo, la
-                       consulta de kilos (consultas.sql_kilos: la llave, la fecha y los
-                       kilos) y su COUNT(*) en la misma conexión
+                       consulta del complemento (consultas.sql_complemento: la llave, la
+                       fecha, los kilos y el código de envío) y su COUNT(*) en la misma conexión
     FASE 2 - sin VPN:  por tramo, del más viejo al más nuevo y empresa por empresa, una
-                       corrida `kilos` en la API
-Solo corre en las empresas de consultas.EMPRESAS_CON_KILOS (hoy Derivados): sin --empresa
-va solo con ellas y run_robot rechaza las demás. Un tramo sin ventas en SAP no se envía
-(`vacío`); uno que falla (`falló`) no frena a los demás. Repetir un mes no hace daño: la API vuelve a escribir los mismos kilos (no hay 409
-por un rango ya cargado, como en el histórico).
+                       corrida `complemento` en la API
+Corre en las dos empresas: el código de envío (ShipToCode) es de verdad en las dos; los
+kilos solo en consultas.EMPRESAS_CON_KILOS (Derivados), y en las demás la consulta los trae
+en NULL (consultas.sql_ventas), así que Segurex los manda en null. Un tramo sin ventas en
+SAP no se envía (`vacío`); uno que falla (`falló`) no frena a los demás. Repetir un mes no
+hace daño: la API vuelve a escribir los mismos valores (no hay 409 por un rango ya cargado,
+como en el histórico).
 
 No escribe CSV: los tramos quedan en memoria hasta que baja la VPN, como en el histórico,
 y el respaldo de esas ventas ya es el CSV del histórico (VENTAS\\<EMPRESA>\\historico). Si
 un tramo falla, se vuelve a correr el comando.
 
-Los kilos son la última columna de queries/ventas/ventas.sql, la expresión de «Tot KG» de
+Los kilos son una columna de queries/ventas/ventas.sql, la expresión de «Tot KG» de
 «AnálisisVentas-1» (consultas.KILOS_VENTAS). Si la consulta no la trae, el modo no corre:
 run_robot llama a revisar_consulta() antes de esperar el candado o subir la VPN, y cada
-tramo la vuelve a exigir (consultas.sql_ventas y consultas.sql_kilos).
+tramo la vuelve a exigir (consultas.sql_ventas y consultas.sql_complemento).
 """
 from __future__ import annotations
 
@@ -41,64 +44,47 @@ from historico import FALLO, VACIO, Tramo
 from registro import obtener
 from trabajos import Trabajo
 
-log = obtener("kilos")
+log = obtener("complemento")
 
 # Estimación de la fase con VPN, para no cruzarse con las franjas de los otros robots. Sale
 # del histórico real del 2026-11-24 (robot.log, 13:01:00 a 13:02:18): 44 tramos (22 meses de
 # dos empresas) en 78 s con la VPN arriba; unos 14 s para conectar la VPN y esperar la ruta
-# a HANA, y 1 a 2 s por tramo (SGX 22 tramos en 42 s, SDC 22 en 22 s). La consulta de kilos
-# es la misma de ventas con menos columnas, así que no debería tardar más. Va con holgura:
-# 2 minutos fijos (unas 8 veces lo medido, por si la VPN reintenta) y 10 s por tramo de cada
-# empresa (unas 5 veces el tramo más lento). Desde enero de 2025, solo Derivados, da unos 5
-# minutos y medio.
+# a HANA, y 1 a 2 s por tramo (SGX 22 tramos en 42 s, SDC 22 en 22 s). La consulta del
+# complemento es la misma de ventas con menos columnas, así que no debería tardar más. Va con
+# holgura: 2 minutos fijos (unas 8 veces lo medido, por si la VPN reintenta) y 10 s por tramo
+# de cada empresa (unas 5 veces el tramo más lento). Desde enero de 2025, con las dos
+# empresas, da unos 9 minutos.
 SEGUNDOS_FIJOS = 120
 SEGUNDOS_POR_TRAMO = 10
 
 LLENO = "lleno"
 
-# Empresas donde corre el modo: las que tienen la expresión de kilos de verdad en ventas.sql.
-EMPRESAS = consultas.EMPRESAS_CON_KILOS
-
-
-def empresas_de_kilos(pedidas: list[str] | None) -> list[str]:
-    """Las empresas del modo: EMPRESAS si no se pidió ninguna; las pedidas si todas tienen
-    kilos. Lanza ValueError si alguna no los tiene (run_robot lo muestra como error del
-    parser y ejecutar() lo vuelve a exigir antes de subir la VPN)."""
-    if not pedidas:
-        return list(EMPRESAS)
-    sin_kilos = [e for e in pedidas if e not in EMPRESAS]
-    if sin_kilos:
-        raise ValueError(
-            f"--kilos-ventas es solo de {', '.join(EMPRESAS)}: los kilos salen de «AnálisisVentas-1» "
-            f"de Derivados y en {', '.join(sin_kilos)} no está confirmado que OITM.NumInSale sean "
-            "kilos (ventas.sql los trae en NULL)."
-        )
-    return list(dict.fromkeys(pedidas))
-
-# --- La corrida `kilos` (contrato §4.1 a §4.3 y §10.5) -------------------------------------
+# --- La corrida `complemento` (contrato §4.1 a §4.3 y §10.5) -------------------------------
 # Su forma vive solo aquí:
-# - conjunto VENTAS, tipo "kilos", la parte ventas en modo todo, sin solicitudes y sin
+# - conjunto VENTAS, tipo "complemento", la parte ventas en modo todo, sin solicitudes y sin
 #   fecha_corte;
 # - ventana_desde es el día 1 del mes, desde PRIMER_MES, y ventana_hasta un día de ese mes
 #   anterior a la ventana nocturna, como el histórico (envio._iniciar); si no, 422;
-# - lotes de la parte ventas con exactamente las columnas de consultas.columnas_kilos(): la
-#   llave, fecha_contabilizacion y kilos. kilos puede ir null en una fila, nunca faltar;
+# - lotes de la parte ventas con exactamente las columnas de consultas.columnas_complemento():
+#   la llave, fecha_contabilizacion, kilos y codigo_envio. kilos y codigo_envio pueden ir
+#   null en una fila, nunca faltar; el cierre los escribe también cuando son null;
 # - cierre con conteo_sap {"ventas": N}, el COUNT(*) del tramo (el tipo está en
 #   trabajos.TIPOS_CON_CONTEO por eso). Si N no es lo recibido, 422 en conteo_sap.ventas;
 #   si las llaves no cuadran con MySQL, 422 en filas.ventas con los conteos `sobran` y
 #   `faltan` (motivo_de_rechazo los pone en el motivo del tramo). La corrida queda fallida;
 # - no hay 409 por un rango ya cargado: un 409 es un fallo del tramo como cualquier otro.
-TIPO = "kilos"
+TIPO = "complemento"
 PRIMER_MES = date(2025, 1, 1)
 _VENTAS = esquema.PARTES["ventas"]
-PARTE_KILOS = esquema.Parte(
-    _VENTAS.nombre, _VENTAS.conjunto, _VENTAS.consulta, consultas.columnas_kilos(), _VENTAS.llave,
-    "todo", False, _VENTAS.columna_ventana,
+PARTE_COMPLEMENTO = esquema.Parte(
+    _VENTAS.nombre, _VENTAS.conjunto, _VENTAS.consulta, consultas.columnas_complemento(),
+    _VENTAS.llave, "todo", False, _VENTAS.columna_ventana,
 )
 
 
-def trabajo_kilos_ventas(empresa: str, desde: date, hasta: date) -> Trabajo:
-    """Un tramo de kilos: la corrida `kilos` de VENTAS de una empresa, de `desde` a `hasta`."""
+def trabajo_complemento_ventas(empresa: str, desde: date, hasta: date) -> Trabajo:
+    """Un tramo del complemento: la corrida `complemento` de VENTAS de una empresa, de
+    `desde` a `hasta`."""
     return Trabajo(
         empresa=empresa,
         conjunto=_VENTAS.conjunto,
@@ -113,7 +99,8 @@ def revisar_desde(desde_mes: date) -> None:
     """Lanza historico.RangoInvalido si --desde es anterior a PRIMER_MES (la API daría 422)."""
     if desde_mes < PRIMER_MES:
         raise historico.RangoInvalido(
-            f"--kilos-ventas va desde {PRIMER_MES:%Y-%m} (contrato §10.5); llegó --desde {desde_mes:%Y-%m}."
+            f"--complemento-ventas va desde {PRIMER_MES:%Y-%m} (contrato §10.5); llegó --desde "
+            f"{desde_mes:%Y-%m}."
         )
 
 
@@ -129,7 +116,7 @@ def motivo_de_rechazo(exc: BaseException) -> str:
     if all(isinstance(n, int) and not isinstance(n, bool) for n in (sobran, faltan)):
         motivo = f"{motivo.rstrip('.')} (sobran {sobran} y faltan {faltan} líneas)."
     return motivo
-# --- fin de la forma de la corrida `kilos` ---------------------------------------------------
+# --- fin de la forma de la corrida `complemento` ---------------------------------------------
 
 
 def revisar_consulta() -> None:
@@ -148,28 +135,30 @@ def duracion_estimada(cantidad_tramos: int, empresas: int) -> timedelta:
 def _extraer_tramo(
     conn: Any, empresa_cfg: EmpresaHana, r: extraccion.Resultado, ahora: Callable[[], datetime]
 ) -> None:
-    """FASE 1, un tramo: la consulta de kilos con su rango y su COUNT(*), en esta conexión.
+    """FASE 1, un tramo: la consulta del complemento con su rango y su COUNT(*), en esta
+    conexión.
 
     Las filas se validan como las de una corrida (tipos, obligatorias, llave repetida) y
     contra el rango del tramo; un error lo atrapa extraccion.extraer_resultados.
     """
     t = r.trabajo
     desde, hasta = date.fromisoformat(t.ventana_fija or ""), date.fromisoformat(t.ventana_hasta or "")
-    sql = consultas.sql_kilos(consultas.leer_parte(_VENTAS, empresa_cfg), desde, hasta)
-    columnas, datos = hana.ejecutar(conn, sql, f"{t.empresa} kilos", empresa_cfg.esquema)
-    filas = esquema.preparar_filas(PARTE_KILOS, columnas, datos)
-    conteo = hana.contar(conn, consultas.sql_contar(sql), f"{t.empresa} kilos (conteo)")
-    extraccion.revisar_ventana(PARTE_KILOS, filas, t.ventana_fija or "", t.ventana_hasta)
+    sql = consultas.sql_complemento(consultas.leer_parte(_VENTAS, empresa_cfg), desde, hasta)
+    columnas, datos = hana.ejecutar(conn, sql, f"{t.empresa} complemento", empresa_cfg.esquema)
+    filas = esquema.preparar_filas(PARTE_COMPLEMENTO, columnas, datos)
+    conteo = hana.contar(conn, consultas.sql_contar(sql), f"{t.empresa} complemento (conteo)")
+    extraccion.revisar_ventana(PARTE_COMPLEMENTO, filas, t.ventana_fija or "", t.ventana_hasta)
     r.ventana_desde = t.ventana_fija
-    r.columnas = {_VENTAS.nombre: PARTE_KILOS.nombres}
+    r.columnas = {_VENTAS.nombre: PARTE_COMPLEMENTO.nombres}
     r.filas = {_VENTAS.nombre: filas}
     r.conteo_sap = {_VENTAS.nombre: conteo}
     r.extraida_en = ahora().isoformat(timespec="seconds")
-    log.info("Kilos de VENTAS %s de %s a %s extraídos: %d filas.", t.empresa, desde, hasta, len(filas))
+    log.info("Complemento de VENTAS %s de %s a %s extraído: %d filas.", t.empresa, desde, hasta, len(filas))
 
 
 def _enviar_tramo(api: ApiCliente, r: extraccion.Resultado) -> tuple[Tramo, list[tuple[str, str]]]:
-    """FASE 2, un tramo: la corrida `kilos` en la API. Nunca lanza por un fallo del tramo."""
+    """FASE 2, un tramo: la corrida `complemento` en la API. Nunca lanza por un fallo del
+    tramo."""
     tramo, fallos, terminado = historico.revisar_extraido(r)
     if terminado:
         return tramo, fallos
@@ -196,16 +185,14 @@ def ejecutar(
     ahora: Callable[[], datetime] = config.ahora,
     renovar: Callable[[], Any] = lambda: None,
 ) -> tuple[list[Tramo], list[tuple[str, str]]]:
-    """Las dos fases de los kilos. Devuelve los tramos y los fallos como (etapa, mensaje).
+    """Las dos fases del complemento. Devuelve los tramos y los fallos como (etapa, mensaje).
 
-    Lanza ValueError, sin subir la VPN, si una empresa no tiene kilos (empresas_de_kilos).
     `renovar()` corre después de cada tramo extraído y enviado: run_robot renueva ahí el
     candado, como en el histórico.
     """
-    empresas_de_kilos(empresas)
     lista, fallos = historico.dos_fases(
-        cfg, empresas, desde_mes, hasta_mes, trabajo=trabajo_kilos_ventas,
-        enviar=lambda r: _enviar_tramo(api, r), extraer=_extraer_tramo, etapa="KILOS",
+        cfg, empresas, desde_mes, hasta_mes, trabajo=trabajo_complemento_ventas,
+        enviar=lambda r: _enviar_tramo(api, r), extraer=_extraer_tramo, etapa="COMPLEMENTO",
         robot_vpn=robot_vpn, conectar=conectar, sin_vpn=sin_vpn, ahora=ahora, renovar=renovar,
     )
     resumir(lista, empresas)
@@ -224,7 +211,7 @@ def resumir(lista: list[Tramo], empresas: list[str]) -> None:
     con el motivo de los fallidos. Sin valores de SAP."""
     for empresa in empresas:
         propios = [t for t in lista if t.empresa == empresa]
-        prefijo = f"Kilos de VENTAS {empresa}"
+        prefijo = f"Complemento de VENTAS {empresa}"
         cuenta = {estado: sum(1 for t in propios if t.estado == estado) for estado, _ in _TITULOS}
         log.info("%s: %d tramos; %d llenos, %d vacíos y %d fallidos.", prefijo,
                  len(propios), cuenta[LLENO], cuenta[VACIO], cuenta[FALLO])

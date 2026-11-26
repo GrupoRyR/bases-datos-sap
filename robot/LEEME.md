@@ -99,7 +99,7 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 | `run_robot.py --catalogo` | Solo el catálogo de tablas y columnas | No |
 | `run_robot.py --carga-produccion --desde AAAA-MM-DD` | Una vez, a mano: PRODUCCION de Segurex desde esa fecha (ver «Producción») | Sí |
 | `run_robot.py --historico-ventas --desde AAAA-MM` | Una vez, a mano: VENTAS mes por mes antes de la ventana nocturna (ver «Histórico de ventas») | Sí |
-| `run_robot.py --kilos-ventas --desde AAAA-MM` | A mano: llena los kilos de VENTAS mes por mes, como el histórico. Solo Derivados (ver «Kilos de ventas») | Sí |
+| `run_robot.py --complemento-ventas --desde AAAA-MM` | A mano: llena `kilos` y `codigo_envio` de VENTAS mes por mes, como el histórico (ver «Complemento de ventas») | Sí |
 | `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
 | `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
@@ -107,10 +107,10 @@ Opciones de `run_robot.py`:
 
 - `--empresa SGX` o `--empresa SDC`: solo esa empresa (se puede repetir). Por defecto, las dos.
 - `--sin-vpn`: no maneja la VPN; úsalo si ya la conectaste a mano.
-- `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas`, `--kilos-ventas` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
-- `--desde` y `--hasta`: solo para `--carga-produccion` (`--desde AAAA-MM-DD`), `--historico-ventas` y `--kilos-ventas` (`--desde AAAA-MM`, `--hasta AAAA-MM`).
+- `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
+- `--desde` y `--hasta`: solo para `--carga-produccion` (`--desde AAAA-MM-DD`), `--historico-ventas` y `--complemento-ventas` (`--desde AAAA-MM`, `--hasta AAAA-MM`).
 
-Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas`, `--kilos-ventas` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
+Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
 
 Códigos de salida: `0` todo bien, `1` algún fallo, `2` configuración incompleta, `130` cancelado con Ctrl+C.
 
@@ -121,7 +121,7 @@ Cada corrida de VENTAS (la nocturna o una solicitud) trae el mes en curso más l
 - El primer día de la ventana (`ventana_desde`) lo calcula HANA con la misma expresión de la consulta, en la misma conexión, antes y después de extraer. Nunca se usa el reloj del PC.
 - Si cambió entre las dos lecturas (la extracción cruzó la medianoche), se repite la extracción una vez; si vuelve a cambiar, esa corrida falla.
 - Si alguna fila trae una `fecha_contabilizacion` anterior a `ventana_desde`, la corrida falla antes de enviar nada.
-- `kilos` es el peso de la línea, con el signo de `cantidad` (ver «Kilos de ventas»). Solo Derivados lo trae; en Segurex va vacío.
+- `kilos` es el peso de la línea, con el signo de `cantidad` (ver «Complemento de ventas»). Solo Derivados lo trae; en Segurex va vacío.
 - `codigo_envio` es la última columna: el código de la dirección de envío del documento (`ShipToCode` de la factura o la nota crédito; en Derivados, el CEDI). Lo traen las dos empresas; va vacío si el documento no tiene dirección de envío.
 - `ganancia_bruta` es la ganancia de cada línea según SAP (`GrssProfit`), con signo negativo en las notas crédito. No se calcula con el costo de inventario (`costo_total`), que se desvía cerca de 0,5 % de lo que muestra SAP. Para revisarla, suma `ganancia_bruta` del 01 al 16/11/2026 en el CSV de `VENTAS\<empresa>`: SGX 294.070.622,59 y SDC 604.768.247,13.
 - Si la extracción falla antes de que HANA dé la ventana (por ejemplo, no conectó la VPN), la corrida no se puede abrir para marcarla fallida: el fallo va al correo y sus solicitudes vencen solas en la app.
@@ -153,31 +153,32 @@ Al final, el log trae un resumen por empresa:
 
 Sale con `1` si algún tramo falló (y avisa por correo, como la nocturna) y con `0` si no. `robot\state\ultima_ejecucion.json` lista cada tramo con su estado, sin datos de SAP.
 
-## Kilos de ventas
+## Complemento de ventas
 
-Llena la columna `kilos` de VENTAS en los meses que la app ya tiene. La corre **a mano** el coordinador o el usuario, no una tarea programada:
+Llena `kilos` y `codigo_envio` de VENTAS en los meses que la app ya tiene y los traen vacíos porque llegaron antes de que el robot los enviara (corrida `complemento`, contrato §10.5). La corre **a mano** el coordinador o el usuario, no una tarea programada:
 
 ```powershell
-.venv\Scripts\python.exe etl\run_robot.py --kilos-ventas --desde 2025-01
+.venv\Scripts\python.exe etl\run_robot.py --complemento-ventas --desde 2025-01
 ```
 
-Los kilos son la columna «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados: en las facturas, `INV1.Quantity * OITM.NumInSale`, y en las notas crédito lo mismo por `-1`. En `queries\ventas\ventas.sql` es la columna `"Kilos"`, antes del código de envío, marcada con `-- @kilos`: `X."Quantity" * T4."NumInSale" * X."Signo"`, con el mismo signo de `cantidad` y `OITM` unida por el artículo sin perder líneas. Una línea sin artículo o sin `NumInSale` sale con `kilos` vacío. La nocturna, las solicitudes y el histórico también la envían.
+Las dos columnas salen de `queries\ventas\ventas.sql`, la misma consulta de la nocturna, las solicitudes y el histórico, que también las envían:
 
-- **Solo Derivados.** En Segurex no está confirmado que `NumInSale` sean kilos, así que el robot cambia la expresión marcada por un `NULL` y Segurex envía `kilos` vacío.
-- **Puede no cuadrar con el informe de SAP.** «AnálisisVentas-1» solo toma las facturas de las series 4, 118 y 120; `ventas.sql` no filtra por serie (trae todas las facturas y notas crédito). Los totales de kilos de un mes pueden ser mayores que los del informe.
-- Si alguien quita la columna de la consulta, el modo no corre: el robot sale con `2` (configuración) antes de esperar el candado o subir la VPN, guarda el motivo en el estado y no envía nada. Nunca manda kilos inventados.
+- **`kilos`** es la columna «Tot KG» de la consulta guardada «AnálisisVentas-1» de Derivados: en las facturas, `INV1.Quantity * OITM.NumInSale`, y en las notas crédito lo mismo por `-1`. En la consulta es la columna `"Kilos"`, marcada con `-- @kilos`: `X."Quantity" * T4."NumInSale" * X."Signo"`, con el mismo signo de `cantidad` y `OITM` unida por el artículo sin perder líneas. Una línea sin artículo o sin `NumInSale` sale con `kilos` vacío.
+- **Los kilos solo son de verdad en Derivados.** En Segurex no está confirmado que `NumInSale` sean kilos, así que el robot cambia la expresión marcada por un `NULL` y Segurex envía `kilos` vacío. La lista de empresas con kilos está en `EMPRESAS_CON_KILOS` (`etl\consultas.py`).
+- **`codigo_envio`** es el código de la dirección de envío del documento (`ShipToCode` de la factura o la nota crédito; en Derivados, el CEDI), en la columna `"Código envío"`. Es de verdad en las dos empresas; va vacío si el documento no tiene dirección de envío.
+- **Los kilos pueden no cuadrar con el informe de SAP.** «AnálisisVentas-1» solo toma las facturas de las series 4, 118 y 120; `ventas.sql` no filtra por serie (trae todas las facturas y notas crédito). Los totales de kilos de un mes pueden ser mayores que los del informe.
+- Si alguien quita la columna de kilos de la consulta, el modo no corre: el robot sale con `2` (configuración) antes de esperar el candado o subir la VPN, guarda el motivo en el estado y no envía nada. Nunca manda kilos inventados.
 
 Cómo corre el modo:
 
-- Va como el histórico: un tramo por mes, de `--desde` a `--hasta`, hasta el día antes de la ventana nocturna. `--desde` va desde `2025-01` (contrato §10.5); uno anterior no corre. `--hasta AAAA-MM` funciona igual. La ventana la da HANA cuando la VPN ya está arriba.
-- Solo corre en Derivados (`SDC`), por lo mismo: sin `--empresa` corre solo `SDC`, y `--empresa SGX` no corre: el robot sale con un error de los argumentos. La lista de empresas con kilos está en `EMPRESAS_CON_KILOS` (`etl\consultas.py`) y manda en la consulta y en el modo.
-- Con la VPN arriba trae de cada tramo solo la llave de la venta (`tipo_objeto`, `doc_entry`, `linea`), `fecha_contabilizacion` y `kilos`, con el `COUNT(*)` en la misma conexión. Luego baja la VPN y envía cada tramo como una corrida `kilos`, del mes más viejo al más nuevo.
+- Va como el histórico: un tramo por mes, de `--desde` a `--hasta`, hasta el día antes de la ventana nocturna. `--desde` va desde `2025-01` (contrato §10.5); uno anterior no corre. `--hasta AAAA-MM` y `--empresa SGX` o `--empresa SDC` funcionan igual; sin `--empresa` corre las dos. La ventana la da HANA cuando la VPN ya está arriba.
+- Con la VPN arriba trae de cada tramo solo la llave de la venta (`tipo_objeto`, `doc_entry`, `linea`), `fecha_contabilizacion`, `kilos` y `codigo_envio`, con el `COUNT(*)` en la misma conexión. Luego baja la VPN y envía cada tramo como una corrida `complemento`: empresa por empresa, del mes más viejo al más nuevo.
 - No escribe CSV: el respaldo de esas ventas ya es el del histórico.
-- Un tramo sin ventas en SAP no se envía. Una línea sin peso en SAP va con `kilos` vacío y la app lo guarda vacío. Un tramo que falla no frena a los demás; si la corrida alcanzó a abrirse, queda fallida.
-- La app solo cambia `kilos` de las líneas que ya tiene. Si las del tramo no cuadran con las suyas, el cierre falla y el motivo dice cuántas `sobran` (llegaron y la app no las tiene) y cuántas `faltan` (la app las tiene y no llegaron). Suele querer decir que ese mes cambió en SAP después del histórico.
-- Repetir un mes no hace daño: vuelve a escribir los mismos kilos. Si algo falló, vuelve a correr el comando.
+- Un tramo sin ventas en SAP no se envía. Una línea sin peso o sin dirección de envío en SAP va con ese valor vacío y la app lo guarda vacío. Un tramo que falla no frena a los demás; si la corrida alcanzó a abrirse, queda fallida.
+- La app solo cambia `kilos` y `codigo_envio` de las líneas que ya tiene, también cuando llegan vacíos. Si las del tramo no cuadran con las suyas, el cierre falla y el motivo dice cuántas `sobran` (llegaron y la app no las tiene) y cuántas `faltan` (la app las tiene y no llegaron). Suele querer decir que ese mes cambió en SAP después del histórico.
+- Repetir un mes no hace daño: vuelve a escribir los mismos valores. Si algo falló, vuelve a correr el comando.
 
-Cuándo correrlo: con la API de la corrida `kilos` desplegada, fuera de las franjas. Respeta las franjas de los otros robots y espera el candado, como el histórico. Antes de subir la VPN estima cuánto la va a tener arriba: 2 minutos fijos más 10 segundos por cada mes de cada empresa (`SEGUNDOS_FIJOS` y `SEGUNDOS_POR_TRAMO` en `etl\kilos.py`). Sale del histórico real del 24/11/2026, que tuvo la VPN arriba 78 segundos para 22 meses de las dos empresas, con mucha holgura: desde enero de 2025, solo Derivados, son unos 5 minutos y medio. Si no cabe antes de la siguiente franja, espera a que pase.
+Cuándo correrlo: con la API de la corrida `complemento` desplegada, fuera de las franjas. Respeta las franjas de los otros robots y espera el candado, como el histórico. Antes de subir la VPN estima cuánto la va a tener arriba: 2 minutos fijos más 10 segundos por cada mes de cada empresa (`SEGUNDOS_FIJOS` y `SEGUNDOS_POR_TRAMO` en `etl\complemento.py`). Sale del histórico real del 24/11/2026, que tuvo la VPN arriba 78 segundos para 22 meses de las dos empresas, con mucha holgura: desde enero de 2025, con las dos empresas, son unos 9 minutos. Si no cabe antes de la siguiente franja, espera a que pase.
 
 Al final, el log trae un resumen por empresa: cuántos tramos quedaron `llenos`, `vacíos` (sin ventas en SAP) y `fallidos`, y cuáles, con el motivo de los fallidos y sin valores de SAP. Sale con `1` si algún tramo falló (y avisa por correo) y con `0` si no. `robot\state\ultima_ejecucion.json` lista cada tramo con su estado.
 

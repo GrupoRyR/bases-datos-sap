@@ -536,36 +536,40 @@ def test_exigir_kilos_pide_la_etiqueta_exacta():
         )
 
 
-def test_sql_kilos_sin_la_columna_no_corre():
+def test_sql_complemento_sin_la_columna_de_kilos_no_corre():
     with pytest.raises(ConfigError, match="kilos"):
-        consultas.sql_kilos(_sin_kilos(_ventas()), *ENERO)
+        consultas.sql_complemento(_sin_kilos(_ventas()), *ENERO)
 
 
-def test_columnas_de_los_kilos_son_la_llave_la_fecha_y_kilos():
-    columnas = consultas.columnas_kilos()
-    assert [c.nombre for c in columnas] == ["tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos"]
-    assert [c.hana for c in columnas] == ["Tipo objeto", "DocEntry", "Línea", "Fecha contabilización", "Kilos"]
-    # La llave es la de VENTAS. La llave y la fecha son obligatorias; kilos no: una línea sin
-    # peso en SAP va en null y la API lo guarda así (contrato §10.5).
+def test_columnas_del_complemento_son_la_llave_la_fecha_kilos_y_codigo_envio():
+    columnas = consultas.columnas_complemento()
+    assert [c.nombre for c in columnas] == [
+        "tipo_objeto", "doc_entry", "linea", "fecha_contabilizacion", "kilos", "codigo_envio"]
+    assert [c.hana for c in columnas] == [
+        "Tipo objeto", "DocEntry", "Línea", "Fecha contabilización", "Kilos", "Código envío"]
+    # La llave es la de VENTAS. La llave y la fecha son obligatorias; kilos y codigo_envio no:
+    # una línea sin peso o sin dirección de envío va en null y la API lo guarda así (§10.5).
     assert set(PARTES["ventas"].llave) < {c.nombre for c in columnas}
-    assert [c.requerida for c in columnas] == [True, True, True, True, False]
+    assert [c.requerida for c in columnas] == [True, True, True, True, False, False]
 
 
-def test_columnas_de_los_kilos_salen_del_esquema_de_ventas():
+def test_columnas_del_complemento_salen_del_esquema_de_ventas():
     ventas = {c.nombre: c for c in PARTES["ventas"].columnas}
-    assert list(consultas.columnas_kilos()) == [ventas[c.nombre] for c in consultas.columnas_kilos()]
+    columnas = consultas.columnas_complemento()
+    assert list(columnas) == [ventas[c.nombre] for c in columnas]
 
 
-def test_sql_kilos_trae_solo_la_llave_la_fecha_y_kilos_con_el_rango():
+def test_sql_complemento_trae_solo_la_llave_la_fecha_kilos_y_codigo_envio_con_el_rango():
     sql = consultas.sql_ventas(_ventas(), "SDC")
-    kilos = consultas.sql_kilos(sql, *ENERO)
-    assert kilos.startswith(
-        'SELECT X."Tipo objeto", X."DocEntry", X."Línea", X."Fecha contabilización", X."Kilos" FROM (\n'
+    complemento = consultas.sql_complemento(sql, *ENERO)
+    assert complemento.startswith(
+        'SELECT X."Tipo objeto", X."DocEntry", X."Línea", X."Fecha contabilización", X."Kilos", '
+        'X."Código envío" FROM (\n'
     )
-    assert kilos.endswith("\n) X")
-    assert kilos.count(RANGO_ENERO) == 2
-    assert consultas.sql_rango(sql, *ENERO) in kilos
-    assert "X.*" not in kilos
+    assert complemento.endswith("\n) X")
+    assert complemento.count(RANGO_ENERO) == 2
+    assert consultas.sql_rango(sql, *ENERO) in complemento
+    assert "X.*" not in complemento
 
 
 def _ventas_con_kilos_en_sqlite() -> sqlite3.Connection:
@@ -575,7 +579,7 @@ def _ventas_con_kilos_en_sqlite() -> sqlite3.Connection:
     con.execute('INSERT INTO "OITM" VALUES (\'A1\', 10, 3, 1.5)')
     desde, hasta = ENERO
     _documento(con, "OINV", 1, desde - timedelta(days=1), cantidad=2)  # el día antes: no sale
-    _documento(con, "OINV", 2, desde, cantidad=2)
+    _documento(con, "OINV", 2, desde, cantidad=2, envio="CEDI NORTE")
     _documento(con, "ORIN", 3, date(2025, 1, 20), cantidad=2)  # nota crédito: kilos negativos
     _documento(con, "OINV", 4, date(2025, 1, 25), cantidad=2, articulo="ZZ")  # sin artículo en OITM
     _documento(con, "OINV", 5, hasta + timedelta(days=1), cantidad=2)  # el día después: no sale
@@ -615,13 +619,19 @@ def test_ventas_de_segurex_en_sqlite_trae_las_mismas_lineas_con_kilos_null():
     assert [(f["DocEntry"], f["Kilos"]) for f in filas] == [(2, None), (3, None), (4, None)]
 
 
-def test_sql_kilos_en_sqlite_trae_el_rango_con_signo_y_su_conteo_cuadra():
+@pytest.mark.parametrize("empresa, kilos", [
+    ("SDC", [3.0, -3.0, None]),
+    ("SGX", [None, None, None]),  # en Segurex los kilos van en NULL; el código de envío, no
+])
+def test_sql_complemento_en_sqlite_trae_el_rango_con_signo_y_su_conteo_cuadra(empresa: str, kilos: list):
     con = _ventas_con_kilos_en_sqlite()
-    sql = consultas.sql_kilos(consultas.sql_ventas(_ventas(), "SDC"), *ENERO)
+    sql = consultas.sql_complemento(consultas.sql_ventas(_ventas(), empresa), *ENERO)
     cursor = con.execute(sql)
-    assert [d[0] for d in cursor.description] == [c.hana for c in consultas.columnas_kilos()]
+    assert [d[0] for d in cursor.description] == [c.hana for c in consultas.columnas_complemento()]
     assert cursor.fetchall() == [
-        (13, 2, 0, "2025-01-01", 3.0), (14, 3, 0, "2025-01-20", -3.0), (13, 4, 0, "2025-01-25", None),
+        (13, 2, 0, "2025-01-01", kilos[0], "CEDI NORTE"),
+        (14, 3, 0, "2025-01-20", kilos[1], None),
+        (13, 4, 0, "2025-01-25", kilos[2], None),
     ]
     [(conteo,)] = con.execute(consultas.sql_contar(sql)).fetchall()
     assert conteo == 3

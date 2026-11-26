@@ -159,14 +159,16 @@ def sql_rango(sql: str, desde: date, hasta: date) -> str:
 # Kilos de VENTAS (orden 016): la columna «Tot KG» de la consulta guardada «AnálisisVentas-1»
 # de Derivados (INV1.Quantity * OITM.NumInSale, y por -1 en RIN1) va en el SELECT de
 # ventas.sql antes del código de envío, con esta etiqueta, el signo de "Cantidad" y el
-# marcador `-- @kilos` al final de la línea (después de la coma). Una línea sin artículo o sin NumInSale va en NULL: la API la guarda así (contrato
-# §10 y §10.5). Si la consulta no trae la columna, todo lo que necesita kilos falla cerrado
-# (exigir_kilos y sql_ventas): nunca se envían kilos inventados.
+# marcador `-- @kilos` al final de la línea (después de la coma). Una línea sin artículo o
+# sin NumInSale va en NULL: la API la guarda así (contrato §10 y §10.5). Si la consulta no
+# trae la columna, todo lo que necesita kilos falla cerrado (exigir_kilos y sql_ventas):
+# nunca se envían kilos inventados.
 MARCADOR_KILOS = "@kilos"
 ALIAS_KILOS = "Kilos"
 # Empresas donde la expresión de kilos es de verdad: «AnálisisVentas-1» es de Derivados y en
 # Segurex no está confirmado que OITM.NumInSale sean kilos. En las demás, la expresión marcada
-# cambia por KILOS_NULO (sql_ventas), y el modo de kilos solo corre en estas.
+# cambia por KILOS_NULO (sql_ventas): la nocturna, el histórico y el complemento de Segurex
+# mandan kilos en null.
 EMPRESAS_CON_KILOS = ("SDC",)
 KILOS_NULO = "CAST(NULL AS DECIMAL(19, 6))"
 KILOS_VENTAS = CampoMarcado(
@@ -186,7 +188,7 @@ def _sin_comentarios(sql: str) -> str:
 def exigir_kilos(sql: str) -> None:
     """Falla con ConfigError si la consulta de ventas no trae la columna de kilos.
 
-    Busca `AS "Kilos"` en el código; los comentarios no cuentan. El modo de kilos la llama
+    Busca `AS "Kilos"` en el código; los comentarios no cuentan. El complemento la llama
     antes de esperar el candado o subir la VPN: sin la expresión de «Tot KG» no corre.
     """
     if not _RE_ALIAS_KILOS.search(_sin_comentarios(sql)):
@@ -197,27 +199,32 @@ def exigir_kilos(sql: str) -> None:
         )
 
 
-def columnas_kilos() -> tuple[Columna, ...]:
-    """Columnas de los kilos de VENTAS, las de la parte ventas, en su orden: la llave, su
-    columna de la ventana (fecha_contabilizacion) y kilos, la última (contrato §10.5). La
-    llave y la fecha son obligatorias; kilos puede llegar vacío si SAP no tiene peso."""
+# Lo que llena la corrida complemento de VENTAS (contrato §10.5), además de la llave y la fecha.
+COLUMNAS_DEL_COMPLEMENTO = ("kilos", "codigo_envio")
+
+
+def columnas_complemento() -> tuple[Columna, ...]:
+    """Columnas del complemento de VENTAS, las de la parte ventas, en su orden: la llave, su
+    columna de la ventana (fecha_contabilizacion), kilos y codigo_envio (contrato §10.5). La
+    llave y la fecha son obligatorias; kilos y codigo_envio pueden llegar vacíos."""
     ventas = PARTES["ventas"]
     return tuple(
         c for c in ventas.columnas
-        if c.nombre in ventas.llave or c.nombre in (ventas.columna_ventana, "kilos")
+        if c.nombre in ventas.llave or c.nombre in (ventas.columna_ventana, *COLUMNAS_DEL_COMPLEMENTO)
     )
 
 
-def sql_kilos(sql: str, desde: date, hasta: date) -> str:
+def sql_complemento(sql: str, desde: date, hasta: date) -> str:
     """La consulta de ventas de una empresa (sql_de_empresa) con el rango de `desde` a
-    `hasta` (sql_rango), de la que solo salen la llave, la fecha y los kilos.
+    `hasta` (sql_rango), de la que solo salen la llave, la fecha, los kilos y el código de
+    envío.
 
     Las columnas van una por una, con las etiquetas de la consulta. Falla con ConfigError si
     la consulta no trae kilos (exigir_kilos) o no tiene la expresión de la ventana. El
     conteo es sql_contar de esta misma consulta.
     """
     exigir_kilos(sql)
-    lista = ", ".join(f'X."{c.hana}"' for c in columnas_kilos())
+    lista = ", ".join(f'X."{c.hana}"' for c in columnas_complemento())
     return f"SELECT {lista} FROM (\n{sql_rango(sql, desde, hasta)}\n) X"
 
 

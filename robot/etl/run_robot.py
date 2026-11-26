@@ -33,17 +33,18 @@ Uso:
     python run_robot.py --historico-ventas --desde 2025-01 [--hasta 2026-06]
                                                    # una vez, a mano: VENTAS mes por mes antes de la
                                                    # ventana nocturna (historico.py, contrato §10.4)
-    python run_robot.py --kilos-ventas --desde 2025-01 [--hasta 2026-06]
-                                                   # a mano: llena los kilos de VENTAS mes por mes,
-                                                   # como el histórico (kilos.py, orden 016). Solo
-                                                   # SDC. No corre si ventas.sql no trae los kilos
+    python run_robot.py --complemento-ventas --desde 2025-01 [--hasta 2026-06]
+                                                   # a mano: llena kilos y codigo_envio de VENTAS
+                                                   # mes por mes, como el histórico (complemento.py,
+                                                   # orden 016). No corre si ventas.sql no trae los
+                                                   # kilos
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
 revisión de solicitudes que está terminando); el catálogo y el diagnóstico, que
 los corre el usuario, no esperan. Si la completa o el archivo arrancan dentro de
 una franja bloqueada de los otros robots (±15 minutos), esperan a que pase,
-salvo con --forzar. El histórico y los kilos de ventas, además, esperan a que su fase
+salvo con --forzar. El histórico y el complemento de ventas, además, esperan a que su fase
 con VPN quepa entera antes de la siguiente franja (bloqueo.inicio_hueco) y renuevan el
 candado por cada tramo, porque pueden durar más que su vigencia.
 
@@ -63,13 +64,13 @@ from typing import Any, Callable, Iterable
 import archivo
 import bloqueo
 import catalogo
+import complemento
 import config
 import diagnostico
 import envio
 import extraccion
 import hana
 import historico
-import kilos
 import notificar
 import registro
 from api import ApiCliente
@@ -305,10 +306,11 @@ def _parser() -> argparse.ArgumentParser:
     modo.add_argument("--historico-ventas", action="store_true",
                       help="Histórico de VENTAS: los meses de --desde a --hasta, uno por corrida, hasta el "
                            "día antes de la ventana nocturna. Se corre una vez, a mano.")
-    modo.add_argument("--kilos-ventas", action="store_true",
-                      help="Kilos de VENTAS: llena kilos en los meses de --desde a --hasta, uno por corrida, "
-                           "como el histórico. Se corre a mano y solo en SDC (sin --empresa, solo SDC). No "
-                           "corre si queries/ventas/ventas.sql no trae la columna de kilos.")
+    modo.add_argument("--complemento-ventas", action="store_true",
+                      help="Complemento de VENTAS: llena kilos y codigo_envio en los meses de --desde a "
+                           "--hasta, uno por corrida, como el histórico. Se corre a mano. Los kilos solo "
+                           "son de verdad en SDC (en SGX van vacíos). No corre si "
+                           "queries/ventas/ventas.sql no trae la columna de kilos.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
@@ -317,16 +319,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--sin-vpn", action="store_true",
                         help="No gestionar la VPN (asume que ya está activa).")
     parser.add_argument("--forzar", action="store_true",
-                        help="Correr la completa, la carga de producción, el histórico o los kilos de "
-                             "ventas o el archivo aunque sea dentro de una franja bloqueada de los otros "
+                        help="Correr la completa, la carga de producción, el histórico o el complemento "
+                             "de ventas o el archivo aunque sea dentro de una franja bloqueada de los otros "
                              "robots.")
     parser.add_argument("--desde", metavar="AAAA-MM-DD | AAAA-MM",
                         help="Primer día de la carga de producción (AAAA-MM-DD, con --carga-produccion) "
-                             "o primer mes del histórico o de los kilos de ventas (AAAA-MM, con "
-                             "--historico-ventas o --kilos-ventas).")
+                             "o primer mes del histórico o del complemento de ventas (AAAA-MM, con "
+                             "--historico-ventas o --complemento-ventas).")
     parser.add_argument("--hasta", metavar="AAAA-MM",
-                        help="Último mes del histórico o de los kilos de ventas (solo con "
-                             "--historico-ventas o --kilos-ventas). Por defecto, el mes en que empieza "
+                        help="Último mes del histórico o del complemento de ventas (solo con "
+                             "--historico-ventas o --complemento-ventas). Por defecto, el mes en que empieza "
                              "la ventana nocturna, hasta el día antes.")
     return parser
 
@@ -340,9 +342,9 @@ def _esperar_hueco(
     dormir: Callable[[float], None],
     carga: str = "del histórico",
 ) -> int | None:
-    """Histórico o kilos de ventas: espera a que su fase con VPN quepa entera antes de la
+    """Histórico o complemento de ventas: espera a que su fase con VPN quepa entera antes de la
     siguiente franja de los otros robots. None si puede seguir; el código de salida si no hay
-    hueco. `carga` nombra la carga en los mensajes ("del histórico", "de los kilos")."""
+    hueco. `carga` nombra la carga en los mensajes ("del histórico", "del complemento")."""
     momento = ahora()
     minutos = int(estimado.total_seconds() // 60)
     try:
@@ -390,20 +392,15 @@ def main(
     args = parser.parse_args(argv)
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
     carga: Trabajo | None = None
-    # (--desde, --hasta) del histórico o de los kilos de ventas
+    # (--desde, --hasta) del histórico o del complemento de ventas
     meses: tuple[date, date | None] | None = None
-    estimado: timedelta | None = None  # cuánto estará arriba la VPN en el histórico o los kilos
-    por_meses = args.historico_ventas or args.kilos_ventas
-    opcion = "--kilos-ventas" if args.kilos_ventas else "--historico-ventas"
+    estimado: timedelta | None = None  # cuánto estará arriba la VPN en el histórico o el complemento
+    por_meses = args.historico_ventas or args.complemento_ventas
+    opcion = "--complemento-ventas" if args.complemento_ventas else "--historico-ventas"
     if args.desde is not None and not (args.carga_produccion or por_meses):
-        parser.error("--desde va solo con --carga-produccion, --historico-ventas o --kilos-ventas.")
+        parser.error("--desde va solo con --carga-produccion, --historico-ventas o --complemento-ventas.")
     if args.hasta is not None and not por_meses:
-        parser.error("--hasta va solo con --historico-ventas o --kilos-ventas.")
-    if args.kilos_ventas:
-        try:
-            empresas = kilos.empresas_de_kilos(args.empresa)
-        except ValueError as exc:
-            parser.error(str(exc))
+        parser.error("--hasta va solo con --historico-ventas o --complemento-ventas.")
     if args.carga_produccion:
         if args.desde is None:
             parser.error("--carga-produccion necesita --desde AAAA-MM-DD.")
@@ -420,21 +417,21 @@ def main(
         try:
             desde_mes = historico.mes(args.desde)
             hasta_mes = historico.mes(args.hasta) if args.hasta is not None else None
-            if args.kilos_ventas:
-                kilos.revisar_desde(desde_mes)
+            if args.complemento_ventas:
+                complemento.revisar_desde(desde_mes)
             # Con la ventana estimada (reloj del PC): los tramos de verdad salen de la de HANA.
             plan = historico.tramos(desde_mes, hasta_mes, historico.inicio_ventana_estimado(ahora().date()))
         except historico.RangoInvalido as exc:
             parser.error(str(exc))
         meses = (desde_mes, hasta_mes)
-        duracion = kilos.duracion_estimada if args.kilos_ventas else historico.duracion_estimada
+        duracion = complemento.duracion_estimada if args.complemento_ventas else historico.duracion_estimada
         estimado = duracion(len(plan), len(empresas))
     if args.completa:
         modo = "completa"
     elif carga is not None:
         modo = "carga produccion"
     elif meses is not None:
-        modo = "kilos ventas" if args.kilos_ventas else "historico ventas"
+        modo = "complemento ventas" if args.complemento_ventas else "historico ventas"
     elif args.archivo:
         modo = f"archivo {args.archivo}"
     else:
@@ -451,14 +448,14 @@ def main(
     try:
         cfg = cargar_config()
         registro.registrar_secretos(cfg)
-        # Solo la completa, la carga, el histórico y los kilos hablan con la API; el archivo,
+        # Solo la completa, la carga, el histórico y el complemento hablan con la API; el archivo,
         # el catálogo y el diagnóstico no.
         cfg.validar(requiere_vpn=not args.sin_vpn,
                     requiere_api=completa or carga is not None or meses is not None, empresas=empresas)
-        if args.kilos_ventas:
+        if args.complemento_ventas:
             # Sin la columna de kilos en ventas.sql no corre: antes de esperar la franja o el
-            # candado y de subir la VPN (kilos.revisar_consulta).
-            kilos.revisar_consulta()
+            # candado y de subir la VPN (complemento.revisar_consulta).
+            complemento.revisar_consulta()
     except ConfigError as exc:
         log.error("Configuración incompleta:\n%s", exc)
         guardar_estado(estado="ERROR", modo=modo, etapa="CONFIGURACION", error=str(exc))
@@ -466,16 +463,16 @@ def main(
             notificar.avisar_fallos(cfg.alertas, [("CONFIGURACION", str(exc))])
         return 2
 
-    # Los modos de las tareas programadas, y la carga, el histórico y los kilos, que son largos:
+    # Los modos de las tareas programadas, y la carga, el histórico y el complemento, que son largos:
     # respetan las franjas de los otros robots y esperan el candado. Los dos manuales que
     # hablan con la API avisan por correo como la nocturna: el diagnóstico no.
     programado = completa or carga is not None or meses is not None or modo.startswith("archivo")
     avisar = modo != "diagnostico"  # el diagnóstico lo corre el usuario y ve el resumen
     momento = ahora()
     franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
-    carga_meses = "de los kilos" if args.kilos_ventas else "del histórico"
+    carga_meses = "del complemento" if args.complemento_ventas else "del histórico"
     if estimado is not None:
-        # El histórico y los kilos tienen la VPN arriba mucho tiempo: no basta con estar fuera
+        # El histórico y el complemento tienen la VPN arriba mucho tiempo: no basta con estar fuera
         # de la franja, toda la fase con VPN debe caber antes de la siguiente.
         codigo = _esperar_hueco(cfg, modo, estimado, args.forzar, ahora, dormir, carga_meses)
         if codigo is not None:
@@ -556,8 +553,8 @@ def _ejecutar(
     trabajos: list[Trabajo] = []
     extra: dict[str, Any] = {}
     try:
-        if meses is not None and modo == "kilos ventas":
-            tramos, fallos = kilos.ejecutar(
+        if meses is not None and modo == "complemento ventas":
+            tramos, fallos = complemento.ejecutar(
                 cfg, empresas, *meses, api=fabrica_api(cfg.api),
                 robot_vpn=None if args.sin_vpn else fabrica_vpn(cfg.vpn), conectar=conectar,
                 sin_vpn=args.sin_vpn, ahora=ahora, renovar=renovar,
