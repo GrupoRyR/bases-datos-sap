@@ -16,6 +16,19 @@ enum RunType: string
     /** A manual VENTAS load of one month before the nightly window, into an empty range (section 10.4). */
     case Historical = 'historico';
 
+    /** A manual VENTAS run of one month before the nightly window that fills only kilos and codigo_envio of the lines already stored (section 10.5). */
+    case Complement = 'complemento';
+
+    /**
+     * Whether the run is a manual one of a VENTAS month before the nightly
+     * window, with ventana_hasta (sections 10.4 and 10.5): it is never the
+     * nightly count of a day nor the last update of the dataset.
+     */
+    public function isPastMonth(): bool
+    {
+        return in_array($this, [self::Historical, self::Complement], true);
+    }
+
     /** Whether the run brings every part of the dataset in full and its SAP count. */
     public function isWhole(): bool
     {

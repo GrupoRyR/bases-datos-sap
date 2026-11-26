@@ -5,6 +5,8 @@ namespace App\Modules\Sap\Models;
 use App\Modules\Sap\Contracts\Enums\Company;
 use App\Modules\Sap\Contracts\Enums\Dataset;
 use App\Modules\Sap\Contracts\Enums\Part;
+use App\Modules\Sap\Domain\Columns\Column;
+use App\Modules\Sap\Domain\Columns\PartColumns;
 use App\Modules\Sap\Domain\Runs\RunFinished;
 use App\Modules\Sap\Domain\Runs\RunState;
 use App\Modules\Sap\Domain\Runs\RunType;
@@ -131,6 +133,18 @@ final class Run extends Model
     }
 
     /**
+     * The columns the run's batches bring for a part: the part's own, except
+     * in a complemento run, whose sales lines bring only their key, posting
+     * date, weight and shipping code (contract section 10.5).
+     *
+     * @return array<string, Column>
+     */
+    public function columnsOf(Part $part): array
+    {
+        return $this->tipo === RunType::Complement && $part === Part::Sales ? PartColumns::salesComplement() : $part->columns();
+    }
+
+    /**
      * The rows the run received for a part, by column name, ten batches
      * (up to 10,000 rows) in memory at a time. Order does not matter: keys
      * never repeat within a run.
@@ -139,7 +153,7 @@ final class Run extends Model
      */
     public function rowsOf(Part $part): LazyCollection
     {
-        $columns = array_keys($part->columns());
+        $columns = array_keys($this->columnsOf($part));
 
         return DB::table('robot_batches')
             ->where('run_id', $this->id)

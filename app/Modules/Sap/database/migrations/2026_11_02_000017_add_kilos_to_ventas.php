@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Schema;
  * recreates v_ventas with it at the end, after sincronizado_en: a view only
  * grows at the end. The column is nullable: the batches that arrive before
  * the robot sends it, and the lines already stored, carry null until the
- * kilos run fills them.
+ * complemento run fills them.
  */
 return new class extends Migration
 {

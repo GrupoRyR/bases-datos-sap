@@ -24,12 +24,36 @@ final class PartColumns
     /** The cost concepts of produccion_costos (contract section 12.2), exact ASCII texts. */
     private const COST_CONCEPTS = ['Mano de obra directa', 'Costo variable', 'Costo fijo', 'Material comprado', 'Material intermedio'];
 
+    /** The columns a complemento run brings of each sales line (contract section 10.5), in contract order. */
+    private const SALES_COMPLEMENT = ['tipo_objeto', 'doc_entry', 'linea', 'fecha_contabilizacion', 'kilos', 'codigo_envio'];
+
+    /** @var array<string, Column>|null */
+    private static ?array $salesComplement = null;
+
     /**
      * @return array<string, Column>
      */
     public static function for(Part $part): array
     {
         return self::$cache[$part->value] ??= self::build($part);
+    }
+
+    /**
+     * The reduced header of a complemento run (contract section 10.5): the
+     * key of the sales line, its posting date for the range, its weight and
+     * its shipping code, which here are not omittable, since filling them is
+     * the whole run. Their values may still be null, as in a full run, when
+     * SAP has no weight or shipping code for the line.
+     *
+     * @return array<string, Column>
+     */
+    public static function salesComplement(): array
+    {
+        return self::$salesComplement ??= [
+            ...array_intersect_key(self::for(Part::Sales), array_flip(self::SALES_COMPLEMENT)),
+            'kilos' => Column::quantity('kilos'),
+            'codigo_envio' => Column::text('codigo_envio', 50),
+        ];
     }
 
     /**

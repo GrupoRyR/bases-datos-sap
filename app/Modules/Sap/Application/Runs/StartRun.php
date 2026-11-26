@@ -32,7 +32,7 @@ final class StartRun
     /** The earliest PRODUCCION window start, so the initial load can reach back months (contract section 12.3). */
     private const PRODUCTION_WINDOW_FROM = '2026-01-01';
 
-    /** The first month a historical VENTAS run may load, the agreed start of the load (contract section 10.4). */
+    /** The first month a historical or complemento VENTAS run may load, the agreed start of the load (contract sections 10.4 and 10.5). */
     private const HISTORICAL_FROM = '2025-01-01';
 
     /** @var array<string, string> */
@@ -60,9 +60,9 @@ final class StartRun
         }
 
         if ($type === null) {
-            $this->fail('tipo', 'Tipo desconocido: solo completa, solicitud o historico.');
-        } elseif ($type === RunType::Historical && $dataset !== null && $dataset !== Dataset::Ventas) {
-            $this->fail('tipo', 'Solo VENTAS tiene corridas historico.');
+            $this->fail('tipo', 'Tipo desconocido: solo completa, solicitud, historico o complemento.');
+        } elseif ($type->isPastMonth() && $dataset !== null && $dataset !== Dataset::Ventas) {
+            $this->fail('tipo', "Solo VENTAS tiene corridas {$type->value}.");
         }
 
         $parts = $dataset ? $this->parts($input['partes'] ?? null, $dataset, $type, $company) : [];
@@ -76,8 +76,8 @@ final class StartRun
             $this->fail('extraida_en', 'Debe ser una hora ISO 8601 con zona.');
         }
 
-        if ($type === RunType::Historical && $requests !== []) {
-            $this->fail('solicitudes', 'Una corrida historico no atiende solicitudes.');
+        if ($type?->isPastMonth() && $requests !== []) {
+            $this->fail('solicitudes', "Una corrida {$type->value} no atiende solicitudes.");
         }
 
         if ($dataset !== null && $company !== null && $requests !== []) {
@@ -88,6 +88,7 @@ final class StartRun
             throw RobotRequestRejected::invalid('La corrida no cumple el contrato.', $this->errors);
         }
 
+        // A complemento run fills a month already loaded, so only the historical one refuses it.
         if ($type === RunType::Historical && $window !== null && $until !== null) {
             $this->refuseLoadedRange($company, $window, $until);
         }
@@ -154,7 +155,7 @@ final class StartRun
                 // Only parts with an SAP update time (and the addresses and
                 // contacts that follow their partner) can bring changes.
                 $this->fail("partes.{$name}", $type?->isWhole()
-                    ? 'En una corrida completa o historico todas las partes van en modo todo.'
+                    ? 'En una corrida completa, historico o complemento todas las partes van en modo todo.'
                     : 'Esta parte siempre llega en modo todo.');
             } else {
                 $valid[$part->value] = $mode->value;
@@ -162,7 +163,7 @@ final class StartRun
         }
 
         if ($type?->isWhole() && array_diff($this->required($dataset, $company), array_keys($parts)) !== []) {
-            $this->fail('partes', 'Una corrida completa o historico trae todas las partes del conjunto.');
+            $this->fail('partes', 'Una corrida completa, historico o complemento trae todas las partes del conjunto.');
         }
 
         return $valid;
@@ -264,7 +265,8 @@ final class StartRun
      * today in Bogota. VENTAS reaches back 40 days at most, so a robot error
      * never reaches closed months; PRODUCCION, to 2026-01-01, since all of it
      * comes again from SAP. The other datasets have no window. A historical
-     * run starts on the first day of a month instead (section 10.4).
+     * or complemento run starts on the first day of a month instead
+     * (sections 10.4 and 10.5).
      */
     private function window(mixed $date, Dataset $dataset, ?RunType $type): ?string
     {
@@ -282,9 +284,9 @@ final class StartRun
             return null;
         }
 
-        if ($type === RunType::Historical) {
+        if ($type?->isPastMonth()) {
             if (substr($date, 8) !== '01' || $date < self::HISTORICAL_FROM) {
-                $this->fail('ventana_desde', 'En una corrida historico es el primer día de un mes, desde '.self::HISTORICAL_FROM.'.');
+                $this->fail('ventana_desde', "En una corrida {$type->value} es el primer día de un mes, desde ".self::HISTORICAL_FROM.'.');
 
                 return null;
             }
@@ -307,22 +309,22 @@ final class StartRun
     }
 
     /**
-     * The last day of a historical run (contract section 10.4): in the month
+     * The last day of a historical or complemento run (contract sections 10.4 and 10.5): in the month
      * of ventana_desde and before the nightly window starts today, so the
      * load never meets the 02:00 run. Any other run carries none.
      */
     private function until(mixed $date, ?RunType $type, ?string $from): ?string
     {
-        if ($type !== RunType::Historical) {
+        if (! $type?->isPastMonth()) {
             if ($date !== null) {
-                $this->fail('ventana_hasta', 'Solo una corrida historico lleva ventana_hasta.');
+                $this->fail('ventana_hasta', 'Solo una corrida historico o complemento lleva ventana_hasta.');
             }
 
             return null;
         }
 
         if (! SapTime::isDate($date)) {
-            $this->fail('ventana_hasta', 'Una corrida historico lleva ventana_hasta AAAA-MM-DD.');
+            $this->fail('ventana_hasta', "Una corrida {$type->value} lleva ventana_hasta AAAA-MM-DD.");
 
             return null;
         }
