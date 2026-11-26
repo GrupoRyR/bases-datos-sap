@@ -64,7 +64,7 @@ return [
         'completa' => 'Nocturna',
         'solicitud' => 'Por solicitud',
         'historico' => 'Carga histórica',
-        'kilos' => 'Kilos',
+        'complemento' => 'Complemento',
     ],
 
     'estados_corrida' => [

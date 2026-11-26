@@ -20,14 +20,14 @@ use Illuminate\Support\Facades\Schema;
  * the number of companies: one for the last applied times, one for the
  * latest runs and, per part, a column check and one grouped count.
  *
- * A historical or kilos VENTAS load (contract sections 10.4 and 10.5) fills a past month: it is
+ * A historical or complemento VENTAS load (contract sections 10.4 and 10.5) fills a past month: it is
  * neither the last update of the dataset nor its latest run, so a failed
  * nightly run still shows.
  */
 final class DatabaseDatasetStatuses implements DatasetStatuses
 {
     /** The run types that load a past month and never stand for the dataset's status. */
-    private const PAST_MONTH = [RunType::Historical->value, RunType::Weights->value];
+    private const PAST_MONTH = [RunType::Historical->value, RunType::Complement->value];
 
     public function all(): array
     {

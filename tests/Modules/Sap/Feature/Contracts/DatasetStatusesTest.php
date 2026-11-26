@@ -62,7 +62,7 @@ it('tells the last applied time and the latest run in any state', function () {
         ->and($sgx->lastRun?->finishedAt?->format('H:i'))->toBe('09:40');
 });
 
-it('never shows a historical or kilos load as the last update or the latest run of VENTAS', function (string $type) {
+it('never shows a historical or complemento load as the last update or the latest run of VENTAS', function (string $type) {
     statusRun(Company::Sgx, Dataset::Ventas, ['tipo' => 'completa', 'partes' => ['ventas' => 'todo'], 'aplicada_en' => '2026-10-26 02:30:00']);
     $nightly = statusRun(Company::Sgx, Dataset::Ventas, [
         'tipo' => 'completa', 'partes' => ['ventas' => 'todo'], 'estado' => 'fallida',
@@ -80,7 +80,7 @@ it('never shows a historical or kilos load as the last update or the latest run 
         ->and($ventas->lastAppliedAt?->format('Y-m-d H:i'))->toBe('2026-10-26 02:30')
         ->and($ventas->lastRun?->id)->toBe($nightly->id)
         ->and($ventas->lastRun?->state)->toBe('fallida');
-})->with(['historico', 'kilos']);
+})->with(['historico', 'complemento']);
 
 it('counts the active master rows and every receivable, sales and order line of each company', function () {
     $synced = '2026-10-27 02:30:00';

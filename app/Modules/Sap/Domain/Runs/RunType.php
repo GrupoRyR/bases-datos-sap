@@ -16,8 +16,8 @@ enum RunType: string
     /** A manual VENTAS load of one month before the nightly window, into an empty range (section 10.4). */
     case Historical = 'historico';
 
-    /** A manual VENTAS run of one month before the nightly window that fills only kilos of the lines already stored (section 10.5). */
-    case Weights = 'kilos';
+    /** A manual VENTAS run of one month before the nightly window that fills only kilos and codigo_envio of the lines already stored (section 10.5). */
+    case Complement = 'complemento';
 
     /**
      * Whether the run is a manual one of a VENTAS month before the nightly
@@ -26,7 +26,7 @@ enum RunType: string
      */
     public function isPastMonth(): bool
     {
-        return in_array($this, [self::Historical, self::Weights], true);
+        return in_array($this, [self::Historical, self::Complement], true);
     }
 
     /** Whether the run brings every part of the dataset in full and its SAP count. */

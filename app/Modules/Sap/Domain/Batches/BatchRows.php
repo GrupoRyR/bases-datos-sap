@@ -16,7 +16,7 @@ use App\Modules\Sap\Domain\Values\SapTime;
  * part's column order, with text trimmed, times in the app timezone and
  * amounts as text, and null where the header left a column out. A run
  * whose batches bring other columns than the part's (the reduced header of
- * a kilos run, section 10.5) passes them as the expected columns.
+ * a complemento run, section 10.5) passes them as the expected columns.
  */
 final class BatchRows
 {
