@@ -11,7 +11,7 @@ use App\Modules\Sap\Domain\Values\SapTime;
  * Checks and normalizes the rows of a batch (docs/contrato-robot.md,
  * section 4.2). Columns may come in any order but must be exactly the
  * part's, without repeats, except an omittable column (ganancia_bruta of
- * VENTAS, contacto_principal of partners, telefono_2 of contacts), which
+ * VENTAS, kilos and codigo_envio of VENTAS, contacto_principal of partners, telefono_2 of contacts), which
  * the header may leave out; rows come back as lists in the
  * part's column order, with text trimmed, times in the app timezone and
  * amounts as text, and null where the header left a column out.
