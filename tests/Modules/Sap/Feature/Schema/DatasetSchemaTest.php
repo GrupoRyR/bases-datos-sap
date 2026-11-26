@@ -362,6 +362,11 @@ it('rolls kilos back, leaving ventas and v_ventas as they were', function () {
     $migration = require base_path('app/Modules/Sap/database/migrations/2026_11_02_000017_add_kilos_to_ventas.php');
     $listing = fn (string $name): array => Schema::connection('ventas')->getColumnListing($name);
 
+    // The first query of a test migrates the test databases (LazilyRefreshDatabase),
+    // so it must run here and not inside usingConnection, which would migrate
+    // with ventas as the default connection (on MySQL it then finds its tables).
+    $full = $listing('v_ventas');
+
     // Roll back in order: codigo_envio goes first, as migrate:rollback would.
     DB::usingConnection('ventas', fn () => $later->down());
     $before = $listing('v_ventas');
@@ -374,4 +379,9 @@ it('rolls kilos back, leaving ventas and v_ventas as they were', function () {
     DB::usingConnection('ventas', fn () => $migration->up());
 
     expect($listing('v_ventas'))->toBe($before);
+
+    // Leave the schema as the migrations left it: DDL commits on MySQL.
+    DB::usingConnection('ventas', fn () => $later->up());
+
+    expect($listing('v_ventas'))->toBe($full);
 });
