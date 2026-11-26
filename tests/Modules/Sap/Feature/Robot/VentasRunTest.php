@@ -266,6 +266,24 @@ it('stores the kilos of a line, negative on a credit note, and null when the hea
     expect($kilos())->toBe([3 => null]);
 });
 
+it('stores the shipping code of a line, and null when the header leaves it out', function () {
+    $run = sendVentas($this, [
+        saleLine(1, '2026-10-01', ['codigo_envio' => '  CEDI BOGOTA  ']),
+        saleLine(2, '2026-10-02', ['codigo_envio' => null]),
+    ], ['tipo' => 'completa']);
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 2], 'conteo_sap' => ['ventas' => 2]])->assertOk();
+
+    $codes = fn (): array => DB::connection('ventas')->table('v_ventas')->orderBy('doc_entry')->pluck('codigo_envio', 'doc_entry')->all();
+
+    expect($codes())->toBe([1 => 'CEDI BOGOTA', 2 => null]);
+
+    $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', ventasRun())->assertCreated()->json('run_id');
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/lotes", ventasBatchWithout([saleLine(3, '2026-10-03')], ['codigo_envio', 'kilos']))->assertCreated();
+    RobotClient::post($this, "/api/robot/v1/corridas/{$run}/cerrar", ['batches' => 1, 'filas' => ['ventas' => 1]])->assertOk();
+
+    expect($codes())->toBe([3 => null]);
+});
+
 it('still refuses a batch that misses or adds any other column', function (array $without, ?string $extra, string $message) {
     $run = (int) RobotClient::post($this, '/api/robot/v1/corridas', ventasRun())->assertCreated()->json('run_id');
     $body = ventasBatchWithout([saleLine(1, '2026-10-01')], $without);

@@ -166,7 +166,7 @@ it('only lets the transition columns be left out', function () {
         'clientes' => ['contacto_principal'],
         'proveedores' => ['contacto_principal'],
         'contactos' => ['telefono_2'],
-        'ventas' => ['ganancia_bruta', 'kilos'],
+        'ventas' => ['ganancia_bruta', 'kilos', 'codigo_envio'],
     ]);
 });
 
