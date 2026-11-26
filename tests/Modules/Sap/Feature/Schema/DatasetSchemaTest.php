@@ -336,16 +336,34 @@ it('rolls fecha_corte of v_cartera back, leaving the table and view as they were
     expect($listing('v_cartera'))->toBe($before);
 });
 
-it('adds kilos at the end of v_ventas, after every older column', function () {
+it('adds kilos and then codigo_envio at the end of v_ventas, after every older column', function () {
     $columns = Schema::connection('ventas')->getColumnListing('v_ventas');
 
-    expect(end($columns))->toBe('kilos')
-        ->and(array_slice($columns, -2, 1))->toBe(['sincronizado_en']);
+    expect(array_slice($columns, -3))->toBe(['sincronizado_en', 'kilos', 'codigo_envio']);
+});
+
+it('rolls codigo_envio back, leaving ventas and v_ventas as they were', function () {
+    $migration = require base_path('app/Modules/Sap/database/migrations/2026_11_02_000018_add_codigo_envio_to_ventas.php');
+    $listing = fn (string $name): array => Schema::connection('ventas')->getColumnListing($name);
+    $before = $listing('v_ventas');
+
+    DB::usingConnection('ventas', fn () => $migration->down());
+
+    expect($listing('ventas'))->not->toContain('codigo_envio')
+        ->and($listing('v_ventas'))->toBe(array_slice($before, 0, -1));
+
+    DB::usingConnection('ventas', fn () => $migration->up());
+
+    expect($listing('v_ventas'))->toBe($before);
 });
 
 it('rolls kilos back, leaving ventas and v_ventas as they were', function () {
+    $later = require base_path('app/Modules/Sap/database/migrations/2026_11_02_000018_add_codigo_envio_to_ventas.php');
     $migration = require base_path('app/Modules/Sap/database/migrations/2026_11_02_000017_add_kilos_to_ventas.php');
     $listing = fn (string $name): array => Schema::connection('ventas')->getColumnListing($name);
+
+    // Roll back in order: codigo_envio goes first, as migrate:rollback would.
+    DB::usingConnection('ventas', fn () => $later->down());
     $before = $listing('v_ventas');
 
     DB::usingConnection('ventas', fn () => $migration->down());

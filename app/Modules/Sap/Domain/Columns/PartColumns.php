@@ -373,6 +373,9 @@ final class PartColumns
             // Weight of the line ("Tot KG" of AnálisisVentas-1), negative on credit
             // notes. Omittable until the robot sends it (contract section 4.2).
             Column::quantity('kilos', omittable: true),
+            // Code of the shipping address (OINV/ORIN.ShipToCode); in SDC, the
+            // distribution centre. Omittable until the robot sends it (section 4.2).
+            Column::text('codigo_envio', 50, omittable: true),
         ];
     }
 
