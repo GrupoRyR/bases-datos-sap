@@ -134,14 +134,14 @@ final class Run extends Model
 
     /**
      * The columns the run's batches bring for a part: the part's own, except
-     * in a kilos run, whose sales lines bring only their key, posting date
-     * and weight (contract section 10.5).
+     * in a complemento run, whose sales lines bring only their key, posting
+     * date, weight and shipping code (contract section 10.5).
      *
      * @return array<string, Column>
      */
     public function columnsOf(Part $part): array
     {
-        return $this->tipo === RunType::Weights && $part === Part::Sales ? PartColumns::salesWeights() : $part->columns();
+        return $this->tipo === RunType::Complement && $part === Part::Sales ? PartColumns::salesComplement() : $part->columns();
     }
 
     /**

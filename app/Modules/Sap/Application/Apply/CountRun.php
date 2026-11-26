@@ -42,7 +42,7 @@ final class CountRun
             ];
         }
 
-        // A historical or kilos load covers a past month, not the day it ran:
+        // A historical or complemento load covers a past month, not the day it ran:
         // only the nightly run stands for the daily count (sections 10.4 and 10.5).
         if ($run->tipo->isPastMonth()) {
             return $counts;
