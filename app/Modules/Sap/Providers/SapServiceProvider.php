@@ -9,6 +9,7 @@ use App\Modules\Sap\Application\Panel\DatabaseRequestHistory;
 use App\Modules\Sap\Application\Panel\DatabaseStability;
 use App\Modules\Sap\Application\Requests\PlaceRequest;
 use App\Modules\Sap\Application\Requests\SettleRequests;
+use App\Modules\Sap\Console\CanDeployCommand;
 use App\Modules\Sap\Console\CreateAppKeyCommand;
 use App\Modules\Sap\Console\ExpireCommand;
 use App\Modules\Sap\Contracts\ClientAppKeys;
@@ -67,7 +68,7 @@ final class SapServiceProvider extends ModuleServiceProvider
 
     protected function bootModule(): void
     {
-        $this->commands([ExpireCommand::class, CreateAppKeyCommand::class]);
+        $this->commands([ExpireCommand::class, CreateAppKeyCommand::class, CanDeployCommand::class]);
 
         Event::listen(RunFinished::class, [SettleRequests::class, 'onRunFinished']);
 

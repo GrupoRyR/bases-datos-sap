@@ -139,3 +139,11 @@ Cada app tiene su llave (`client_apps`): `bsap_` y 48 caracteres al azar; se gua
 - Al iniciar una corrida, cada id de `solicitudes` debe estar `tomada`, ser de la misma empresa y conjunto y pedir solo partes que la corrida trae; si no, 422. La solicitud queda ligada a la corrida (`run_id`).
 - Las solicitudes se cierran con su corrida (`Domain\Runs\RunFinished`, en la misma transacción, `SettleRequests`): cerrada → `terminada`; fallida → `fallida` con el error; vencida → `vencida`. Las hermanas que esperaban sin hora reciben la suya: 3 minutos después si terminó bien, de inmediato si falló o venció, y siempre fuera de las franjas bloqueadas.
 - `sap:vencer` además vence las solicitudes que llevan 30 minutos `tomada`. Si su corrida cierra bien después, los datos se aplican igual y la solicitud se queda `vencida`: es la señal de que tardó demasiado.
+
+## Antes de desplegar
+
+El despachador de despliegues corre `php artisan sap:puede-desplegar --no-ansi` (`Console\CanDeployCommand`) antes de cada despliegue, porque el modo mantenimiento a mitad de una corrida la mata: el robot reintenta un 5xx solo 3 veces en 14 segundos (`robot/etl/api.py`). Solo lee; no vence nada. Imprime `ok` y sale con 0, o imprime una línea con el primer motivo que aplica y sale con 1:
+
+1. A 15 minutos o menos de una franja bloqueada, con la misma regla de `BlockedSlots` que las solicitudes: desde 15 minutos antes (incluido) hasta 15 minutos después (excluido).
+2. Dentro de la ventana de la corrida nocturna en Bogotá (`sap.deploy.nightly_window`, `BASES_SAP_VENTANA_NOCTURNA_DESPLIEGUE`, por defecto `01:45-02:15`; `Domain\Deploy\NightlyWindow`): el inicio incluido y el fin excluido; si el fin va antes del inicio, cruza la medianoche. Una ventana mal escrita también rechaza.
+3. Una corrida `abierta` que sigue dentro de su ventana de 30 minutos (`Run::isOpen()`), o una solicitud `tomada` que todavía no cumple los 30 minutos para vencer.
