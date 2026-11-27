@@ -14,18 +14,28 @@ que guardó la app:
   envía con `activo = true`; en una parte sin columna `activo` (direcciones), todas. Una
   empresa sin lista de precios pública no envía precios: su grupo va en 0.
 - CARTERA: un grupo `actual` con las filas de la cartera y la suma de `saldo`.
-- VENTAS: de 2025-01-01 a hoy, mes por mes con el filtro del histórico (consultas.sql_rango);
-  un grupo por mes con líneas: filas, `sumas.total`, `sumas.cantidad`, `nulos.kilos` y
-  `nulos.codigo_envio`. Cada tramo se suelta apenas se suma.
+- VENTAS: de 2025-01-01 a ayer (fecha de Bogotá), mes por mes con el filtro del histórico
+  (consultas.sql_rango); un grupo por mes con líneas: filas, `sumas.total`, `sumas.cantidad`,
+  `nulos.kilos` y `nulos.codigo_envio`. Cada tramo se suelta apenas se suma. Hasta ayer, y no
+  hasta hoy, porque la app tiene lo que cargó la corrida de las 02:00: las ventas que SAP
+  contabiliza durante el día serían diferencias falsas. El mismo `hasta` va a /totales y a
+  /comparaciones.
 Las sumas van exactas en Decimal y se redondean al final, la mitad lejos del cero (como cada
 línea ya va redondeada, no cambian), y se comparan como texto.
 
 Un conjunto que falla en SAP o en /totales no se compara: queda en el log y en los fallos, y
 los demás siguen. El resumen va al log sin valores de SAP más allá de la clave y el campo.
+
+`run_robot.py --comparar` compara los tres conjuntos (o los de --conjunto); --tras-despliegue,
+solo VENTAS; y la comparación diaria, los tres, una vez al día después de una --completa buena
+(run_robot._comparacion_diaria), con el día anotado en robot/state/comparacion_diaria.json
+(comparada_el y anotar_dia).
 """
 from __future__ import annotations
 
 import dataclasses
+import json
+import os
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -60,10 +70,14 @@ _SIN_SESION = "SIN_SESION"  # la VPN o la conexión fallaron: el fallo ya lo da 
 # Estimación de la fase con VPN: la del complemento de ventas (complemento.duracion_estimada:
 # 2 minutos fijos y 10 s por mes de cada empresa) por VENTAS, que es el mismo recorrido mes a
 # mes pero con la consulta completa del histórico (que en el histórico real del 2026-11-24 tardó
-# 1 a 2 s por tramo con su COUNT(*)), más 60 s por empresa para MAESTROS y CARTERA, que son
-# una consulta por parte como en la nocturna. Sin medir todavía con SAP: va con holgura. Desde
-# enero de 2025, con las dos empresas, da unos 11 minutos.
-SEGUNDOS_POR_EMPRESA = 60
+# 1 a 2 s por tramo con su COUNT(*)), más 30 s por empresa para MAESTROS y otros 30 para
+# CARTERA, que son una consulta por parte como en la nocturna. Sin medir todavía con SAP: va
+# con holgura. Desde enero de 2025, los tres conjuntos de las dos empresas dan unos 11 minutos;
+# solo VENTAS (después de un despliegue), unos 9.
+SEGUNDOS_POR_CONJUNTO = 30
+
+# La comparación diaria (run_robot._comparacion_diaria): el último día en que se comparó todo.
+ARCHIVO_DIARIO = "comparacion_diaria.json"
 
 
 @dataclass
@@ -111,15 +125,31 @@ class Comparacion:
                 "grupos_con_diferencias": len(self.claves_con_diferencias)}
 
 
-def duracion_estimada(empresas: int, hoy: date) -> timedelta:
-    """Cuánto estará la VPN arriba (una estimación; ver SEGUNDOS_POR_EMPRESA)."""
-    return (complemento.duracion_estimada(len(tramos_ventas(hoy)), empresas)
-            + timedelta(seconds=SEGUNDOS_POR_EMPRESA * empresas))
+def hoy_bogota(ahora: Callable[[], datetime] = config.ahora) -> date:
+    """La fecha de hoy en Bogotá, aunque el reloj dé otra zona."""
+    momento = ahora()
+    return (momento.astimezone(config.BOGOTA) if momento.tzinfo else momento).date()
 
 
-def tramos_ventas(hoy: date) -> list[tuple[date, date]]:
-    """Un tramo por mes de PRIMER_DIA a hoy (el último, hasta hoy)."""
-    return historico.tramos(PRIMER_DIA, None, hoy + timedelta(days=1))
+def hasta_ventas(hoy: date) -> date:
+    """El último día que se compara en VENTAS: ayer."""
+    return hoy - timedelta(days=1)
+
+
+def duracion_estimada(empresas: int, hoy: date, conjuntos: tuple[str, ...] | list[str] = CONJUNTOS) -> timedelta:
+    """Cuánto estará la VPN arriba (una estimación; ver SEGUNDOS_POR_CONJUNTO)."""
+    tramos = len(tramos_ventas(hasta_ventas(hoy))) if "VENTAS" in conjuntos else 0
+    otros = sum(1 for c in conjuntos if c != "VENTAS")
+    return (complemento.duracion_estimada(tramos, empresas)
+            + timedelta(seconds=SEGUNDOS_POR_CONJUNTO * otros * empresas))
+
+
+def tramos_ventas(hasta: date) -> list[tuple[date, date]]:
+    """Un tramo por mes de PRIMER_DIA a `hasta` (el último, hasta ese día); ninguno si `hasta`
+    es anterior a PRIMER_DIA."""
+    if hasta < PRIMER_DIA:
+        return []
+    return historico.tramos(PRIMER_DIA, None, hasta + timedelta(days=1))
 
 
 def formatear(valor: Decimal, decimales: int) -> str:
@@ -141,15 +171,16 @@ def _extraer(conn: Any, empresa_cfg: EmpresaHana, trabajo: Any, ahora: Callable[
     return r
 
 
-def _trabajo_completo(cfg: Config, conjunto: str, empresa: str, hoy: date) -> Any:
-    """El trabajo de la nocturna de ese conjunto (las mismas partes), sin su COUNT(*)."""
-    [t] = [t for t in trabajos_completos([empresa], hoy, [], cfg.hana.sin_precios()) if t.conjunto == conjunto]
+def _trabajo_completo(cfg: Config, conjunto: str, empresa: str, dia: date) -> Any:
+    """El trabajo de la nocturna de ese conjunto (las mismas partes), sin su COUNT(*). `dia`
+    solo pone la fecha_corte de CARTERA, que no cambia la consulta."""
+    [t] = [t for t in trabajos_completos([empresa], dia, [], cfg.hana.sin_precios()) if t.conjunto == conjunto]
     return dataclasses.replace(t, tipo=TIPO)
 
 
-def _maestros(cfg: Config, conn: Any, empresa_cfg: EmpresaHana, hoy: date,
+def _maestros(cfg: Config, conn: Any, empresa_cfg: EmpresaHana, hasta: date,
               ahora: Callable[[], datetime], renovar: Callable[[], Any]) -> dict[str, Grupo]:
-    r = _extraer(conn, empresa_cfg, _trabajo_completo(cfg, "MAESTROS", empresa_cfg.codigo, hoy), ahora)
+    r = _extraer(conn, empresa_cfg, _trabajo_completo(cfg, "MAESTROS", empresa_cfg.codigo, hasta), ahora)
     grupos: dict[str, Grupo] = {}
     for nombre in esquema.PARTES_POR_CONJUNTO["MAESTROS"]:
         filas = r.filas.get(nombre, [])  # precios no va si la empresa no tiene lista pública
@@ -162,9 +193,9 @@ def _maestros(cfg: Config, conn: Any, empresa_cfg: EmpresaHana, hoy: date,
     return grupos
 
 
-def _cartera(cfg: Config, conn: Any, empresa_cfg: EmpresaHana, hoy: date,
+def _cartera(cfg: Config, conn: Any, empresa_cfg: EmpresaHana, hasta: date,
              ahora: Callable[[], datetime], renovar: Callable[[], Any]) -> dict[str, Grupo]:
-    r = _extraer(conn, empresa_cfg, _trabajo_completo(cfg, "CARTERA", empresa_cfg.codigo, hoy), ahora)
+    r = _extraer(conn, empresa_cfg, _trabajo_completo(cfg, "CARTERA", empresa_cfg.codigo, hasta), ahora)
     filas = r.filas["cartera"]
     posicion = r.columnas["cartera"].index("saldo")
     saldo = sum((Decimal(f[posicion]) for f in filas), Decimal(0))
@@ -197,10 +228,10 @@ def grupos_ventas(acumulado: dict[str, dict[str, Any]]) -> dict[str, Grupo]:
     }
 
 
-def _ventas(cfg: Config, conn: Any, empresa_cfg: EmpresaHana, hoy: date,
+def _ventas(cfg: Config, conn: Any, empresa_cfg: EmpresaHana, ultimo: date,
             ahora: Callable[[], datetime], renovar: Callable[[], Any]) -> dict[str, Grupo]:
     acumulado: dict[str, dict[str, Any]] = {}
-    for desde, hasta in tramos_ventas(hoy):
+    for desde, hasta in tramos_ventas(ultimo):
         # El tramo del histórico (la misma consulta, el mismo rango y la misma validación); se
         # suma y se suelta antes del siguiente.
         r = _extraer(conn, empresa_cfg, trabajo_historico_ventas(empresa_cfg.codigo, desde, hasta), ahora)
@@ -233,13 +264,25 @@ def leer_sap(
     sin_vpn: bool = False,
     ahora: Callable[[], datetime] = config.ahora,
     renovar: Callable[[], Any] = lambda: None,
+    conjuntos: tuple[str, ...] | list[str] = CONJUNTOS,
 ) -> tuple[list[Comparacion], list[tuple[str, str]]]:
-    """FASE 1: los totales de SAP de cada empresa y conjunto, en una sesión de VPN. Un conjunto
-    que falla no frena a los demás. Devuelve las comparaciones y los fallos."""
-    comparaciones = [
-        Comparacion(conjunto, empresa, *((PRIMER_DIA.isoformat(), hoy.isoformat()) if conjunto == "VENTAS" else ()))
-        for empresa in empresas for conjunto in CONJUNTOS if esquema.es_de_la_empresa(conjunto, empresa)
-    ]
+    """FASE 1: los totales de SAP de cada empresa y de los `conjuntos` (en el orden de
+    CONJUNTOS), en una sesión de VPN. VENTAS va de PRIMER_DIA a ayer (hasta_ventas(hoy)); si
+    ayer es anterior, VENTAS no tiene nada que comparar y no entra. Un conjunto que falla no
+    frena a los demás. Devuelve las comparaciones y los fallos."""
+    hasta = hasta_ventas(hoy)
+    comparaciones: list[Comparacion] = []
+    for empresa in empresas:
+        for conjunto in CONJUNTOS:
+            if conjunto not in conjuntos or not esquema.es_de_la_empresa(conjunto, empresa):
+                continue
+            if conjunto != "VENTAS":
+                comparaciones.append(Comparacion(conjunto, empresa))
+            elif hasta < PRIMER_DIA:
+                log.info("Comparación VENTAS %s: nada que comparar (ayer, %s, es anterior a %s).",
+                         empresa, hasta, PRIMER_DIA)
+            else:
+                comparaciones.append(Comparacion(conjunto, empresa, PRIMER_DIA.isoformat(), hasta.isoformat()))
 
     def leer(conn: Any, empresa: str) -> None:
         empresa_cfg = cfg.hana.empresas[empresa]
@@ -247,13 +290,16 @@ def leer_sap(
             if c.empresa != empresa:
                 continue
             try:
-                c.sap = _LECTORES[c.conjunto](cfg, conn, empresa_cfg, hoy, ahora, renovar)
+                c.sap = _LECTORES[c.conjunto](cfg, conn, empresa_cfg, hasta, ahora, renovar)
             except Exception as exc:
                 c.fallar(_etapa(exc), extraccion.mensaje_seguro(exc))
                 log.error("Comparación %s: falló la lectura de SAP: %s", c.nombre, exc)
             renovar()
 
-    fallos = extraccion.sesion(cfg, empresas, leer, robot_vpn=robot_vpn, conectar=conectar, sin_vpn=sin_vpn)
+    if not comparaciones:
+        return comparaciones, []  # nothing to read: no VPN session
+    fallos = extraccion.sesion(cfg, sorted({c.empresa for c in comparaciones}, key=empresas.index), leer,
+                               robot_vpn=robot_vpn, conectar=conectar, sin_vpn=sin_vpn)
     for c in comparaciones:
         if c.sap is None and c.error is None:
             c.fallar(_SIN_SESION, "No se leyó SAP (falló la VPN o la conexión a HANA).")
@@ -379,13 +425,69 @@ def ejecutar(
     sin_vpn: bool = False,
     ahora: Callable[[], datetime] = config.ahora,
     renovar: Callable[[], Any] = lambda: None,
+    conjuntos: tuple[str, ...] | list[str] = CONJUNTOS,
 ) -> tuple[list[Comparacion], list[tuple[str, str]]]:
-    """Las dos fases de la comparación. Devuelve las comparaciones y los fallos (etapa, mensaje):
-    sin fallos, todo cuadró y quedó guardado."""
-    comparaciones, fallos = leer_sap(cfg, empresas, ahora().date(), robot_vpn=robot_vpn, conectar=conectar,
-                                     sin_vpn=sin_vpn, ahora=ahora, renovar=renovar)
+    """Las dos fases de la comparación de los `conjuntos`. Devuelve las comparaciones y los
+    fallos (etapa, mensaje): sin fallos, todo cuadró y quedó guardado."""
+    comparaciones, fallos = leer_sap(cfg, empresas, hoy_bogota(ahora), robot_vpn=robot_vpn, conectar=conectar,
+                                     sin_vpn=sin_vpn, ahora=ahora, renovar=renovar, conjuntos=conjuntos)
     fallos += comparar_con_api(api, comparaciones, ahora, renovar)
     resumir(comparaciones)
     if not fallos:
         log.info("Comparación con SAP: todo cuadra.")
     return comparaciones, fallos
+
+
+# --- La comparación diaria: el día en robot/state/comparacion_diaria.json ----------------------
+# {"fecha": "AAAA-MM-DD" (el último día en que se comparó todo; falta si nunca),
+#  "ultima": {"momento", "resultado": "cuadra" | "no_cuadra" | "error", "comparaciones": [...]}}
+# Sin datos de SAP: solo el resultado de cada conjunto y cuántos grupos no cuadran.
+
+
+def _ruta_diaria() -> Any:
+    return config.STATE_DIR / ARCHIVO_DIARIO  # se lee aquí: las pruebas lo cambian
+
+
+def _leer_diaria() -> dict[str, Any]:
+    """El archivo diario; vacío si no existe o está dañado (comparar otra vez no hace daño)."""
+    ruta = _ruta_diaria()
+    if not ruta.exists():
+        return {}
+    try:
+        datos = json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        log.warning("No se pudo leer %s; se toma como sin comparación diaria.", ruta)
+        return {}
+    return datos if isinstance(datos, dict) else {}
+
+
+def comparada_el(dia: date) -> bool:
+    """Si la comparación diaria ya se hizo ese día."""
+    return _leer_diaria().get("fecha") == dia.isoformat()
+
+
+def se_comparo_todo(comparaciones: list[Comparacion]) -> bool:
+    """Si cada conjunto se leyó de SAP, se comparó con /totales y quedó guardado, cuadre o no."""
+    return bool(comparaciones) and all(c.resultado != "error" and c.sin_guardar is None for c in comparaciones)
+
+
+def anotar_dia(dia: date, comparaciones: list[Comparacion], momento: datetime) -> bool:
+    """Guarda el resultado de la comparación diaria, de forma atómica. Anota `dia` solo si se
+    comparó todo (se_comparo_todo); si no, deja la fecha anterior para que otra completa buena
+    de ese día lo reintente. Devuelve si anotó el día. Lanza OSError si no puede escribir."""
+    anterior = _leer_diaria().get("fecha")
+    completa = se_comparo_todo(comparaciones)
+    resultado = ("error" if not completa
+                 else "no_cuadra" if any(c.diferencias for c in comparaciones) else "cuadra")
+    datos: dict[str, Any] = {}
+    fecha = dia.isoformat() if completa else anterior
+    if isinstance(fecha, str):
+        datos["fecha"] = fecha
+    datos["ultima"] = {"momento": momento.isoformat(timespec="seconds"), "resultado": resultado,
+                       "comparaciones": [c.para_estado() for c in comparaciones]}
+    ruta = _ruta_diaria()
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    temporal = ruta.with_name(ruta.name + ".tmp")
+    temporal.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8", newline="\n")
+    os.replace(temporal, ruta)
+    return completa

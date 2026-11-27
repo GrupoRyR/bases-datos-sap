@@ -18,7 +18,8 @@ siguen las mismas dos fases y nunca llaman a la API.
 Uso:
     python run_robot.py --completa                 # nocturna: MAESTROS, CARTERA, VENTAS y PEDIDOS de SGX y SDC,
                                                    # PRODUCCION solo de SGX,
-                                                   # más los registros del archivo (AUDITORIA, ORTT)
+                                                   # más los registros del archivo (AUDITORIA, ORTT);
+                                                   # si salió bien, la comparación diaria con SAP
     python run_robot.py --completa --empresa SGX   # solo una empresa (se puede repetir)
     python run_robot.py --completa --sin-vpn       # asume la VPN ya conectada a mano
     python run_robot.py --archivo fotos            # domingo 03:00: fotos del archivo y catálogo
@@ -38,13 +39,15 @@ Uso:
                                                    # mes por mes, como el histórico (complemento.py,
                                                    # orden 016). No corre si ventas.sql no trae los
                                                    # kilos
-    python run_robot.py --comparar [--empresa SGX] # solo lee: totales de MAESTROS, CARTERA y VENTAS en
-                                                   # SAP contra los de la app (/totales), y el
-                                                   # resultado a /comparaciones (comparar.py)
+    python run_robot.py --comparar [--empresa SGX] [--conjunto VENTAS]
+                                                   # solo lee: totales de MAESTROS, CARTERA y VENTAS
+                                                   # (VENTAS hasta ayer) en SAP contra los de la app
+                                                   # (/totales), y el resultado a /comparaciones
+                                                   # (comparar.py)
     python run_robot.py --tras-despliegue          # lo lanza la revisión de cada minuto después de
                                                    # actualizarse (autoactualizar.py): corre los
                                                    # complementos pendientes de robot/complementos.toml
-                                                   # y al final la comparación
+                                                   # y al final la comparación de VENTAS
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
@@ -101,6 +104,9 @@ SOLICITUDES_POR_PAGINA = 20
 MAX_PAGINAS = 5
 ESPERA_CANDADO = timedelta(minutes=20)  # la nocturna y el domingo esperan a la revisión que termina
 TRAS_DESPLIEGUE = "tras despliegue"
+# After a deploy or a complement only VENTAS is compared (the complements change it); the daily
+# comparison after a good completa compares the three (_comparacion_diaria).
+CONJUNTOS_TRAS_DESPLIEGUE = ("VENTAS",)
 # Options a pending complement (robot/complementos.toml) may carry, per mode. Anything else,
 # --forzar, --sin-vpn or another mode included, makes the entry invalid.
 OPCIONES_COMPLEMENTO = {"complemento-ventas": ("--desde", "--hasta", "--empresa")}
@@ -329,17 +335,20 @@ def _parser() -> argparse.ArgumentParser:
     modo.add_argument("--tras-despliegue", action="store_true",
                       help="Lo lanza la revisión de cada minuto después de actualizarse al commit desplegado: "
                            "corre los complementos pendientes de robot/complementos.toml y al final la "
-                           "comparación con SAP (--comparar). Respeta las franjas y espera el candado; no lleva "
+                           "comparación de VENTAS con SAP (--comparar --conjunto VENTAS). Respeta las franjas y espera el candado; no lleva "
                            "otras opciones.")
     modo.add_argument("--comparar", action="store_true",
-                      help="Solo lee: calcula en SAP los totales de MAESTROS, CARTERA y VENTAS (desde 2025-01-01) y "
-                           "los compara con los de la app (/totales); guarda cada resultado en /comparaciones. "
-                           "No escribe en SAP ni abre corridas. Respeta las franjas y espera el candado.")
+                      help="Solo lee: calcula en SAP los totales de MAESTROS, CARTERA y VENTAS (VENTAS de "
+                           "2025-01-01 a ayer), o los de --conjunto, y los compara con los de la app (/totales); "
+                           "guarda cada resultado en /comparaciones. No escribe en SAP ni abre corridas. Respeta "
+                           "las franjas y espera el candado.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
     parser.add_argument("--empresa", action="append", choices=EMPRESAS,
                         help="Empresa a procesar (se puede repetir). Por defecto, todas.")
+    parser.add_argument("--conjunto", action="append", choices=comparar.CONJUNTOS,
+                        help="Conjunto que compara --comparar (se puede repetir). Por defecto, los tres.")
     parser.add_argument("--sin-vpn", action="store_true",
                         help="No gestionar la VPN (asume que ya está activa).")
     parser.add_argument("--forzar", action="store_true",
@@ -490,7 +499,11 @@ def main(
     if tras and (args.empresa or args.desde is not None or args.hasta is not None or args.forzar):
         parser.error("--tras-despliegue no lleva --empresa, --desde, --hasta ni --forzar: cada complemento "
                      "pendiente trae sus argumentos y nunca se corre dentro de una franja.")
+    if args.conjunto and not args.comparar:
+        parser.error("--conjunto va solo con --comparar.")
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
+    # Los conjuntos de --comparar, en el orden de comparar.CONJUNTOS.
+    conjuntos = [c for c in comparar.CONJUNTOS if not args.conjunto or c in args.conjunto]
     carga: Trabajo | None = None
     # (--desde, --hasta) del histórico o del complemento de ventas
     meses: tuple[date, date | None] | None = None
@@ -572,11 +585,11 @@ def main(
             log.info("Complementos pendientes: %s.", ", ".join(c.id for c, _ in planes))
         else:
             log.info("Sin complementos pendientes después del despliegue: queda la comparación con SAP.")
-        # The comparison always runs at the end, also with nothing pending.
+        # The comparison of VENTAS always runs at the end, also with nothing pending.
         estimado = (sum((plan.estimado for _, plan in planes), timedelta())
-                    + comparar.duracion_estimada(len(EMPRESAS), ahora().date()))
+                    + comparar.duracion_estimada(len(EMPRESAS), comparar.hoy_bogota(ahora), CONJUNTOS_TRAS_DESPLIEGUE))
     elif args.comparar:
-        estimado = comparar.duracion_estimada(len(empresas), ahora().date())
+        estimado = comparar.duracion_estimada(len(empresas), comparar.hoy_bogota(ahora), conjuntos)
 
     programado = (completa or carga is not None or meses is not None or tras or args.comparar
                   or modo.startswith("archivo"))
@@ -716,12 +729,13 @@ def _tras_despliegue(
         resumen.append({"id": c.id, "modo": c.modo, "argumentos": list(c.argumentos),
                         "estado": "hecho" if hecho else "fallido",
                         "tramos": [t.para_estado() for t in tramos]})
-    # Always the comparison at the end, once, also after a failed complement or with nothing
-    # pending: it only reads SAP (its own VPN session) and the app.
+    # Always the comparison of VENTAS at the end, once, also after a failed complement or with
+    # nothing pending: it only reads SAP (its own VPN session) and the app.
     renovar()
     try:
         comparaciones, propios = _comparar(cfg, args, EMPRESAS, fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn,
-                                           conectar=conectar, ahora=ahora, renovar=renovar)
+                                           conectar=conectar, ahora=ahora, renovar=renovar,
+                                           conjuntos=CONJUNTOS_TRAS_DESPLIEGUE)
     except Exception as exc:
         log.exception("Error inesperado en la comparación con SAP.")
         comparaciones, propios = [], [("INESPERADO", f"Comparación: {extraccion.mensaje_seguro(exc)}")]
@@ -743,6 +757,57 @@ def _comparar(
         cfg, empresas, api=fabrica_api(cfg.api), robot_vpn=None if args.sin_vpn else fabrica_vpn(cfg.vpn),
         sin_vpn=args.sin_vpn, **kwargs,
     )
+
+
+def _comparacion_diaria(
+    cfg: Config,
+    args: argparse.Namespace,
+    empresas: list[str],
+    *,
+    fabrica_api: Callable[..., ApiCliente],
+    fabrica_vpn: Callable[..., Any],
+    conectar: Callable[..., Any],
+    ahora: Callable[[], datetime],
+    renovar: Callable[[], Any],
+) -> None:
+    """After a --completa that ended OK, with the lock still held: the full comparison of the
+    three datasets, at most once per Bogotá day (comparar.comparada_el / anotar_dia).
+
+    Only after a completa of every company (the nightly one): a partial one does not compare.
+    It never changes the completa's exit code or state: a mismatch or a failure goes to the
+    log, to robot/state/comparacion_diaria.json and to its own alert. If it could not compare
+    everything (SAP, the VPN or the API failed), the day is not recorded, so a later good
+    completa that day retries.
+    """
+    if set(empresas) != set(EMPRESAS):
+        log.info("La comparación diaria va después de una completa de todas las empresas; esta no compara.")
+        return
+    hoy = comparar.hoy_bogota(ahora)
+    if comparar.comparada_el(hoy):
+        log.info("La comparación diaria con SAP ya se hizo hoy (%s); no se repite.", hoy)
+        return
+    log.info("Comparación diaria con SAP: %s.", ", ".join(comparar.CONJUNTOS))
+    renovar()
+    try:
+        comparaciones, fallos = _comparar(cfg, args, list(EMPRESAS), fabrica_api=fabrica_api,
+                                          fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora,
+                                          renovar=renovar, conjuntos=comparar.CONJUNTOS)
+    except Exception as exc:  # the load already went well: nothing here changes it
+        log.exception("Error inesperado en la comparación diaria con SAP.")
+        comparaciones, fallos = [], [("INESPERADO", f"Comparación diaria: {extraccion.mensaje_seguro(exc)}")]
+    try:
+        if comparar.anotar_dia(hoy, comparaciones, ahora()):
+            log.info("Comparación diaria del %s anotada en %s.", hoy, comparar.ARCHIVO_DIARIO)
+        else:
+            log.warning("La comparación diaria no se pudo completar: no se anota el día; la reintenta la "
+                        "siguiente completa buena de hoy.")
+    except OSError as exc:
+        log.error("No se pudo guardar %s: %s", comparar.ARCHIVO_DIARIO, exc)
+        fallos.append(("ESTADO", f"No se pudo guardar el estado de la comparación diaria: {exc.__class__.__name__}."))
+    if fallos:
+        for etapa, mensaje in fallos:
+            log.error("FALLO en la etapa %s: %s", etapa, mensaje)
+        notificar.avisar_fallos(cfg.alertas, fallos)
 
 
 def _ejecutar(
@@ -776,6 +841,7 @@ def _ejecutar(
             comparaciones, fallos = _comparar(
                 cfg, args, empresas, fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn, conectar=conectar,
                 ahora=ahora, renovar=renovar,
+                conjuntos=[c for c in comparar.CONJUNTOS if not args.conjunto or c in args.conjunto],
             )
             extra["comparaciones"] = [c.para_estado() for c in comparaciones]
         elif meses is not None and modo == "complemento ventas":
@@ -840,6 +906,15 @@ def _ejecutar(
             notificar.avisar_fallos(cfg.alertas, fallos)
         return 1
     log.info("Robot terminado sin fallos en %.1fs.", duracion)
+    if modo == "completa":
+        # The load ended OK (the same condition as returning 0): the daily full comparison, in
+        # its own VPN session. Its outcome never changes this exit code nor the state above.
+        try:
+            _comparacion_diaria(cfg, args, empresas, fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn,
+                                conectar=conectar, ahora=ahora, renovar=renovar)
+        except KeyboardInterrupt:
+            log.warning("Comparación diaria cancelada por el usuario.")
+            return 130
     return 0
 
 

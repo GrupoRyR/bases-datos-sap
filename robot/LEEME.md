@@ -93,7 +93,7 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 
 | Comando | Qué hace | Usa la API |
 |---|---|---|
-| `run_robot.py --completa` | Nocturna: MAESTROS, CARTERA, VENTAS y PEDIDOS de las dos empresas, PRODUCCION de Segurex, la foto diaria de cartera y los registros del archivo. Toma también las solicitudes listas | Sí |
+| `run_robot.py --completa` | Nocturna: MAESTROS, CARTERA, VENTAS y PEDIDOS de las dos empresas, PRODUCCION de Segurex, la foto diaria de cartera y los registros del archivo. Toma también las solicitudes listas. Si salió bien, al final hace la comparación diaria con SAP (ver «Comparación con SAP») | Sí |
 | `run_robot.py --archivo fotos` | Domingo: fotos de las tablas del archivo y el catálogo | No |
 | `run_robot.py --archivo registros` | Solo los registros del archivo (auditoría y tasas de cambio) | No |
 | `run_robot.py --catalogo` | Solo el catálogo de tablas y columnas | No |
@@ -101,8 +101,8 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 | `run_robot.py --historico-ventas --desde AAAA-MM` | Una vez, a mano: VENTAS mes por mes antes de la ventana nocturna (ver «Histórico de ventas») | Sí |
 | `run_robot.py --complemento-ventas --desde AAAA-MM` | A mano: llena `kilos` y `codigo_envio` de VENTAS mes por mes, como el histórico (ver «Complemento de ventas») | Sí |
 | `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
-| `run_robot.py --comparar` | Solo lee: compara los totales de MAESTROS, CARTERA y VENTAS en SAP con los de la app y guarda el resultado en la app (ver «Comparación con SAP») | Sí |
-| `run_robot.py --tras-despliegue` | Lo lanza solo la revisión de cada minuto: corre los complementos pendientes de `complementos.toml` y al final la comparación con SAP (ver «Actualización automática») | Sí |
+| `run_robot.py --comparar` | Solo lee: compara los totales de MAESTROS, CARTERA y VENTAS (o los de `--conjunto`) en SAP con los de la app y guarda el resultado en la app (ver «Comparación con SAP») | Sí |
+| `run_robot.py --tras-despliegue` | Lo lanza solo la revisión de cada minuto: corre los complementos pendientes de `complementos.toml` y al final la comparación de VENTAS con SAP (ver «Actualización automática») | Sí |
 | `revisar_solicitudes.py` | Se actualiza al commit desplegado (ver «Actualización automática»), toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
 Opciones de `run_robot.py`:
@@ -110,6 +110,7 @@ Opciones de `run_robot.py`:
 - `--empresa SGX` o `--empresa SDC`: solo esa empresa (se puede repetir). Por defecto, las dos.
 - `--sin-vpn`: no maneja la VPN; úsalo si ya la conectaste a mano.
 - `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas`, `--comparar` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
+- `--conjunto MAESTROS`, `--conjunto CARTERA` o `--conjunto VENTAS`: solo con `--comparar`, compara solo ese conjunto (se puede repetir). Por defecto, los tres.
 - `--desde` y `--hasta`: solo para `--carga-produccion` (`--desde AAAA-MM-DD`), `--historico-ventas` y `--complemento-ventas` (`--desde AAAA-MM`, `--hasta AAAA-MM`).
 
 Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas`, `--comparar`, `--tras-despliegue` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
@@ -190,24 +191,40 @@ Comprueba, sin cambiar nada, que lo que tiene la app cuadra con SAP (contrato §
 
 ```powershell
 .venv\Scripts\python.exe etl\run_robot.py --comparar
-.venv\Scripts\python.exe etl\run_robot.py --comparar --empresa SDC
+.venv\Scripts\python.exe etl\run_robot.py --comparar --empresa SDC --conjunto VENTAS
 ```
+
+Corre en tres momentos:
+
+| Cuándo | Qué compara |
+|---|---|
+| A mano, `--comparar` | Los tres conjuntos, o solo los de `--conjunto` (se puede repetir) |
+| Al final de cada `--tras-despliegue` (después de un despliegue o de un complemento) | Solo VENTAS, de las dos empresas |
+| Una vez al día, al final de una `--completa` que salió bien | Los tres conjuntos de las dos empresas (la comparación diaria, abajo) |
 
 - **Solo lee.** En SAP solo corre `SELECT` (las mismas consultas de `robot\queries` que la nocturna y el histórico); nunca escribe en SAP, no abre ninguna corrida en la app y no escribe CSV. Lo único que guarda la app es el resultado de la comparación, que nunca se aplica a los datos.
 - **Qué compara**, con los valores tal como el robot los envía (el mismo signo de las notas crédito, los mismos redondeos por línea y el texto vacío como vacío):
   - MAESTROS: por cada una de las doce partes, las filas activas que envía la nocturna (en direcciones, todas). Si la empresa no tiene lista de precios pública, `precios` va en 0, como la nocturna, que no la envía.
   - CARTERA: la cartera actual, filas y suma de `saldo`.
-  - VENTAS: de enero de 2025 a hoy, mes por mes: líneas, suma de `total` y de `cantidad`, y cuántas líneas tienen `kilos` y `codigo_envio` vacíos.
+  - VENTAS: de enero de 2025 a **ayer** (fecha de Bogotá), mes por mes: líneas, suma de `total` y de `cantidad`, y cuántas líneas tienen `kilos` y `codigo_envio` vacíos. Hasta ayer, y no hasta hoy, porque la app tiene lo que cargó la corrida de las 02:00: las ventas que SAP contabiliza durante el día saldrían como diferencias falsas. El mismo rango va a la consulta de SAP, a `/totales` y a `/comparaciones`.
   - PEDIDOS y PRODUCCION no se comparan.
 - Las sumas se hacen exactas y se comparan como texto con 2 decimales (`total`, `saldo`) o 6 (`cantidad`). Un mes, una parte o la cartera que está en un lado y no en el otro también es una diferencia.
 - **Dos fases**, como siempre: con la VPN arriba solo consulta SAP; con la VPN abajo pide los totales a la app y guarda las comparaciones.
-- Respeta las franjas de los otros robots y espera el candado hasta 20 minutos, como la nocturna (`--forzar` no espera la franja). Antes de subir la VPN estima cuánto la va a tener arriba: lo del complemento de ventas (2 minutos fijos más 10 segundos por mes de cada empresa) más 1 minuto por empresa para MAESTROS y CARTERA (`SEGUNDOS_POR_EMPRESA` en `etl\comparar.py`). Desde enero de 2025, con las dos empresas, son unos 11 minutos; todavía no está medido con SAP. Si no cabe antes de la siguiente franja, espera a que pase.
+- Respeta las franjas de los otros robots y espera el candado hasta 20 minutos, como la nocturna (`--forzar` no espera la franja). Antes de subir la VPN estima cuánto la va a tener arriba: lo del complemento de ventas (2 minutos fijos más 10 segundos por mes de cada empresa) por VENTAS, más 30 segundos por empresa para MAESTROS y otros 30 para CARTERA (`SEGUNDOS_POR_CONJUNTO` en `etl\comparar.py`). Desde enero de 2025, los tres conjuntos de las dos empresas son unos 11 minutos y solo VENTAS unos 9; todavía no está medido con SAP. Si no cabe antes de la siguiente franja, espera a que pase.
 - Si un conjunto falla en SAP o al pedir sus totales a la app, no se guarda su comparación: queda en el log y en el correo, y los demás siguen.
 - El log trae una línea por conjunto y empresa: `cuadra`, `no cuadra en N grupos` con el mes o la parte y el campo que no cuadran (por ejemplo `2026-10 (filas, sumas.total)`), o `error` con el motivo. Nunca trae valores de SAP. `robot\state\ultima_ejecucion.json` lista cada comparación con su resultado.
 - Sale con `0` si todo cuadra y quedó guardado, y con `1` si algo no cuadra o falló (y avisa por correo, como la nocturna).
-- **Diferencias esperables:** VENTAS va hasta hoy y la app tiene lo que cargó la corrida de las 02:00, así que las ventas contabilizadas después en SAP salen como diferencia del mes en curso; la cartera cambia con cada pago del día. Una diferencia en un mes viejo suele querer decir que ese mes cambió en SAP después del histórico.
+- **Diferencias esperables:** la cartera cambia con cada pago del día, así que comparada a mano durante el día puede no cuadrar; en la comparación diaria va justo después de la carga. Una diferencia en un mes viejo de VENTAS suele querer decir que ese mes cambió en SAP después del histórico.
 
-Corre sola al final de cada `--tras-despliegue` (ver «Actualización automática»).
+### Comparación diaria
+
+Al final de una `--completa` que salió bien (la misma condición en que sale con `0`), en el mismo proceso y con el candado todavía tomado, el robot compara los tres conjuntos de las dos empresas, con su propia sesión de VPN después de la de la carga:
+
+- Una vez por día (fecha de Bogotá). El día queda en `robot\state\comparacion_diaria.json` (`fecha`), cuadre o no, junto con el resultado de la última (`ultima`: la hora, `cuadra`, `no_cuadra` o `error`, y cada conjunto con su resultado, sin datos de SAP). Una segunda completa buena el mismo día (por ejemplo, una reparación) no vuelve a comparar.
+- Si la comparación no pudo correr entera (falló SAP, la VPN o la app en algún conjunto), no anota el día: la siguiente completa buena de ese día la reintenta. Si el archivo se daña o lo borras, la siguiente completa buena compara otra vez (no hace daño).
+- Solo después de una completa de las dos empresas: `--completa --empresa SGX` no compara. Una completa que falló tampoco.
+- **No cambia la completa:** su código de salida y `ultima_ejecucion.json` siguen diciendo cómo fue la carga. Si algo no cuadra o la comparación falla, queda en el log y en `comparacion_diaria.json`, y avisa por correo aparte.
+- La completa no estima la duración de su fase con VPN (solo espera a que pase la franja en la que arranca), así que la comparación diaria tampoco agrega una estimación: corre a continuación, dentro del hueco de la nocturna.
 
 ## Pedidos
 
@@ -302,9 +319,9 @@ La revisión de cada minuto lanza `--tras-despliegue` después de actualizarse y
 
 ### El modo `--tras-despliegue`
 
-Es un modo programado: respeta las franjas como los otros (nunca con `--forzar`, que además no acepta, como tampoco `--empresa`, `--desde` ni `--hasta`), espera el candado hasta 20 minutos y lo renueva mientras corre. Antes de subir la VPN espera a que la suma de lo que estima cada complemento pendiente más la comparación con SAP quepa antes de la siguiente franja, como el complemento de ventas.
+Es un modo programado: respeta las franjas como los otros (nunca con `--forzar`, que además no acepta, como tampoco `--empresa`, `--desde` ni `--hasta`), espera el candado hasta 20 minutos y lo renueva mientras corre. Antes de subir la VPN espera a que la suma de lo que estima cada complemento pendiente más la comparación de VENTAS quepa antes de la siguiente franja, como el complemento de ventas.
 
-Con el candado tomado vuelve a mirar qué está pendiente (otro proceso pudo haberlo corrido) y corre cada complemento en orden, por el mismo camino del modo a mano (`--complemento-ventas` con sus argumentos, con su propia sesión de VPN). Marca cada uno como hecho o fallido en `complementos.json`; uno que falla no frena a los siguientes. El log trae una línea por complemento (`Complemento <id>: hecho` o `fallido`) y `ultima_ejecucion.json` los lista con sus tramos. Al final, siempre, corre la comparación con SAP de las dos empresas (ver «Comparación con SAP»), con su propia sesión de VPN: también si no había nada pendiente o si un complemento falló. `ultima_ejecucion.json` trae también el resultado de cada comparación. Si algún complemento falló o algo no cuadra, avisa por correo y sale con `1`.
+Con el candado tomado vuelve a mirar qué está pendiente (otro proceso pudo haberlo corrido) y corre cada complemento en orden, por el mismo camino del modo a mano (`--complemento-ventas` con sus argumentos, con su propia sesión de VPN). Marca cada uno como hecho o fallido en `complementos.json`; uno que falla no frena a los siguientes. El log trae una línea por complemento (`Complemento <id>: hecho` o `fallido`) y `ultima_ejecucion.json` los lista con sus tramos. Al final, siempre, corre la comparación de VENTAS con SAP de las dos empresas (ver «Comparación con SAP»; MAESTROS y CARTERA van en la comparación diaria), con su propia sesión de VPN: también si no había nada pendiente o si un complemento falló. `ultima_ejecucion.json` trae también el resultado de cada comparación. Si algún complemento falló o algo no cuadra, avisa por correo y sale con `1`.
 
 ## Carpeta de CSV
 

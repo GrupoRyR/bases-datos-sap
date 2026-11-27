@@ -9,7 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -23,7 +23,7 @@ from fake_hana import fila, revisar_fases
 from test_historico import _no_dormir, _Reloj
 from test_run_robot import _estado, _main
 
-HOY = AHORA.date().isoformat()  # 2026-10-26: /totales of VENTAS goes from 2025-01-01 to today
+AYER = (AHORA.date() - timedelta(days=1)).isoformat()  # 2026-10-25: VENTAS goes from 2025-01-01 to yesterday
 MAESTROS = esquema.PARTES_POR_CONJUNTO["MAESTROS"]
 # Active rows per part of fake_hana.datos_empresa: clients 1 and 3 active, supplier 1 active,
 # two addresses per partner (no activo column: all count), the rest two rows active.
@@ -47,7 +47,7 @@ def _ventas_de_prueba(e, empresa: str) -> None:
         _venta(3, date(2026, 9, 11), Decimal("-40.5"), Decimal("-1"), None, ""),
         _venta(4, date(2026, 9, 30), Decimal("0.006"), Decimal("2"), Decimal("1"), "   "),
         _venta(5, date(2026, 10, 2), Decimal("10"), Decimal("3.1234565"), None, "X"),
-        _venta(6, date(2026, 10, 27), Decimal("5"), Decimal("1"), None, "X"),  # after today: out
+        _venta(6, date(2026, 10, 26), Decimal("5"), Decimal("1"), None, "X"),  # today: out (until yesterday)
     ]
 
 
@@ -88,13 +88,13 @@ def test_ventas_por_mes_con_la_conversion_del_envio(escenario):
         "2026-10": (1, {"total": "10.00", "cantidad": "3.123457"}, {"kilos": 1, "codigo_envio": 0}),
     }
     ventas = [c for c in comparaciones if c.conjunto == "VENTAS"]
-    assert {(c.desde, c.hasta) for c in ventas} == {("2025-01-01", HOY)}
-    # One month per tramo, from January 2025 to the current month (the last one up to today),
+    assert {(c.desde, c.hasta) for c in ventas} == {("2025-01-01", AYER)}
+    # One month per tramo, from January 2025 to the month of yesterday (the last one up to it),
     # with the same range filter as the historico; never the HANA window.
     pasos = [x for x in e.hana.de("SDC", parte="ventas") if x.tipo == "todo"]
     assert len(pasos) == 22
     assert "BETWEEN TO_DATE('2025-01-01', 'YYYY-MM-DD') AND TO_DATE('2025-01-31', 'YYYY-MM-DD')" in pasos[0].sql
-    assert "BETWEEN TO_DATE('2026-10-01', 'YYYY-MM-DD') AND TO_DATE('2026-10-26', 'YYYY-MM-DD')" in pasos[-1].sql
+    assert "BETWEEN TO_DATE('2026-10-01', 'YYYY-MM-DD') AND TO_DATE('2026-10-25', 'YYYY-MM-DD')" in pasos[-1].sql
     assert not e.hana.de("SDC", "ventana")
 
 
@@ -197,11 +197,11 @@ def test_todo_cuadra_despues_de_una_completa(entorno, correos, caplog):
     for c in enviadas:
         datetime.fromisoformat(c["comparada_en"])
         if c["conjunto"] == "VENTAS":
-            assert (c["desde"], c["hasta"]) == ("2025-01-01", HOY)
+            assert (c["desde"], c["hasta"]) == ("2025-01-01", AYER)
         else:
             assert "desde" not in c and "hasta" not in c
     totales = [p.datos for p in e.servidor.peticiones_a("totales")]
-    assert {"conjunto": "VENTAS", "empresa": "SGX", "desde": "2025-01-01", "hasta": HOY} in totales
+    assert {"conjunto": "VENTAS", "empresa": "SGX", "desde": "2025-01-01", "hasta": AYER} in totales
     assert {"conjunto": "MAESTROS", "empresa": "SGX"} in totales
     assert "Comparación VENTAS SDC: cuadra." in caplog.messages
     assert correos == []
@@ -333,10 +333,15 @@ def test_empresa_y_sin_vpn(entorno, correos):
 
 
 def test_duracion_estimada_es_la_del_complemento_mas_maestros_y_cartera():
-    # 22 months (January 2025 to October 2026) of two companies: 2 minutes, 10 s per month and
-    # company and 60 s per company for MAESTROS and CARTERA: 680 s.
+    # 22 months (January 2025 to October 2026, up to yesterday) of two companies: 2 minutes,
+    # 10 s per month and company and 30 s per company for MAESTROS and for CARTERA: 680 s.
     assert comparar.duracion_estimada(2, date(2026, 10, 26)) == timedelta(seconds=120 + 440 + 120)
     assert comparar.duracion_estimada(1, date(2026, 10, 31)) == timedelta(seconds=120 + 220 + 60)
+    # On the 1st, yesterday is the last day of the month before: October has no tramo.
+    assert comparar.duracion_estimada(2, date(2026, 11, 1), ("VENTAS",)) == timedelta(seconds=120 + 440)
+    assert comparar.duracion_estimada(2, date(2026, 10, 26), ("CARTERA",)) == timedelta(seconds=120 + 60)
+    # Before any VENTAS month (yesterday before 2025-01-01): only the fixed part.
+    assert comparar.duracion_estimada(2, date(2025, 1, 1), ("VENTAS",)) == timedelta(seconds=120)
 
 
 def test_dentro_de_una_franja_espera_a_que_pase(entorno, correos):
@@ -380,7 +385,8 @@ def test_sin_candado_en_20_minutos_avisa_y_no_corre(entorno, correos, candado_aj
     assert [etapa for etapa, _ in correos[0]] == ["CANDADO"]
 
 
-@pytest.mark.parametrize("extra", [["--desde", "2026-06"], ["--hasta", "2026-06"], ["--completa"]])
+@pytest.mark.parametrize("extra", [["--desde", "2026-06"], ["--hasta", "2026-06"], ["--completa"],
+                                   ["--conjunto", "PEDIDOS"]])
 def test_argumentos_invalidos_no_corren(entorno, capsys, extra):
     with pytest.raises(SystemExit) as exc:
         _main(entorno, "--comparar", *extra)
@@ -391,19 +397,37 @@ def test_argumentos_invalidos_no_corren(entorno, capsys, extra):
 # --- --tras-despliegue runs the comparison at the end ----------------------------------------
 
 
-def test_tras_despliegue_sin_pendientes_corre_la_comparacion(entorno, correos):
+def test_tras_despliegue_sin_pendientes_compara_solo_ventas(entorno, correos):
     from test_autoactualizar import GitFalso
 
     e = entorno
     assert _main(e, "--completa") == 0
-    antes = len(e.servidor.peticiones)
+    antes, consultas = len(e.servidor.peticiones), len(e.hana.ejecutadas)
+    e.linea.clear()
     assert _main(e, "--tras-despliegue", git=GitFalso(), dormir=_no_dormir) == 0
+    revisar_fases(e.linea)
     nombres = {p.nombre for p in e.servidor.peticiones[antes:]}
     assert nombres == {"totales", "comparaciones"}
-    assert len(_comparaciones(e)) == 6 and all(c["cuadra"] for c in _comparaciones(e))
+    assert [(c["conjunto"], c["empresa"], c["hasta"], c["cuadra"]) for c in _comparaciones(e)] == [
+        ("VENTAS", "SGX", AYER, True), ("VENTAS", "SDC", AYER, True)]
+    assert {p.datos["conjunto"] for p in e.servidor.peticiones_a("totales")} == {"VENTAS"}
+    assert {x.parte for x in e.hana.ejecutadas[consultas:]} == {"ventas"}
     estado = _estado()
     assert (estado["estado"], estado["modo"], estado["complementos"]) == ("OK", "tras despliegue", [])
-    assert len(estado["comparaciones"]) == 6
+    assert len(estado["comparaciones"]) == 2
+
+
+def test_tras_despliegue_estima_solo_ventas(entorno, correos, monkeypatch):
+    from test_autoactualizar import GitFalso
+
+    import run_robot
+
+    estimados: list = []
+    original = run_robot._esperar_hueco
+    monkeypatch.setattr(run_robot, "_esperar_hueco",
+                        lambda cfg, modo, estimado, *a, **k: estimados.append(estimado) or original(cfg, modo, estimado, *a, **k))
+    assert _main(entorno, "--tras-despliegue", git=GitFalso(), dormir=_no_dormir) == 1  # nothing loaded
+    assert estimados and set(estimados) == {comparar.duracion_estimada(2, AHORA.date(), ("VENTAS",))}
 
 
 def test_tras_despliegue_compara_despues_de_un_complemento_que_falla(entorno, correos):
@@ -418,7 +442,7 @@ def test_tras_despliegue_compara_despues_de_un_complemento_que_falla(entorno, co
     nombres = [p.nombre for p in e.servidor.peticiones]
     # The comparison goes last, after both complements, in its own VPN session.
     assert nombres.index("totales") > max(i for i, n in enumerate(nombres) if n in ("iniciar", "cerrar"))
-    assert len(_comparaciones(e)) == 6
+    assert {c["conjunto"] for c in _comparaciones(e)} == {"VENTAS"} and len(_comparaciones(e)) == 2
     assert e.vpn.conexiones == 3
     revisar_fases(e.linea)
 
@@ -459,7 +483,7 @@ def test_totales_422_del_contrato(escenario, cuerpo, campo):
 
 def _cuerpo_comparacion(**cambios):
     cuerpo = {"conjunto": "VENTAS", "empresa": "SGX", "comparada_en": "2026-10-26T02:00:05-05:00",
-              "desde": "2025-01-01", "hasta": HOY, "cuadra": False,
+              "desde": "2025-01-01", "hasta": AYER, "cuadra": False,
               "diferencias": [{"clave": "2026-10", "campo": "filas", "sap": "2", "mysql": None}]}
     cuerpo.update(cambios)
     return cuerpo
@@ -489,3 +513,192 @@ def test_comparaciones_422_del_contrato(escenario, cambios, campo):
         escenario.cliente._post("/comparaciones", _cuerpo_comparacion(**cambios))
     assert exc.value.status == 422 and campo in exc.value.errors
     assert escenario.servidor.comparaciones == []
+
+
+# --- hasta = yesterday, with the Bogotá clock ------------------------------------------------
+
+
+@pytest.mark.parametrize("momento, ayer", [
+    (datetime(2026, 10, 26, 0, 0, 30, tzinfo=config.BOGOTA), "2026-10-25"),  # just after midnight
+    (datetime(2026, 10, 25, 23, 59, 59, tzinfo=config.BOGOTA), "2026-10-24"),  # just before
+    # 04:30 UTC on the 26th is still 23:30 of the 25th in Bogotá.
+    (datetime(2026, 10, 26, 4, 30, tzinfo=timezone.utc), "2026-10-24"),
+])
+def test_hasta_es_ayer_en_sap_totales_y_comparaciones(escenario, momento, ayer):
+    e = escenario
+    comparaciones, fallos = comparar.ejecutar(
+        e.cfg, ["SDC"], conjuntos=("VENTAS",), api=e.cliente, robot_vpn=e.vpn, conectar=e.hana.conectar,
+        ahora=lambda: momento,
+    )
+    [c] = comparaciones
+    assert (c.conjunto, c.desde, c.hasta) == ("VENTAS", "2025-01-01", ayer)
+    ultimo = [x for x in e.hana.de("SDC", parte="ventas") if x.tipo == "todo"][-1]
+    assert f"AND TO_DATE('{ayer}', 'YYYY-MM-DD')" in ultimo.sql
+    [totales] = e.servidor.peticiones_a("totales")
+    assert totales.datos == {"conjunto": "VENTAS", "empresa": "SDC", "desde": "2025-01-01", "hasta": ayer}
+    [enviada] = _comparaciones(e)
+    assert (enviada["desde"], enviada["hasta"]) == ("2025-01-01", ayer)
+    revisar_fases(e.linea)
+
+
+def test_si_ayer_es_antes_de_2025_ventas_no_tiene_nada_que_comparar(escenario, caplog):
+    e = escenario
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        comparaciones, fallos = comparar.leer_sap(e.cfg, ["SGX"], date(2025, 1, 1), robot_vpn=e.vpn,
+                                                  conectar=e.hana.conectar, ahora=e.ahora)
+    assert fallos == [] and [c.conjunto for c in comparaciones] == ["MAESTROS", "CARTERA"]
+    assert not e.hana.de("SGX", parte="ventas")
+    assert any("VENTAS SGX: nada que comparar" in m and "2024-12-31" in m for m in caplog.messages)
+
+
+# --- --conjunto --------------------------------------------------------------------------------
+
+
+def test_conjunto_filtra_los_conjuntos(entorno, correos):
+    e = entorno
+    assert _main(e, "--completa") == 0
+    assert _main(e, "--comparar", "--conjunto", "VENTAS", "--conjunto", "CARTERA", dormir=_no_dormir) == 0
+    assert [(c["conjunto"], c["empresa"]) for c in _comparaciones(e)] == [
+        ("CARTERA", "SGX"), ("VENTAS", "SGX"), ("CARTERA", "SDC"), ("VENTAS", "SDC")]
+    assert {p.datos["conjunto"] for p in e.servidor.peticiones_a("totales")} == {"CARTERA", "VENTAS"}
+
+
+@pytest.mark.parametrize("modo", [["--completa"], ["--diagnostico"], ["--tras-despliegue"],
+                                  ["--complemento-ventas", "--desde", "2026-06"]])
+def test_conjunto_va_solo_con_comparar(entorno, capsys, modo):
+    with pytest.raises(SystemExit) as exc:
+        _main(entorno, *modo, "--conjunto", "VENTAS")
+    assert exc.value.code == 2
+    assert "--conjunto va solo con --comparar" in capsys.readouterr().err
+    assert entorno.servidor.peticiones == [] and entorno.hana.ejecutadas == []
+
+
+# --- The daily full comparison after a successful --completa ---------------------------------
+
+
+def _diaria() -> dict:
+    return json.loads((config.STATE_DIR / comparar.ARCHIVO_DIARIO).read_text(encoding="utf-8"))
+
+
+def test_una_completa_buena_compara_todo_una_vez_y_anota_el_dia(entorno, correos, comparacion_diaria, caplog):
+    e = entorno
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert _main(e, "--completa") == 0
+    revisar_fases(e.linea)
+    assert e.vpn.conexiones == 2  # the completa and then the comparison, each with its VPN
+    nombres = [p.nombre for p in e.servidor.peticiones]
+    ultimo_cierre = max(i for i, n in enumerate(nombres) if n == "cerrar")
+    assert min(i for i, n in enumerate(nombres) if n == "totales") > ultimo_cierre
+    assert [(c["conjunto"], c["empresa"], c["cuadra"]) for c in _comparaciones(e)] == [
+        (conjunto, empresa, True) for empresa in ("SGX", "SDC") for conjunto in ("MAESTROS", "CARTERA", "VENTAS")]
+    diaria = _diaria()
+    assert diaria["fecha"] == "2026-10-26"
+    assert diaria["ultima"]["resultado"] == "cuadra" and len(diaria["ultima"]["comparaciones"]) == 6
+    # The completa's own state keeps reporting the load.
+    estado = _estado()
+    assert (estado["estado"], estado["modo"]) == ("OK", "completa") and "comparaciones" not in estado
+    assert correos == []
+    assert not list(config.STATE_DIR.glob("*.tmp"))
+    assert not (config.STATE_DIR / "robot.lock").exists()
+
+
+def test_una_segunda_completa_buena_el_mismo_dia_no_compara(entorno, correos, comparacion_diaria, caplog):
+    e = entorno
+    assert _main(e, "--completa") == 0
+    antes = len(_comparaciones(e))
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert _main(e, "--completa") == 0
+    assert len(_comparaciones(e)) == antes == 6
+    assert any("ya se hizo hoy" in m for m in caplog.messages)
+    # The next day it compares again.
+    assert _main(e, "--completa", ahora=lambda: AHORA + timedelta(days=1)) == 0
+    assert len(_comparaciones(e)) == 12 and _diaria()["fecha"] == "2026-10-27"
+
+
+def test_una_completa_que_falla_no_compara(entorno, correos, comparacion_diaria):
+    e = entorno
+    e.servidor.programar_fallas("lote", status=422, datos={"message": "x", "errors": {"rows.0.codigo": ["x"]}})
+    assert _main(e, "--completa") == 1
+    assert e.servidor.peticiones_a("totales") == [] and e.vpn.conexiones == 1
+    assert not (config.STATE_DIR / comparar.ARCHIVO_DIARIO).exists()
+
+
+def test_una_completa_de_una_sola_empresa_no_compara(entorno, correos, comparacion_diaria):
+    e = entorno
+    assert _main(e, "--completa", "--empresa", "SGX") == 0
+    assert e.servidor.peticiones_a("totales") == []
+    assert not (config.STATE_DIR / comparar.ARCHIVO_DIARIO).exists()
+
+
+def test_si_no_cuadra_la_completa_sigue_en_0_y_avisa(entorno, correos, comparacion_diaria):
+    e = entorno
+    e.servidor.totales[("CARTERA", "SDC")] = [{"clave": "actual", "filas": 9, "sumas": {"saldo": "1.00"}, "nulos": {}}]
+    assert _main(e, "--completa") == 0
+    assert _estado()["estado"] == "OK"
+    [aviso] = correos
+    assert aviso == [("COMPARAR", "Comparación CARTERA SDC: no cuadra en 1 grupos: actual (filas, sumas.saldo).")]
+    diaria = _diaria()
+    assert diaria["fecha"] == "2026-10-26" and diaria["ultima"]["resultado"] == "no_cuadra"
+
+
+def test_si_la_comparacion_no_pudo_correr_no_anota_el_dia_y_otra_completa_reintenta(
+    entorno, correos, comparacion_diaria
+):
+    e = entorno
+    e.servidor.programar_fallas("totales", status=422, datos={"message": "x", "errors": {"conjunto": ["x"]}})
+    assert _main(e, "--completa") == 0
+    assert _estado()["estado"] == "OK"
+    [aviso] = correos
+    assert [etapa for etapa, _ in aviso] == ["API"]
+    diaria = _diaria()
+    assert "fecha" not in diaria and diaria["ultima"]["resultado"] == "error"
+    assert len(_comparaciones(e)) == 5
+    # A later good completa that same day retries, and now records the day.
+    assert _main(e, "--completa") == 0
+    assert len(_comparaciones(e)) == 11 and _diaria()["fecha"] == "2026-10-26"
+
+
+def test_si_falla_la_vpn_de_la_comparacion_no_anota_el_dia(entorno, correos, comparacion_diaria):
+    e = entorno
+    conectar = e.vpn.conectar
+    veces: list[int] = []
+
+    def segunda_falla():
+        veces.append(1)
+        if len(veces) == 2:
+            from vpn import VpnError
+
+            e.linea.append(("vpn", "conectar"))
+            raise VpnError("No se pudo conectar la VPN tras 3 intentos.")
+        conectar()
+
+    e.vpn.conectar = segunda_falla
+    assert _main(e, "--completa") == 0
+    revisar_fases(e.linea)
+    [aviso] = correos
+    assert [etapa for etapa, _ in aviso] == ["VPN"]
+    assert e.servidor.peticiones_a("totales") == []
+    assert "fecha" not in _diaria()
+
+
+def test_un_error_inesperado_en_la_comparacion_no_cambia_la_completa(entorno, correos, comparacion_diaria,
+                                                                      monkeypatch):
+    e = entorno
+
+    def explota(*args, **kwargs):
+        raise RuntimeError("algo raro con un valor de SAP")
+
+    monkeypatch.setattr(comparar, "ejecutar", explota)
+    assert _main(e, "--completa") == 0
+    [aviso] = correos
+    assert [etapa for etapa, _ in aviso] == ["INESPERADO"] and "valor de SAP" not in aviso[0][1]
+    assert _estado()["estado"] == "OK"
+    assert not (config.STATE_DIR / comparar.ARCHIVO_DIARIO).exists() or "fecha" not in _diaria()
+
+
+def test_un_archivo_diario_danado_se_toma_como_sin_comparar(entorno, correos, comparacion_diaria):
+    e = entorno
+    config.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    (config.STATE_DIR / comparar.ARCHIVO_DIARIO).write_text("{no es json", encoding="utf-8")
+    assert _main(e, "--completa") == 0
+    assert len(_comparaciones(e)) == 6 and _diaria()["fecha"] == "2026-10-26"

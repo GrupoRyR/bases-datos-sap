@@ -750,11 +750,11 @@ _DOS = (
 def comparacion(monkeypatch, entorno):
     """--tras-despliegue always ends with the comparison (T7b, tested in test_comparar.py): here
     it is replaced by a recorder, so these tests only see the complements. Each call records
-    the companies and the API requests made before it."""
-    llamadas: list[tuple[list[str], int]] = []
+    the companies, the API requests made before it and the datasets (only VENTAS)."""
+    llamadas: list[tuple[list[str], int, tuple]] = []
 
     def falsa(cfg, args, empresas, **kwargs):
-        llamadas.append((list(empresas), len(entorno.servidor.peticiones)))
+        llamadas.append((list(empresas), len(entorno.servidor.peticiones), tuple(kwargs["conjuntos"])))
         return [], []
 
     monkeypatch.setattr(run_robot, "_comparar", falsa)
@@ -781,7 +781,7 @@ def test_tras_despliegue_corre_los_complementos_pendientes_en_orden(entorno, cor
     assert correos == []
     assert not (config.STATE_DIR / CANDADO).exists()
     # The comparison runs once, of both companies, after both complements.
-    assert comparacion == [(["SGX", "SDC"], len(e.servidor.peticiones))]
+    assert comparacion == [(["SGX", "SDC"], len(e.servidor.peticiones), ("VENTAS",))]
     # Done: the next run has nothing pending.
     assert _main(e, "--tras-despliegue", git=GitFalso(head=C), fabrica_vpn=_prohibida,
                  dormir=_no_dormir) == 0
@@ -813,7 +813,7 @@ def test_tras_despliegue_sin_pendientes_solo_corre_la_comparacion(entorno, corre
     assert _main(e, "--tras-despliegue", git=GitFalso(), fabrica_api=_prohibida, fabrica_vpn=_prohibida,
                  conectar=_prohibida, dormir=_no_dormir) == 0
     assert e.servidor.peticiones == [] and e.hana.ejecutadas == []
-    assert comparacion == [(["SGX", "SDC"], 0)]
+    assert comparacion == [(["SGX", "SDC"], 0, ("VENTAS",))]
     assert correos == []
 
 

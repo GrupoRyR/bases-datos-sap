@@ -14,8 +14,13 @@ import autoactualizar
 import config
 import hana
 import registro
+import run_robot
 
 PREFIJOS = ("SOPHOS_", "HANA_", "BASES_SAP_", "ALERTA_")
+# The daily full comparison after a good --completa (run_robot._comparacion_diaria): off in
+# every test unless it asks for the `comparacion_diaria` fixture, so the completa tests keep
+# seeing only the load (one VPN session, no /totales).
+_COMPARACION_DIARIA = getattr(run_robot, "_comparacion_diaria", None)
 
 
 def _limpiar_variables() -> None:
@@ -52,6 +57,7 @@ def aislar_entorno(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(autoactualizar, "comando_por_defecto", _real_prohibido("pip"))
     monkeypatch.setattr(autoactualizar, "lanzador_por_defecto", _real_prohibido("el proceso nuevo"))
     monkeypatch.setattr(autoactualizar, "RUTA_COMPLEMENTOS", tmp_path / "complementos.toml")
+    monkeypatch.setattr(run_robot, "_comparacion_diaria", lambda *args, **kwargs: None, raising=False)
     yield
     _limpiar_variables()
     # registro.configurar() no vuelve a configurar un logger con handlers: los de una prueba
@@ -194,3 +200,9 @@ def entorno(escenario, entorno_completo, monkeypatch) -> SimpleNamespace:
     """El escenario con un .env completo (en variables) que apunta la carpeta al tmp."""
     monkeypatch.setenv("BASES_SAP_CSV_DIR", str(escenario.csv_dir))
     return escenario
+
+
+@pytest.fixture
+def comparacion_diaria(monkeypatch):
+    """Turns the daily full comparison after a good --completa back on (see aislar_entorno)."""
+    monkeypatch.setattr(run_robot, "_comparacion_diaria", _COMPARACION_DIARIA)
