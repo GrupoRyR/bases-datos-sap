@@ -6,7 +6,9 @@ use App\Modules\Sap\Http\Controllers\Robot\CloseRunController;
 use App\Modules\Sap\Http\Controllers\Robot\FailRunController;
 use App\Modules\Sap\Http\Controllers\Robot\StartRunController;
 use App\Modules\Sap\Http\Controllers\Robot\StoreBatchController;
+use App\Modules\Sap\Http\Controllers\Robot\StoreComparisonController;
 use App\Modules\Sap\Http\Controllers\Robot\TakeRequestsController;
+use App\Modules\Sap\Http\Controllers\Robot\TotalsController;
 use App\Modules\Sap\Http\Controllers\Robot\VersionController;
 use App\Modules\Sap\Http\Middleware\AuthenticateClientApp;
 use Illuminate\Support\Facades\Route;
@@ -26,6 +28,9 @@ Route::prefix('robot/v1')->name('robot.')->middleware('sap.robot')->group(functi
     Route::post('solicitudes/tomar', TakeRequestsController::class)->name('solicitudes.tomar');
     // The commit the server runs: the robot updates itself only to it.
     Route::post('version', VersionController::class)->name('version');
+    // Totals to compare with SAP (read only) and the outcome of the comparison.
+    Route::post('totales', TotalsController::class)->name('totales');
+    Route::post('comparaciones', StoreComparisonController::class)->name('comparaciones.store');
 });
 
 // The apps, each with its own key (contract section 7.4).

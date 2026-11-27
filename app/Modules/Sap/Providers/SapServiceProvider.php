@@ -3,6 +3,7 @@
 namespace App\Modules\Sap\Providers;
 
 use App\Modules\Sap\Application\Apps\AppKeys;
+use App\Modules\Sap\Application\Panel\DatabaseComparisons;
 use App\Modules\Sap\Application\Panel\DatabaseDatasetStatuses;
 use App\Modules\Sap\Application\Panel\DatabaseMasterLookup;
 use App\Modules\Sap\Application\Panel\DatabaseRequestHistory;
@@ -13,6 +14,7 @@ use App\Modules\Sap\Console\CanDeployCommand;
 use App\Modules\Sap\Console\CreateAppKeyCommand;
 use App\Modules\Sap\Console\ExpireCommand;
 use App\Modules\Sap\Contracts\ClientAppKeys;
+use App\Modules\Sap\Contracts\Comparisons;
 use App\Modules\Sap\Contracts\DatasetStatuses;
 use App\Modules\Sap\Contracts\MasterLookup;
 use App\Modules\Sap\Contracts\RequestHistory;
@@ -64,6 +66,9 @@ final class SapServiceProvider extends ModuleServiceProvider
         $this->app->bind(Stability::class, DatabaseStability::class);
         $this->app->bind(RequestHistory::class, DatabaseRequestHistory::class);
         $this->app->bind(MasterLookup::class, DatabaseMasterLookup::class);
+
+        // The robot's comparisons with SAP (contract section 13.3), latest per dataset and company.
+        $this->app->bind(Comparisons::class, DatabaseComparisons::class);
     }
 
     protected function bootModule(): void
