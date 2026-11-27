@@ -20,12 +20,12 @@ beforeEach(function () {
 /**
  * @param  list<array{clave: string, campo: string, sap: string|null, mysql: string|null}>  $differences
  */
-function comparisonStored(string $dataset, string $company, string $comparedAt, array $differences = []): int
+function comparisonStored(string $dataset, string $company, string $comparedAt, array $differences = [], string $robotKey = 'r2026a'): int
 {
     return RobotComparison::forceCreate([
         'conjunto' => $dataset, 'empresa' => $company, 'desde' => $dataset === 'VENTAS' ? '2025-01-01' : null,
         'hasta' => null, 'cuadra' => $differences === [], 'diferencias' => $differences,
-        'comparada_en' => Carbon::parse($comparedAt), 'robot_key' => 'r2026a',
+        'comparada_en' => Carbon::parse($comparedAt), 'robot_key' => $robotKey,
     ])->id;
 }
 
@@ -62,8 +62,9 @@ it('answers the latest comparison of each dataset and company, in company then d
 });
 
 it('breaks a tie on the comparison time by the newest one received', function () {
+    // The same moment can only repeat with another robot key, as while keys rotate.
     comparisonStored('CARTERA', 'SGX', '2026-11-27T03:00:00-05:00');
-    $newest = comparisonStored('CARTERA', 'SGX', '2026-11-27T03:00:00-05:00');
+    $newest = comparisonStored('CARTERA', 'SGX', '2026-11-27T03:00:00-05:00', robotKey: 'r2026b');
 
     expect(app(Comparisons::class)->latest()[0]->id)->toBe($newest);
 });

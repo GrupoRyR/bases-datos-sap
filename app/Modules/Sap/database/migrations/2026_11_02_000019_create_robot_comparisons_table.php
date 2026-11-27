@@ -29,7 +29,10 @@ return new class extends Migration
             $table->string('robot_key', 32);
             $table->timestamp('created_at');
 
-            $table->index(['conjunto', 'empresa', 'comparada_en']);
+            // One comparison per robot key and moment: a retry after a lost
+            // answer stores nothing new (section 13.3). It also serves the
+            // latest comparison of a company and dataset.
+            $table->unique(['conjunto', 'empresa', 'comparada_en', 'robot_key']);
         });
     }
 

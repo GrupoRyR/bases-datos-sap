@@ -90,6 +90,41 @@ it('accepts up to 500 differences', function () {
     expect(RobotComparison::sole()->diferencias)->toHaveCount(500);
 });
 
+it('answers the first id and stores nothing new when the robot repeats a comparison', function () {
+    $first = compare($this, comparisonBody())->assertCreated()->json('id');
+
+    // The robot lost the answer and sends the same comparison again.
+    $again = compare($this, comparisonBody(['cuadra' => true, 'diferencias' => []]))->assertCreated()->json('id');
+
+    expect($again)->toBe($first)
+        ->and(RobotComparison::count())->toBe(1)
+        ->and(RobotComparison::findOrFail($first)->cuadra)->toBeFalse();
+});
+
+it('stores another comparison for another time, company or dataset', function (array $overrides) {
+    compare($this, comparisonBody())->assertCreated();
+    compare($this, comparisonBody($overrides))->assertCreated();
+
+    expect(RobotComparison::count())->toBe(2);
+})->with([
+    'another time' => [['comparada_en' => '2026-11-27T03:06:00-05:00']],
+    'another company' => [['empresa' => 'SDC']],
+    'another dataset' => [['conjunto' => 'CARTERA', 'desde' => null, 'hasta' => null]],
+]);
+
+it('refuses a comparison made in the future, beyond five minutes of clock drift', function (string $comparedAt, bool $stored) {
+    $response = compare($this, comparisonBody(['comparada_en' => $comparedAt]));
+
+    $stored ? $response->assertCreated() : $response->assertUnprocessable()->assertJsonValidationErrorFor('comparada_en');
+
+    expect(RobotComparison::count())->toBe($stored ? 1 : 0);
+})->with([
+    // The server clock reads 03:10 in Bogota.
+    'five minutes ahead' => ['2026-11-27T03:15:00-05:00', true],
+    'more than five minutes ahead' => ['2026-11-27T03:15:01-05:00', false],
+    'a day ahead' => ['2026-11-28T03:10:00-05:00', false],
+]);
+
 it('writes nothing but the comparison', function () {
     $before = [
         'ventas' => DB::connection('ventas')->table('ventas')->count(),
@@ -151,4 +186,16 @@ it('refuses an unsigned request with the usual 401 and stores nothing', function
         ->assertExactJson(['message' => 'Firma inválida.']);
 
     expect(RobotComparison::count())->toBe(0);
+});
+
+it('reads the differences back in contract key order, whatever order the database keeps', function () {
+    $id = compare($this, comparisonBody())->assertCreated()->json('id');
+
+    // MySQL's JSON type sorts object keys (by length, then alphabetically).
+    DB::table('robot_comparisons')->where('id', $id)->update(['diferencias' => json_encode([
+        ['sap' => '1204', 'clave' => '2026-10', 'campo' => 'filas', 'mysql' => '1203'],
+        ['sap' => '1000.50', 'clave' => '2026-10', 'campo' => 'sumas.total', 'mysql' => null],
+    ])]);
+
+    expect(RobotComparison::findOrFail($id)->diferencias)->toBe(comparisonBody()['diferencias']);
 });

@@ -5,6 +5,7 @@ namespace App\Modules\Sap\Application\Totals;
 use App\Modules\Sap\Domain\Values\SapTime;
 use App\Modules\Sap\Http\Exceptions\RobotRequestRejected;
 use App\Modules\Sap\Models\RobotComparison;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 /**
  * Stores what the robot reports after comparing its totals of SAP with
@@ -14,6 +15,9 @@ use App\Modules\Sap\Models\RobotComparison;
 final class StoreComparison
 {
     public const MAX_DIFFERENCES = 500;
+
+    /** How far ahead of the server clock comparada_en may be, for clock drift. */
+    public const FUTURE_MINUTES = 5;
 
     /** The longest text of each field of a difference. */
     private const LENGTHS = ['clave' => 20, 'campo' => 40, 'sap' => 40, 'mysql' => 40];
@@ -38,6 +42,9 @@ final class StoreComparison
 
         if ($comparedAt === null) {
             $this->errors['comparada_en'] = 'Debe ser una hora ISO 8601 con zona.';
+        } elseif ($comparedAt->greaterThan(now()->addMinutes(self::FUTURE_MINUTES))) {
+            // A clock that ran ahead once would keep that comparison as the latest forever.
+            $this->errors['comparada_en'] = 'No puede ser posterior a la hora del servidor (con '.self::FUTURE_MINUTES.' minutos de margen).';
         }
 
         if (! is_bool($matches)) {
@@ -52,16 +59,36 @@ final class StoreComparison
             throw RobotRequestRejected::invalid('La comparación no cumple el contrato.', $this->errors);
         }
 
-        return RobotComparison::create([
-            'conjunto' => $scope->dataset,
-            'empresa' => $scope->company,
-            'desde' => $scope->from,
-            'hasta' => $scope->until,
-            'cuadra' => $matches,
-            'diferencias' => $differences,
+        // A retry of the same comparison (same key, dataset, company and
+        // moment) answers the first one and stores nothing new.
+        $identity = [
+            'conjunto' => $scope->dataset->value,
+            'empresa' => $scope->company->value,
             'comparada_en' => $comparedAt,
             'robot_key' => $robotKey,
-        ]);
+        ];
+
+        $stored = RobotComparison::query()->where($identity)->first();
+
+        if ($stored !== null) {
+            return $stored;
+        }
+
+        try {
+            return RobotComparison::create([
+                'conjunto' => $scope->dataset,
+                'empresa' => $scope->company,
+                'desde' => $scope->from,
+                'hasta' => $scope->until,
+                'cuadra' => $matches,
+                'diferencias' => $differences,
+                'comparada_en' => $comparedAt,
+                'robot_key' => $robotKey,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // The same retry arrived twice at once: the other one stored it.
+            return RobotComparison::query()->where($identity)->firstOrFail();
+        }
     }
 
     /**

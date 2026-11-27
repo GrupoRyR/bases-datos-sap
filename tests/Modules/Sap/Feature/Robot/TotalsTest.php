@@ -152,7 +152,7 @@ it('counts the active MAESTROS rows of the company per part, every part in order
     totalsMaster('clientes', 'C2');
     totalsMaster('clientes', 'C3', active: false);
     totalsMaster('clientes', 'C4', company: 'SDC');
-    totalsMaster('marcas', 'M1');
+    totalsMaster('marcas', '1');
 
     $response = totals($this, ['conjunto' => 'MAESTROS', 'empresa' => 'SGX'])->assertOk();
     $groups = $response->json('grupos');

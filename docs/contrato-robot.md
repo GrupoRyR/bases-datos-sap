@@ -731,7 +731,7 @@ El robot informa el resultado de comparar sus totales de SAP con los de §13.2. 
 ```
 
 - `conjunto`, `empresa`, `desde` y `hasta`: las mismas reglas de §13.2 (`desde` y `hasta` solo en `VENTAS`, opcionales, `null` es no enviarlas). Son los de la consulta de totales que comparó.
-- `comparada_en`: cuándo comparó el robot, hora ISO 8601 con zona (§2). La API la guarda en hora de Bogotá.
+- `comparada_en`: cuándo comparó el robot, hora ISO 8601 con zona (§2). La API la guarda en hora de Bogotá. No puede pasar de la hora del servidor más **5 minutos**, para que un reloj adelantado no deje esa comparación como la última para siempre.
 - `cuadra`: `true` o `false` (booleano JSON). Con `true`, `diferencias` va vacía; con `false`, trae al menos una.
 - `diferencias`: lista, hasta **500**. Cada una es un objeto con exactamente estas cuatro llaves:
   - `clave`: la `clave` del grupo (§13.2), texto de 1 a 20 caracteres;
@@ -741,10 +741,12 @@ El robot informa el resultado de comparar sus totales de SAP con los de §13.2. 
 
 Respuesta 201: `{"id": 17}`.
 
+**Reintento.** Una comparación se identifica por la llave del robot que la firma, `conjunto`, `empresa` y `comparada_en`. Si el robot la reenvía porque perdió la respuesta, la API no guarda otra fila: responde 201 con el `id` de la primera, aunque el resto del cuerpo cambie. Para una comparación nueva, el robot usa la hora nueva en que comparó.
+
 422 (`{"message": "La comparación no cumple el contrato.", "errors": {...}}`, hasta 50 llaves):
 
 - los casos de §13.2 en `conjunto`, `empresa`, `desde` y `hasta`;
-- `comparada_en` que falta o no es una hora con zona;
+- `comparada_en` que falta, no es una hora con zona o pasa de la hora del servidor más 5 minutos;
 - `cuadra` que falta o no es booleano (`"false"` o `0` no valen);
 - `diferencias` que falta, no es una lista o trae más de 500;
 - `cuadra: true` con diferencias, o `cuadra: false` sin ninguna (el error va en `diferencias`);
