@@ -59,7 +59,7 @@ Today the coordinator deploys by SSH with the user's own key (alias `cartera-cpa
 - [x] T1 `sap:puede-desplegar` artisan command (slots, nightly window, open runs), with tests. Route: Datos y API session. PR #96, merged at `579dd79`. Follow-ups (same timezone in both windows, reject an empty window, document that the guard cannot see the robot's extraction phase) go in a later PR.
 - [x] T2 Phase 0: `deploy/despachar.sh` (all orders; `desplegar` guarded), `tests/Deploy` tests with stubs, `.github/workflows/deploy-ping.yml` (`workflow_dispatch`, `ping` only), docs §12 with the user's one-time steps. Route: delegated writer.
 - [ ] T3 User: create the key, install the forced-command line, store the `BASES_SAP_DEPLOY_KEY` secret and the `known_hosts` variable, then authorize one `ping` run. If the runner cannot reach port 22, switch to the server-pull cron design (research §2.3 b').
-- [ ] T4 `deploy.yml` (Phase 1) on push to `main`. Route: delegated writer, after T1 to T3.
+- [ ] T4 `deploy.yml` (Phase 1) on push to `main`. Route: delegated writer, after T1 to T3. It carries two review items from #98. First, `estado` must count only the errors since the deploy, not the whole day. Second, only the timestamp and exception class of each error line may reach the Actions log, never the message, because it can hold SAP data.
 - [ ] T5 `deploy/env-cambios`, the allowlist and `set-secret`. Route: delegated writer.
 - [ ] T6 Robot self-update and post-deploy complements; deployed-version endpoint. Route: Robot and Datos y API. The user approved the contract change on 2026-11-27 («Ambas piezas»). `deploy.sh` writes the deployed commit to `storage/app/deploy/commit` (git-ignored); `POST /api/robot/v1/version` reads it.
 - [ ] T7 Robot `--comparar` read-only mode and its aggregates endpoint, as the last step of each deploy and complement. Route: Robot and Datos y API, approved 2026-11-27. The `/totales` shape is fixed by the coordinator: groups by month (VENTAS), `actual` (CARTERA) or part (MAESTROS), with `filas`, `sumas` and `nulos`. Counts must match exactly; sums must match after rounding.
@@ -77,6 +77,7 @@ Today the coordinator deploys by SSH with the user's own key (alias `cartera-cpa
 - 2026-11-27: T2 done in `d982bf8` (dispatcher, `DEPLOY_REF` in `deploy.sh`, `tests/Feature/Deploy/DispatcherTest.php`) and `63d63b5` (`deploy-ping.yml`, docs §12). Dispatcher tests RED (35 failed, script missing) then GREEN (35 passed, 145 assertions); `composer lint` green; `composer test` 948 passed, 2 skipped, on Windows. shellcheck is not installed locally.
 
 - 2026-11-27: coordinator review of T2 added two things. A lock older than 30 minutes is taken over, because nobody can remove it with a forced-command key: test RED (exit 75), then GREEN. `deploy.sh` now records the deployed commit. Dispatcher tests: 36 passed. `composer lint` green.
+- 2026-11-27: the `/code-review` of #98 found one important issue. A retry after a half-failed deploy said `already deployed`, because HEAD moves before migrate. It is fixed by also requiring `storage/app/deploy/commit` to equal the sha (test RED, then GREEN). `estado` now uses the Bogota date. Dispatcher tests: 37 passed.
 
 ## Next step
 

@@ -65,7 +65,7 @@ release_lock() {
 }
 
 desplegar() {
-    local sha="$1" previous head
+    local sha="$1" previous recorded head
     require_sha "$sha"
 
     # A deploy takes a few minutes, so a lock older than 30 minutes was left by one that died.
@@ -87,7 +87,11 @@ desplegar() {
         || refuse 65 "commit is not on origin/main: $sha"
 
     previous="$(git rev-parse HEAD)"
-    if [ "$previous" = "$sha" ]; then
+
+    # deploy.sh moves HEAD before composer and migrate, and records the commit only when it
+    # finishes. HEAD on <sha> alone may be a deploy that failed halfway: then it runs again.
+    recorded="$(cat storage/app/deploy/commit 2>/dev/null || true)"
+    if [ "$previous" = "$sha" ] && [ "$recorded" = "$sha" ]; then
         printf 'already deployed: %s\n' "$sha"
         exit 0
     fi
@@ -122,7 +126,8 @@ estado() {
     fi
 
     # The daily channel writes laravel-<date>.log; the single channel, laravel.log.
-    today="$(date +%Y-%m-%d)"
+    # Laravel names and stamps its logs in app.timezone (Bogota); the server clock may not be.
+    today="$(TZ=America/Bogota date +%Y-%m-%d)"
     for file in "storage/logs/laravel-$today.log" storage/logs/laravel.log; do
         if [ -f "$file" ]; then
             logs+=("$file")

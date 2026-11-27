@@ -118,6 +118,8 @@ function dispatcherFixture(string $bash): array
         printf 'deploy %s\n' "$DEPLOY_REF" >> "$STUB_LOG"
         git fetch --quiet origin
         git merge --quiet --ff-only "$DEPLOY_REF"
+        mkdir -p storage/app/deploy
+        git rev-parse HEAD > storage/app/deploy/commit
 
         BASH);
 
@@ -341,11 +343,29 @@ it('deploys a fast-forward commit from origin/main', function () {
 
 it('does nothing when the commit is already deployed', function () {
     dispatcherRepos($this->fx);
-    $process = dispatcherRun($this->fx, 'desplegar '.dispatcherHead($this->fx));
+    $head = dispatcherHead($this->fx);
+    mkdir("{$this->fx['app']}/storage/app/deploy", 0777, true);
+    file_put_contents("{$this->fx['app']}/storage/app/deploy/commit", "{$head}\n");
+
+    $process = dispatcherRun($this->fx, "desplegar {$head}");
 
     expect($process->getExitCode())->toBe(0)
         ->and($process->getOutput())->toContain('already deployed')
         ->and(dispatcherLog($this->fx))->toBe('');
+});
+
+it('runs the deploy again when HEAD is on the commit but its deploy never finished', function () {
+    // deploy.sh moves HEAD before composer and migrate, and records the commit only at the end.
+    dispatcherRepos($this->fx);
+    $head = dispatcherHead($this->fx);
+
+    $process = dispatcherRun($this->fx, "desplegar {$head}");
+
+    expect($process->getExitCode())->toBe(0)
+        ->and($process->getOutput())->not->toContain('already deployed')
+        ->and($process->getOutput())->toContain("deployed: {$head}")
+        ->and(dispatcherLog($this->fx))->toContain("deploy {$head}")
+        ->and(trim((string) file_get_contents("{$this->fx['app']}/storage/app/deploy/commit")))->toBe($head);
 });
 
 it('refuses a commit that is not on origin/main', function () {
