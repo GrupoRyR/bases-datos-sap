@@ -265,6 +265,7 @@ Las tablas `@HBT_*` de `CONFIGURACION` se leen columna por columna y el robot sa
 - `robot\logs\robot.log`: el detalle de cada ejecución (rota a los 5 MB). Las contraseñas y el secreto de la API nunca se escriben: se marcan para ocultarlas apenas carga el `.env`. De un rechazo de la API solo queda el estado y los campos (`rows.12.codigo`), no su texto, que podría repetir un valor de SAP. Una revisión de solicitudes sin trabajo no escribe nada.
 - Un cliente o proveedor que llega de SAP sin nombre no frena la corrida: se envía con su código como nombre y queda un aviso (`WARNING ... llegó sin nombre`) en el log, para que TI le ponga el nombre en SAP.
 - `robot\state\ultima_ejecucion.json`: cómo terminó la última ejecución. Nunca lleva datos de SAP.
+- `robot\state\ultima_completa.json`: cómo terminó la última `--completa` (día de Bogotá, `OK` o `ERROR`, empresas y nombres de las etapas que fallaron). La revisión de cada minuto no lo toca. Nunca lleva datos de SAP.
 - `robot\state\robot.lock`: el candado, mientras el robot corre.
 
 ## Correos de fallo
