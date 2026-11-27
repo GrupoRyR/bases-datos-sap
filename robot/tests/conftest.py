@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import autoactualizar
 import config
 import hana
 import registro
@@ -21,6 +22,13 @@ def _limpiar_variables() -> None:
     for nombre in list(os.environ):
         if nombre.startswith(PREFIJOS):
             del os.environ[nombre]
+
+
+def _real_prohibido(que: str):
+    def prohibido(*args, **kwargs):
+        raise AssertionError(f"las pruebas nunca corren {que} de verdad: pasa uno falso")
+
+    return prohibido
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +46,12 @@ def aislar_entorno(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(registro, "_SECRETOS", [])
     # El modo TLS de HANA se anuncia una vez por proceso: cada prueba es una ejecución nueva.
     monkeypatch.setattr(hana, "_modo_tls_avisado", False, raising=False)
+    # Self-update (autoactualizar.py): no test runs the real git, pip or a new process, and
+    # robot/complementos.toml is a file in tmp (missing unless the test writes it).
+    monkeypatch.setattr(autoactualizar, "git_por_defecto", _real_prohibido("git"))
+    monkeypatch.setattr(autoactualizar, "comando_por_defecto", _real_prohibido("pip"))
+    monkeypatch.setattr(autoactualizar, "lanzador_por_defecto", _real_prohibido("el proceso nuevo"))
+    monkeypatch.setattr(autoactualizar, "RUTA_COMPLEMENTOS", tmp_path / "complementos.toml")
     yield
     _limpiar_variables()
     # registro.configurar() no vuelve a configurar un logger con handlers: los de una prueba

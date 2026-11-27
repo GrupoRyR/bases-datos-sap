@@ -1,4 +1,4 @@
-"""Cliente de la API del robot (docs/contrato-robot.md §2, §3, §4 y §7.3).
+"""Cliente de la API del robot (docs/contrato-robot.md §2, §3, §4 y §7.3, y /version).
 
 Cada petición es un POST JSON firmado con HMAC (firma.py), comprimido con gzip
 por defecto. El gzip usa mtime=0 para que un lote reenviado tenga los mismos
@@ -20,6 +20,7 @@ from __future__ import annotations
 import gzip
 import http.client
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -41,6 +42,7 @@ RETRY_AFTER_POR_DEFECTO = 30
 RETRY_AFTER_MAXIMO = 120
 MAX_ERROR = 1000
 USER_AGENT = "bases-sap-robot/1"
+_RE_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass(frozen=True)
@@ -164,6 +166,23 @@ class ApiCliente:
     def tomar_solicitudes(self, max_solicitudes: int = 20) -> list[dict[str, Any]]:
         datos = self._post("/solicitudes/tomar", {"max": max_solicitudes})
         return list(datos.get("solicitudes") or [])
+
+    def version(self) -> str | None:
+        """The commit the server reports as deployed (40 lowercase hex), or None.
+
+        PROVISIONAL until the Datos y API PR defines the route: POST /version with {} (signed
+        like every robot route, contract §2 and §3), answer {"commit": "<sha>" | null}. The
+        path and the parsing live only here, so adapting it is a one-method change.
+        """
+        datos = self._post("/version", {})
+        if "commit" not in datos:
+            raise ApiError("La API respondió /version sin la llave commit.")
+        commit = datos["commit"]
+        if commit is None:
+            return None
+        if not isinstance(commit, str) or not _RE_COMMIT.match(commit):
+            raise ApiError("La API respondió /version con un commit que no es un SHA de 40 caracteres.")
+        return commit
 
     def iniciar_corrida(
         self,

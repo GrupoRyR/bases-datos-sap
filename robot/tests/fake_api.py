@@ -91,7 +91,7 @@ _RE_FECHA = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 @dataclass
 class Peticion:
-    nombre: str  # tomar, iniciar, lote, cerrar, fallar o desconocida
+    nombre: str  # tomar, iniciar, lote, cerrar, fallar, version o desconocida
     ruta: str  # desde la raíz de la app: /api/robot/v1/...
     url: str
     headers: dict[str, str]
@@ -201,6 +201,8 @@ class ApiFalsa:
         # con alguno en su rango responde 409 sin abrir nada (contrato §10.4). Las pruebas
         # pueden llenarlo; cada corrida de VENTAS cerrada suma los suyos.
         self.ventas_cargadas: dict[str, set[str]] = {}
+        # POST /version (provisional): what the server answers as the deployed commit.
+        self.commit_desplegado: Any = None
 
     # ------------------------------------------------------------ para pruebas
     def reloj(self) -> float:
@@ -282,6 +284,8 @@ class ApiFalsa:
             return "tomar"
         if relativa == "/corridas":
             return "iniciar"
+        if relativa == "/version":
+            return "version"
         for nombre, patron in (("lote", _RE_LOTES), ("cerrar", _RE_CERRAR), ("fallar", _RE_FALLAR)):
             if relativa and patron.match(relativa):
                 return nombre
@@ -328,6 +332,8 @@ class ApiFalsa:
             return self._tomar(datos)
         if relativa == "/corridas":
             return self._iniciar(datos)
+        if relativa == "/version":
+            return self._version(datos)
         for patron, accion in ((_RE_LOTES, self._lote), (_RE_CERRAR, self._cerrar), (_RE_FALLAR, self._fallar)):
             m = patron.match(relativa)
             if m:
@@ -351,6 +357,13 @@ class ApiFalsa:
             self.solicitudes[solicitud["id"]] = solicitud
             self.estado_solicitudes[solicitud["id"]] = "tomada"
         return 200, {"solicitudes": tomadas}
+
+    def _version(self, datos: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        # PROVISIONAL until the Datos y API PR defines it: the commit the server reports as
+        # deployed, or null. The tests set commit_desplegado (any value, to test bad ones).
+        if datos:
+            raise _rechazo("El cuerpo de /version va vacío.")
+        return 200, {"commit": self.commit_desplegado}
 
     def _iniciar(self, datos: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         conjunto, empresa, tipo = datos.get("conjunto"), datos.get("empresa"), datos.get("tipo")

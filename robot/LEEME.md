@@ -101,7 +101,8 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 | `run_robot.py --historico-ventas --desde AAAA-MM` | Una vez, a mano: VENTAS mes por mes antes de la ventana nocturna (ver «Histórico de ventas») | Sí |
 | `run_robot.py --complemento-ventas --desde AAAA-MM` | A mano: llena `kilos` y `codigo_envio` de VENTAS mes por mes, como el histórico (ver «Complemento de ventas») | Sí |
 | `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
-| `revisar_solicitudes.py` | Toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
+| `run_robot.py --tras-despliegue` | Lo lanza solo la revisión de cada minuto: corre los complementos pendientes de `complementos.toml` (ver «Actualización automática») | Sí |
+| `revisar_solicitudes.py` | Se actualiza al commit desplegado (ver «Actualización automática»), toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
 Opciones de `run_robot.py`:
 
@@ -110,7 +111,7 @@ Opciones de `run_robot.py`:
 - `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
 - `--desde` y `--hasta`: solo para `--carga-produccion` (`--desde AAAA-MM-DD`), `--historico-ventas` y `--complemento-ventas` (`--desde AAAA-MM`, `--hasta AAAA-MM`).
 
-Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
+Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas`, `--tras-despliegue` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
 
 Códigos de salida: `0` todo bien, `1` algún fallo, `2` configuración incompleta, `130` cancelado con Ctrl+C.
 
@@ -235,6 +236,50 @@ Registra tres tareas con `pythonw.exe` (sin ventana), como el usuario actual y c
 
 Para lanzar una ahora: `Start-ScheduledTask -TaskName BasesSAP-Nocturna`.
 
+## Actualización automática
+
+El robot se actualiza solo al commit que la app dice que está desplegado, para que después de cada despliegue el PC de TI corra el mismo código.
+
+**La primera vez** la copia del PC de TI no tiene este código: hay que traerlo a mano una sola vez, desde la raíz del repo, con `git pull --ff-only`. Desde ahí se actualiza sola.
+
+Cuándo pasa: en la revisión de cada minuto, solo fuera de las franjas bloqueadas y con el candado tomado (ninguna otra ejecución del robot corriendo). Pregunta a la app qué commit está desplegado (`POST /version`, firmado como las demás rutas; la forma es provisional hasta que la app la defina) y:
+
+1. Si la app no dice ningún commit, o es el mismo de la copia, no hace nada.
+2. La copia debe estar en la rama `main`.
+3. Trae `origin/main` (`git fetch`), y el commit debe estar ahí.
+4. Si la copia ya va adelante de ese commit, no hace nada (no es un error).
+5. Solo avanza si es un avance rápido: si la copia se desvió de `origin/main`, no la toca.
+6. Si cambió `requirements.txt`, instala los paquetes del commit nuevo con el `python.exe` del `.venv` **antes** de cambiar el código: si `pip` falla, el robot sigue con el código de hoy y no con uno al que le faltan paquetes. `requirements-dev.txt` no cuenta: es solo para las pruebas.
+7. `git merge --ff-only` al commit y comprueba que quedó ahí.
+
+Los archivos sin seguimiento de la copia (los que Git no conoce) no la frenan. Solo la frena lo que Git mismo rechaza: cambios locales en archivos del repo, o un archivo sin seguimiento que el commit nuevo traería con el mismo nombre. Nunca toca el `.env`, nunca usa `--forzar` y nunca hace `git status`, `git pull` ni `git reset`. Necesita `git` en el `PATH` del usuario de las tareas y las credenciales de Git que ya tenga el PC; nunca pide una contraseña (si Git la pidiera, falla).
+
+Si se actualizó, la revisión suelta el candado, lanza `run_robot.py --tras-despliegue` en un proceso nuevo, sin ventana, que ya corre con el código nuevo, y ese minuto no toma solicitudes. Si algo falla (no está en `main`, el commit no está en `origin/main`, no es avance rápido, Git rechaza el merge o `pip` falla), lo deja en el log, avisa por correo una vez por hora y sigue con el código de hoy: las solicitudes se siguen atendiendo. Si la pregunta a la app falla (por ejemplo, la ruta todavía no existe), solo queda en el log en DEBUG y la revisión sigue como siempre.
+
+### Complementos pendientes
+
+`robot\complementos.toml` (está en Git) lista los complementos que el robot corre solo después de un despliegue. Hoy viene sin entradas, solo con un ejemplo en comentario. Para pedir uno, agrega una entrada y despliégala:
+
+```toml
+[[complemento]]
+id = "complemento-ventas-2025-01"
+modo = "complemento-ventas"
+argumentos = ["--desde", "2025-01"]
+```
+
+- `id`: único y nunca reutilizado. `modo`: el modo de `run_robot.py` sin los guiones; hoy solo `complemento-ventas`. `argumentos`: sus opciones, como textos; solo `--desde`, `--hasta` y `--empresa`.
+- Una entrada inválida (id repetido o vacío, otro modo, `--forzar`, `--sin-vpn`, otro modo como opción, argumentos que `run_robot.py` no acepta) queda en el log, avisa por correo una vez por hora y se salta; nunca se marca como hecha. Si el archivo no se puede leer, no corre ningún complemento.
+- Lo que ya corrió queda en `robot\state\complementos.json` (fuera de Git): cada id como hecho, o como fallido en un commit con un motivo corto y sin valores de SAP. Si ese archivo se daña, no corre ningún complemento hasta que lo arregles; si lo borras, los complementos vuelven a correr (repetir un complemento de ventas no hace daño).
+- Una entrada hecha no vuelve a correr. Una fallida se reintenta solo después del siguiente despliegue (otro commit), nunca cada minuto. Para correr algo otra vez, agrega una entrada con otro id.
+
+La revisión de cada minuto lanza `--tras-despliegue` después de actualizarse y también, sin despliegue, cuando hay un complemento pendiente (la primera instalación o un reintento tras un despliegue) y su fase con VPN cabe antes de la siguiente franja. Si no cabe, no lanza nada ese minuto y lo intenta el siguiente.
+
+### El modo `--tras-despliegue`
+
+Es un modo programado: respeta las franjas como los otros (nunca con `--forzar`, que además no acepta, como tampoco `--empresa`, `--desde` ni `--hasta`), espera el candado hasta 20 minutos y lo renueva mientras corre. Antes de subir la VPN espera a que la suma de lo que estima cada complemento pendiente quepa antes de la siguiente franja, como el complemento de ventas.
+
+Con el candado tomado vuelve a mirar qué está pendiente (otro proceso pudo haberlo corrido) y corre cada complemento en orden, por el mismo camino del modo a mano (`--complemento-ventas` con sus argumentos, con su propia sesión de VPN). Marca cada uno como hecho o fallido en `complementos.json`; uno que falla no frena a los siguientes. El log trae una línea por complemento (`Complemento <id>: hecho` o `fallido`) y `ultima_ejecucion.json` los lista con sus tramos. Si alguno falló, avisa por correo y sale con `1`. Sin nada pendiente sale con `0` sin tocar SAP, la VPN ni la app.
+
 ## Carpeta de CSV
 
 Todo queda en `BASES_SAP_CSV_DIR` (UTF-8 con BOM, separador `;`):
@@ -266,6 +311,7 @@ Las tablas `@HBT_*` de `CONFIGURACION` se leen columna por columna y el robot sa
 - Un cliente o proveedor que llega de SAP sin nombre no frena la corrida: se envía con su código como nombre y queda un aviso (`WARNING ... llegó sin nombre`) en el log, para que TI le ponga el nombre en SAP.
 - `robot\state\ultima_ejecucion.json`: cómo terminó la última ejecución. Nunca lleva datos de SAP.
 - `robot\state\robot.lock`: el candado, mientras el robot corre.
+- `robot\state\complementos.json`: qué complementos pendientes ya corrieron (ver «Actualización automática»).
 
 ## Correos de fallo
 
@@ -273,7 +319,7 @@ Si llenas `ALERTA_SMTP_*` y `ALERTA_DESTINATARIOS`, el robot manda un correo con
 
 La conexión al servidor de correo va cifrada (puerto 465, o 587 con STARTTLS) y comprueba su certificado: si el certificado no es válido para `ALERTA_SMTP_HOST`, el correo no sale y el error queda en el log.
 
-Para no llenar el buzón, los avisos de la revisión de cada minuto tienen límite: la configuración incompleta avisa una vez al día y un error al tomar las solicitudes o uno inesperado, una vez por hora. El diagnóstico no avisa: lo corres tú y ves el resumen.
+Para no llenar el buzón, los avisos de la revisión de cada minuto tienen límite: la configuración incompleta avisa una vez al día y un error al tomar las solicitudes, uno inesperado, una actualización automática que falla o un complemento inválido, una vez por hora. El diagnóstico no avisa: lo corres tú y ves el resumen.
 
 ## Pruebas
 

@@ -38,13 +38,17 @@ Uso:
                                                    # mes por mes, como el histórico (complemento.py,
                                                    # orden 016). No corre si ventas.sql no trae los
                                                    # kilos
+    python run_robot.py --tras-despliegue          # lo lanza la revisión de cada minuto después de
+                                                   # actualizarse (autoactualizar.py): corre los
+                                                   # complementos pendientes de robot/complementos.toml
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
 revisión de solicitudes que está terminando); el catálogo y el diagnóstico, que
 los corre el usuario, no esperan. Si la completa o el archivo arrancan dentro de
 una franja bloqueada de los otros robots (±15 minutos), esperan a que pase,
-salvo con --forzar. El histórico y el complemento de ventas, además, esperan a que su fase
+salvo con --forzar (--tras-despliegue nunca lo usa). El histórico, el complemento de ventas y
+--tras-despliegue, además, esperan a que su fase
 con VPN quepa entera antes de la siguiente franja (bloqueo.inicio_hueco) y renuevan el
 candado por cada tramo, porque pueden durar más que su vigencia.
 
@@ -58,10 +62,12 @@ import argparse
 import json
 import sys
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Iterable
 
 import archivo
+import autoactualizar
 import bloqueo
 import catalogo
 import complemento
@@ -89,6 +95,10 @@ from vpn import RobotVPN
 SOLICITUDES_POR_PAGINA = 20
 MAX_PAGINAS = 5
 ESPERA_CANDADO = timedelta(minutes=20)  # la nocturna y el domingo esperan a la revisión que termina
+TRAS_DESPLIEGUE = "tras despliegue"
+# Options a pending complement (robot/complementos.toml) may carry, per mode. Anything else,
+# --forzar, --sin-vpn or another mode included, makes the entry invalid.
+OPCIONES_COMPLEMENTO = {"complemento-ventas": ("--desde", "--hasta", "--empresa")}
 
 log = registro.obtener("robot")
 
@@ -311,6 +321,10 @@ def _parser() -> argparse.ArgumentParser:
                            "--hasta, uno por corrida, como el histórico. Se corre a mano. Los kilos solo "
                            "son de verdad en SDC (en SGX van vacíos). No corre si "
                            "queries/ventas/ventas.sql no trae la columna de kilos.")
+    modo.add_argument("--tras-despliegue", action="store_true",
+                      help="Lo lanza la revisión de cada minuto después de actualizarse al commit desplegado: "
+                           "corre los complementos pendientes de robot/complementos.toml. Respeta las franjas "
+                           "y espera el candado; no lleva otras opciones.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
@@ -333,6 +347,77 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _plan_por_meses(
+    args: argparse.Namespace, empresas: list[str], ahora: Callable[[], datetime]
+) -> tuple[tuple[date, date | None], timedelta]:
+    """(--desde, --hasta) del histórico o del complemento de ventas y cuánto estará arriba la
+    VPN. Lanza historico.RangoInvalido si el rango no sirve."""
+    desde_mes = historico.mes(args.desde)
+    hasta_mes = historico.mes(args.hasta) if args.hasta is not None else None
+    if args.complemento_ventas:
+        complemento.revisar_desde(desde_mes)
+    # Con la ventana estimada (reloj del PC): los tramos de verdad salen de la de HANA.
+    plan = historico.tramos(desde_mes, hasta_mes, historico.inicio_ventana_estimado(ahora().date()))
+    duracion = complemento.duracion_estimada if args.complemento_ventas else historico.duracion_estimada
+    return (desde_mes, hasta_mes), duracion(len(plan), len(empresas))
+
+
+class ComplementoInvalido(ValueError):
+    """A pending complement whose arguments run_robot would not accept."""
+
+
+@dataclass(frozen=True)
+class PlanComplemento:
+    empresas: list[str]
+    desde: date
+    hasta: date | None
+    estimado: timedelta  # how long its VPN phase takes (complemento.duracion_estimada)
+
+
+def plan_complemento(
+    modo: str, argumentos: list[str], ahora: Callable[[], datetime] = config.ahora
+) -> PlanComplemento:
+    """Validates a pending complement as `run_robot.py --<modo> <argumentos...>` would, and
+    returns its plan. Raises ComplementoInvalido."""
+    permitidas = OPCIONES_COMPLEMENTO.get(modo)
+    if permitidas is None:
+        raise ComplementoInvalido(f"modo {modo!r} no permitido.")
+    for token in argumentos:
+        if token.startswith("-") and token.split("=", 1)[0] not in permitidas:
+            raise ComplementoInvalido(f"{token} no va en un complemento pendiente (solo {', '.join(permitidas)}).")
+    parser = _parser()
+
+    def error(mensaje: str) -> None:
+        raise ComplementoInvalido(mensaje)
+
+    parser.error = error  # type: ignore[method-assign]
+    args = parser.parse_args([f"--{modo}", *argumentos])
+    if args.desde is None:
+        raise ComplementoInvalido(f"--{modo} necesita --desde AAAA-MM.")
+    empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
+    try:
+        (desde, hasta), estimado = _plan_por_meses(args, empresas, ahora)
+    except historico.RangoInvalido as exc:
+        raise ComplementoInvalido(str(exc)) from exc
+    return PlanComplemento(empresas, desde, hasta, estimado)
+
+
+def complementos_pendientes(
+    ahora: Callable[[], datetime], git: autoactualizar.Ejecutor | None = None
+) -> tuple[list[tuple[autoactualizar.Complemento, PlanComplemento]], list[str]]:
+    """The pending complements of robot/complementos.toml with their plans, in order, and the
+    problems found (invalid entries or an unreadable state). Never raises for those."""
+    entradas, problemas = autoactualizar.cargar_complementos(
+        lambda modo, argumentos: plan_complemento(modo, argumentos, ahora)
+    )
+    try:
+        estado = autoactualizar.leer_estado()
+    except autoactualizar.EstadoIlegible as exc:
+        return [], [*problemas, str(exc)]
+    lista = autoactualizar.pendientes(entradas, estado, lambda: autoactualizar.commit_actual(git))
+    return [(c, plan_complemento(c.modo, list(c.argumentos), ahora)) for c in lista], problemas
+
+
 def _esperar_hueco(
     cfg: Config,
     modo: str,
@@ -342,7 +427,7 @@ def _esperar_hueco(
     dormir: Callable[[float], None],
     carga: str = "del histórico",
 ) -> int | None:
-    """Histórico o complemento de ventas: espera a que su fase con VPN quepa entera antes de la
+    """Histórico, complemento de ventas o --tras-despliegue: espera a que su fase con VPN quepa entera antes de la
     siguiente franja de los otros robots. None si puede seguir; el código de salida si no hay
     hueco. `carga` nombra la carga en los mensajes ("del histórico", "del complemento")."""
     momento = ahora()
@@ -387,9 +472,14 @@ def main(
     conectar: Callable[..., Any] = hana.conectar,
     ahora: Callable[[], datetime] = config.ahora,
     dormir: Callable[[float], None] = time.sleep,
+    git: autoactualizar.Ejecutor | None = None,
 ) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    tras = args.tras_despliegue
+    if tras and (args.empresa or args.desde is not None or args.hasta is not None or args.forzar):
+        parser.error("--tras-despliegue no lleva --empresa, --desde, --hasta ni --forzar: cada complemento "
+                     "pendiente trae sus argumentos y nunca se corre dentro de una franja.")
     empresas = list(dict.fromkeys(args.empresa or EMPRESAS))
     carga: Trabajo | None = None
     # (--desde, --hasta) del histórico o del complemento de ventas
@@ -415,23 +505,17 @@ def main(
         if args.desde is None:
             parser.error(f"{opcion} necesita --desde AAAA-MM.")
         try:
-            desde_mes = historico.mes(args.desde)
-            hasta_mes = historico.mes(args.hasta) if args.hasta is not None else None
-            if args.complemento_ventas:
-                complemento.revisar_desde(desde_mes)
-            # Con la ventana estimada (reloj del PC): los tramos de verdad salen de la de HANA.
-            plan = historico.tramos(desde_mes, hasta_mes, historico.inicio_ventana_estimado(ahora().date()))
+            meses, estimado = _plan_por_meses(args, empresas, ahora)
         except historico.RangoInvalido as exc:
             parser.error(str(exc))
-        meses = (desde_mes, hasta_mes)
-        duracion = complemento.duracion_estimada if args.complemento_ventas else historico.duracion_estimada
-        estimado = duracion(len(plan), len(empresas))
     if args.completa:
         modo = "completa"
     elif carga is not None:
         modo = "carga produccion"
     elif meses is not None:
         modo = "complemento ventas" if args.complemento_ventas else "historico ventas"
+    elif tras:
+        modo = TRAS_DESPLIEGUE
     elif args.archivo:
         modo = f"archivo {args.archivo}"
     else:
@@ -451,7 +535,7 @@ def main(
         # Solo la completa, la carga, el histórico y el complemento hablan con la API; el archivo,
         # el catálogo y el diagnóstico no.
         cfg.validar(requiere_vpn=not args.sin_vpn,
-                    requiere_api=completa or carga is not None or meses is not None, empresas=empresas)
+                    requiere_api=completa or carga is not None or meses is not None or tras, empresas=empresas)
         if args.complemento_ventas:
             # Sin la columna de kilos en ventas.sql no corre: antes de esperar la franja o el
             # candado y de subir la VPN (complemento.revisar_consulta).
@@ -466,11 +550,25 @@ def main(
     # Los modos de las tareas programadas, y la carga, el histórico y el complemento, que son largos:
     # respetan las franjas de los otros robots y esperan el candado. Los dos manuales que
     # hablan con la API avisan por correo como la nocturna: el diagnóstico no.
-    programado = completa or carga is not None or meses is not None or modo.startswith("archivo")
+    if tras:
+        planes, problemas = complementos_pendientes(ahora, git)
+        for problema in problemas:
+            # The per-minute check alerts these (once an hour); here they only go to the log.
+            log.error("%s", problema)
+        if not planes:
+            # T7b: when --comparar exists it also runs after a deploy with nothing pending, so
+            # this early exit moves into _tras_despliegue.
+            log.info("Sin complementos pendientes después del despliegue.")
+            return 0
+        log.info("Complementos pendientes: %s.", ", ".join(c.id for c, _ in planes))
+        estimado = sum((plan.estimado for _, plan in planes), timedelta())
+
+    programado = completa or carga is not None or meses is not None or tras or modo.startswith("archivo")
     avisar = modo != "diagnostico"  # el diagnóstico lo corre el usuario y ve el resumen
     momento = ahora()
     franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
-    carga_meses = "del complemento" if args.complemento_ventas else "del histórico"
+    carga_meses = ("de los complementos" if tras
+                   else "del complemento" if args.complemento_ventas else "del histórico")
     if estimado is not None:
         # El histórico y el complemento tienen la VPN arriba mucho tiempo: no basta con estar fuera
         # de la franja, toda la fase con VPN debe caber antes de la siguiente.
@@ -526,10 +624,83 @@ def main(
         return _ejecutar(
             cfg, args, modo, empresas, inicio, avisar=avisar, fabrica_api=fabrica_api,
             fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora, carga=carga, meses=meses,
-            renovar=candado.renovar,
+            renovar=candado.renovar, git=git,
         )
     finally:
         candado.soltar()
+
+
+def _complemento_ventas(
+    cfg: Config, args: argparse.Namespace, plan: PlanComplemento, **kwargs: Any
+) -> tuple[list[historico.Tramo], list[tuple[str, str]]]:
+    """The same path as `run_robot.py --complemento-ventas` (see _ejecutar)."""
+    fabrica_api, fabrica_vpn = kwargs.pop("fabrica_api"), kwargs.pop("fabrica_vpn")
+    complemento.revisar_consulta()  # ConfigError if ventas.sql lost the kilos column
+    return complemento.ejecutar(
+        cfg, plan.empresas, plan.desde, plan.hasta, api=fabrica_api(cfg.api),
+        robot_vpn=None if args.sin_vpn else fabrica_vpn(cfg.vpn), sin_vpn=args.sin_vpn, **kwargs,
+    )
+
+
+_CORRER_COMPLEMENTO = {"complemento-ventas": _complemento_ventas}
+
+
+def _tras_despliegue(
+    cfg: Config,
+    args: argparse.Namespace,
+    *,
+    fabrica_api: Callable[..., ApiCliente],
+    fabrica_vpn: Callable[..., Any],
+    conectar: Callable[..., Any],
+    ahora: Callable[[], datetime],
+    renovar: Callable[[], Any],
+    git: autoactualizar.Ejecutor | None,
+) -> tuple[list[tuple[str, str]], dict[str, Any]]:
+    """--tras-despliegue, with the lock held: each pending complement in order, through the
+    path of its manual mode. A failing one is marked failed at this commit and the next one
+    still runs. Returns the failures and what goes to the state."""
+    # Again under the lock: another process may have run some while this one waited.
+    planes, problemas = complementos_pendientes(ahora, git)
+    for problema in problemas:
+        log.error("%s", problema)
+    commit = autoactualizar.commit_actual(git)
+    fallos: list[tuple[str, str]] = []
+    resumen: list[dict[str, Any]] = []
+    if not planes:
+        log.info("Sin complementos pendientes: otro proceso ya los corrió.")
+    for c, plan in planes:
+        log.info("Complemento %s: --%s %s.", c.id, c.modo, " ".join(c.argumentos))
+        tramos: list[historico.Tramo] = []
+        try:
+            tramos, propios = _CORRER_COMPLEMENTO[c.modo](
+                cfg, args, plan, fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn, conectar=conectar,
+                ahora=ahora, renovar=renovar,
+            )
+        except ConfigError as exc:
+            propios = [("CONFIGURACION", str(exc))]
+        except Exception as exc:  # one complement never stops the next
+            log.exception("Error inesperado en el complemento %s.", c.id)
+            propios = [("INESPERADO", extraccion.mensaje_seguro(exc))]
+        renovar()
+        hecho = not propios
+        try:
+            autoactualizar.marcar(c.id, hecho=hecho, commit=commit, momento=ahora(),
+                                  motivo="; ".join(m for _, m in propios))
+        except OSError as exc:
+            log.error("No se pudo guardar el estado del complemento %s: %s", c.id, exc)
+            propios = [*propios,
+                       ("ESTADO", f"No se pudo guardar el estado del complemento: {exc.__class__.__name__}.")]
+        if hecho:
+            log.info("Complemento %s: hecho (%d tramos).", c.id, len(tramos))
+        else:
+            log.error("Complemento %s: fallido (%d tramos, %d fallos); se reintenta después del "
+                      "siguiente despliegue.", c.id, len(tramos), len(propios))
+        fallos += [(etapa, f"Complemento {c.id}: {mensaje}") for etapa, mensaje in propios]
+        resumen.append({"id": c.id, "modo": c.modo, "argumentos": list(c.argumentos),
+                        "estado": "hecho" if hecho else "fallido",
+                        "tramos": [t.para_estado() for t in tramos]})
+    # T7b: --comparar is called here, once, after the pending complements (not implemented yet).
+    return fallos, {"complementos": resumen}
 
 
 def _ejecutar(
@@ -547,13 +718,19 @@ def _ejecutar(
     carga: Trabajo | None = None,
     meses: tuple[date, date | None] | None = None,
     renovar: Callable[[], Any] = lambda: None,
+    git: autoactualizar.Ejecutor | None = None,
 ) -> int:
     """El modo pedido, con el candado ya tomado."""
     completa = modo == "completa" or carga is not None
     trabajos: list[Trabajo] = []
     extra: dict[str, Any] = {}
     try:
-        if meses is not None and modo == "complemento ventas":
+        if modo == TRAS_DESPLIEGUE:
+            fallos, extra = _tras_despliegue(
+                cfg, args, fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn, conectar=conectar,
+                ahora=ahora, renovar=renovar, git=git,
+            )
+        elif meses is not None and modo == "complemento ventas":
             tramos, fallos = complemento.ejecutar(
                 cfg, empresas, *meses, api=fabrica_api(cfg.api),
                 robot_vpn=None if args.sin_vpn else fabrica_vpn(cfg.vpn), conectar=conectar,

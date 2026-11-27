@@ -72,8 +72,9 @@ def test_sin_solicitudes_no_sube_la_vpn_ni_escribe_en_el_log(entorno, correos, c
     e = entorno
     with caplog.at_level(logging.INFO, logger="bases_sap"):
         assert _revisar(e, fabrica_vpn=_prohibida) == 0
-    assert [p.nombre for p in e.servidor.peticiones] == ["tomar"]
-    assert e.servidor.peticiones[0].datos == {"max": 20}
+    # First the deployed commit (self-update, autoactualizar.py), then the requests.
+    assert [p.nombre for p in e.servidor.peticiones] == ["version", "tomar"]
+    assert e.servidor.peticiones[1].datos == {"max": 20}
     assert e.hana.ejecutadas == []
     assert not [ev for ev in e.linea if ev[0] in ("vpn", "hana")]
     assert [r for r in caplog.records if r.levelno >= logging.INFO] == []
