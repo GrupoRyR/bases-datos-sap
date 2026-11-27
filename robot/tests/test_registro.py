@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 import sys
 from pathlib import Path
@@ -88,3 +89,43 @@ def test_los_secretos_del_env_se_registran_al_cargar(entorno_completo, monkeypat
     for secreto in secretos:
         assert secreto not in mensaje
     assert mensaje == "Valores: " + " ".join(["***"] * len(secretos))
+
+
+def test_la_consola_cp1252_no_falla_con_caracteres_fuera_de_su_juego(monkeypatch) -> None:
+    # The Windows console is cp1252: an arrow there used to raise UnicodeEncodeError.
+    crudo = io.BytesIO()
+    consola = io.TextIOWrapper(crudo, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(sys, "stdout", consola)
+    errores: list[logging.LogRecord] = []
+    monkeypatch.setattr(logging.Handler, "handleError", lambda self, record: errores.append(record))
+    logger = registro.configurar()
+    try:
+        registro.obtener("prueba").info("POST /corridas → 201 en 0,4 s (año)")
+        for handler in logger.handlers:
+            handler.flush()
+
+        assert errores == []
+        salida = crudo.getvalue().decode("cp1252")
+        assert "POST /corridas ? 201 en 0,4 s (año)" in salida
+    finally:
+        for handler in list(logger.handlers):
+            handler.close()
+            logger.removeHandler(handler)
+
+
+def test_sin_consola_pythonw_solo_escribe_el_archivo(tmp_path: Path, monkeypatch) -> None:
+    # pythonw.exe (the scheduled tasks) has no sys.stdout.
+    monkeypatch.setattr(sys, "stdout", None)
+    logger = registro.configurar()
+    try:
+        registro.obtener("prueba").info("Sin consola → solo archivo")
+        for handler in logger.handlers:
+            handler.flush()
+
+        assert [type(h) for h in logger.handlers] == [registro.RotatingFileHandler]
+        contenido = (tmp_path / "logs" / "robot.log").read_text(encoding="utf-8")
+        assert "Sin consola → solo archivo" in contenido
+    finally:
+        for handler in list(logger.handlers):
+            handler.close()
+            logger.removeHandler(handler)
