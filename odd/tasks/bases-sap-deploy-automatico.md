@@ -57,7 +57,7 @@ Today the coordinator deploys by SSH with the user's own key (alias `cartera-cpa
 ## Tasks
 
 - [ ] T1 `sap:puede-desplegar` artisan command (slots, nightly window, open runs), with tests. Route: Datos y API session.
-- [ ] T2 Phase 0: `deploy/despachar.sh` (all orders; `desplegar` guarded), `tests/Deploy` tests with stubs, `.github/workflows/deploy-ping.yml` (`workflow_dispatch`, `ping` only), docs §12 with the user's one-time steps. Route: delegated writer.
+- [x] T2 Phase 0: `deploy/despachar.sh` (all orders; `desplegar` guarded), `tests/Deploy` tests with stubs, `.github/workflows/deploy-ping.yml` (`workflow_dispatch`, `ping` only), docs §12 with the user's one-time steps. Route: delegated writer.
 - [ ] T3 User: create the key, install the forced-command line, store the `BASES_SAP_DEPLOY_KEY` secret and the `known_hosts` variable, then authorize one `ping` run. If the runner cannot reach port 22, switch to the server-pull cron design (research §2.3 b').
 - [ ] T4 `deploy.yml` (Phase 1) on push to `main`. Route: delegated writer, after T1 to T3.
 - [ ] T5 `deploy/env-cambios`, the allowlist and `set-secret`. Route: delegated writer.
@@ -74,6 +74,7 @@ Today the coordinator deploys by SSH with the user's own key (alias `cartera-cpa
 ## Progress
 
 - 2026-11-27: the ticket was accepted, and the coordinator made the first deploy by hand (`6a9323c`). The answers to the ticket questions are in the ticket's history.
+- 2026-11-27: T2 done in `d982bf8` (dispatcher, `DEPLOY_REF` in `deploy.sh`, `tests/Feature/Deploy/DispatcherTest.php`) and `63d63b5` (`deploy-ping.yml`, docs §12). Dispatcher tests RED (35 failed, script missing) then GREEN (35 passed, 145 assertions); `composer lint` green; `composer test` 948 passed, 2 skipped, on Windows. shellcheck is not installed locally.
 
 ## Next step
 
