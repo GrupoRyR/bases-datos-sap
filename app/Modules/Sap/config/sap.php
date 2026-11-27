@@ -73,4 +73,22 @@ return [
         'taken_expires_minutes' => 30,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Deploys
+    |--------------------------------------------------------------------------
+    |
+    | What `php artisan sap:puede-desplegar` checks before each deploy, since
+    | maintenance mode in the middle of a run kills it. Besides the blocked
+    | slots above, no deploy starts inside the nightly run window, in Bogota,
+    | from BASES_SAP_VENTANA_NOCTURNA_DESPLIEGUE as "HH:MM-HH:MM": the start
+    | is included and the end excluded, and an end before the start crosses
+    | midnight.
+    |
+    */
+
+    'deploy' => [
+        'nightly_window' => (string) env('BASES_SAP_VENTANA_NOCTURNA_DESPLIEGUE', '01:45-02:15'),
+    ],
+
 ];
