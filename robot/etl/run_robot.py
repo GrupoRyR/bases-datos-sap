@@ -786,6 +786,21 @@ def _comparacion_diaria(
     if comparar.comparada_el(hoy):
         log.info("La comparación diaria con SAP ya se hizo hoy (%s); no se repite.", hoy)
         return
+    # Its VPN phase must fit before the next blocked slot of the other robots, now: it never
+    # waits (the load is done) and, if it does not fit, the day stays free for a later completa.
+    momento = ahora()
+    estimado = comparar.duracion_estimada(len(EMPRESAS), hoy, comparar.CONJUNTOS)
+    minutos = int(estimado.total_seconds() // 60)
+    try:
+        inicio = bloqueo.inicio_hueco(momento, estimado, cfg.franjas, cfg.margen_franja_min)
+        motivo = (f"su fase con VPN (unos {minutos} minutos) no cabe antes de la siguiente franja de los "
+                  f"otros robots (cabría desde las {inicio:%H:%M})")
+    except ValueError as exc:
+        inicio, motivo = None, str(exc).rstrip(".")
+    if inicio is None or inicio > momento:
+        log.warning("La comparación diaria no se hace ahora (%s): %s; no se anota el día y la puede hacer "
+                    "otra completa buena de hoy.", f"{momento:%H:%M}", motivo)
+        return
     log.info("Comparación diaria con SAP: %s.", ", ".join(comparar.CONJUNTOS))
     renovar()
     try:

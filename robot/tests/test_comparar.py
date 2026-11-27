@@ -702,3 +702,63 @@ def test_un_archivo_diario_danado_se_toma_como_sin_comparar(entorno, correos, co
     (config.STATE_DIR / comparar.ARCHIVO_DIARIO).write_text("{no es json", encoding="utf-8")
     assert _main(e, "--completa") == 0
     assert len(_comparaciones(e)) == 6 and _diaria()["fecha"] == "2026-10-26"
+
+
+class _RelojDeLaCarga:
+    """The completa starts at `inicio` and, once its VPN is down, the clock reads `fin`: the
+    time at which the load ended and the daily comparison would start."""
+
+    def __init__(self, e, inicio: datetime, fin: datetime) -> None:
+        self.e, self.inicio, self.fin = e, inicio, fin
+
+    def __call__(self) -> datetime:
+        return self.fin if ("vpn", "abajo") in self.e.linea else self.inicio
+
+
+def test_si_la_comparacion_diaria_no_cabe_antes_de_la_franja_no_compara_ni_anota(
+    entorno, correos, comparacion_diaria, caplog
+):
+    # The PC started late: the nightly ends at 04:52, inside the 05:00 slot (±15 minutes) of
+    # the other robots. The comparison (about 11 minutes of VPN) does not wait and is skipped.
+    e = entorno
+    reloj = _RelojDeLaCarga(e, datetime(2026, 10, 26, 4, 30, tzinfo=config.BOGOTA),
+                            datetime(2026, 10, 26, 4, 52, tzinfo=config.BOGOTA))
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert _main(e, "--completa", ahora=reloj, dormir=_no_dormir) == 0
+    assert e.vpn.conexiones == 1 and e.servidor.peticiones_a("totales") == []
+    assert not (config.STATE_DIR / comparar.ARCHIVO_DIARIO).exists()
+    assert any("La comparación diaria no se hace ahora" in m and "franja" in m for m in caplog.messages)
+    assert correos == []
+    assert _estado()["estado"] == "OK"
+    revisar_fases(e.linea)
+    # A later good completa that day, with time to spare, still compares and records the day.
+    e.linea.clear()
+    reloj = _RelojDeLaCarga(e, datetime(2026, 10, 26, 6, 20, tzinfo=config.BOGOTA),
+                            datetime(2026, 10, 26, 6, 40, tzinfo=config.BOGOTA))
+    assert _main(e, "--completa", ahora=reloj, dormir=_no_dormir) == 0
+    assert len(_comparaciones(e)) == 6 and _diaria()["fecha"] == "2026-10-26"
+
+
+def test_si_ningun_hueco_del_dia_alcanza_no_compara(entorno, correos, comparacion_diaria, caplog, monkeypatch):
+    e = entorno
+    import bloqueo
+
+    def sin_hueco(*args, **kwargs):
+        raise ValueError("Ningún hueco entre las franjas bloqueadas dura 11 minutos.")
+
+    monkeypatch.setattr(bloqueo, "inicio_hueco", sin_hueco)
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert _main(e, "--completa") == 0
+    assert e.vpn.conexiones == 1 and e.servidor.peticiones_a("totales") == []
+    assert not (config.STATE_DIR / comparar.ARCHIVO_DIARIO).exists()
+    assert any("La comparación diaria no se hace ahora" in m and "Ningún hueco" in m for m in caplog.messages)
+    assert correos == []
+
+
+def test_una_completa_que_termina_a_las_2_20_compara_como_siempre(entorno, correos, comparacion_diaria):
+    e = entorno
+    reloj = _RelojDeLaCarga(e, AHORA, datetime(2026, 10, 26, 2, 20, tzinfo=config.BOGOTA))
+    assert _main(e, "--completa", ahora=reloj, dormir=_no_dormir) == 0
+    assert e.vpn.conexiones == 2
+    assert len(_comparaciones(e)) == 6 and _diaria()["fecha"] == "2026-10-26"
+    revisar_fases(e.linea)
