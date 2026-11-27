@@ -13,7 +13,8 @@ import hmac
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Callable
 
 from api import ErrorRed, Respuesta
@@ -87,11 +88,16 @@ _RE_LOTES = re.compile(r"^/corridas/(\d+)/lotes$")
 _RE_CERRAR = re.compile(r"^/corridas/(\d+)/cerrar$")
 _RE_FALLAR = re.compile(r"^/corridas/(\d+)/fallar$")
 _RE_FECHA = re.compile(r"\d{4}-\d{2}-\d{2}")
+# Contract §13.2 and §13.3: datasets with totals and the limits of a comparison.
+CONJUNTOS_CON_TOTALES = ("MAESTROS", "CARTERA", "VENTAS")
+MAX_DIFERENCIAS = 500
+LLAVES_DIFERENCIA = {"clave", "campo", "sap", "mysql"}
+LARGOS_DIFERENCIA = {"clave": 20, "campo": 40, "sap": 40, "mysql": 40}
 
 
 @dataclass
 class Peticion:
-    nombre: str  # tomar, iniciar, lote, cerrar, fallar o desconocida
+    nombre: str  # tomar, iniciar, lote, cerrar, fallar, version, totales, comparaciones o desconocida
     ruta: str  # desde la raíz de la app: /api/robot/v1/...
     url: str
     headers: dict[str, str]
@@ -201,6 +207,14 @@ class ApiFalsa:
         # con alguno en su rango responde 409 sin abrir nada (contrato §10.4). Las pruebas
         # pueden llenarlo; cada corrida de VENTAS cerrada suma los suyos.
         self.ventas_cargadas: dict[str, set[str]] = {}
+        # POST /version (§13.1): what the server answers as the deployed commit.
+        self.commit_desplegado: Any = None
+        # POST /totales (§13.2): (conjunto, empresa) -> the `grupos` to answer, as given (any
+        # value, to test bad shapes). Without an entry, they are computed from what the closed
+        # runs loaded, as the server would from MySQL (_totales_cargados).
+        self.totales: dict[tuple[str, str], Any] = {}
+        # POST /comparaciones (§13.3): the bodies saved, in order; the id is the position + 1.
+        self.comparaciones: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------ para pruebas
     def reloj(self) -> float:
@@ -282,6 +296,12 @@ class ApiFalsa:
             return "tomar"
         if relativa == "/corridas":
             return "iniciar"
+        if relativa == "/version":
+            return "version"
+        if relativa == "/totales":
+            return "totales"
+        if relativa == "/comparaciones":
+            return "comparaciones"
         for nombre, patron in (("lote", _RE_LOTES), ("cerrar", _RE_CERRAR), ("fallar", _RE_FALLAR)):
             if relativa and patron.match(relativa):
                 return nombre
@@ -328,6 +348,12 @@ class ApiFalsa:
             return self._tomar(datos)
         if relativa == "/corridas":
             return self._iniciar(datos)
+        if relativa == "/version":
+            return self._version(datos)
+        if relativa == "/totales":
+            return self._totales(datos)
+        if relativa == "/comparaciones":
+            return self._comparar(datos)
         for patron, accion in ((_RE_LOTES, self._lote), (_RE_CERRAR, self._cerrar), (_RE_FALLAR, self._fallar)):
             m = patron.match(relativa)
             if m:
@@ -351,6 +377,136 @@ class ApiFalsa:
             self.solicitudes[solicitud["id"]] = solicitud
             self.estado_solicitudes[solicitud["id"]] = "tomada"
         return 200, {"solicitudes": tomadas}
+
+    def _version(self, datos: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        # Contract §13.1: the commit the server reports as deployed, or null. The tests set commit_desplegado (any value, to test bad ones).
+        if datos:
+            raise _rechazo("El cuerpo de /version va vacío.")
+        return 200, {"commit": self.commit_desplegado}
+
+    # --- §13.2 and §13.3 -----------------------------------------------------------------
+    @staticmethod
+    def _consulta(datos: dict[str, Any], errores: dict[str, list[str]]) -> tuple[Any, Any, Any, Any]:
+        """conjunto, empresa, desde and hasta of /totales or /comparaciones, with the errors of §13.2."""
+        conjunto, empresa = datos.get("conjunto"), datos.get("empresa")
+        if conjunto not in CONJUNTOS_CON_TOTALES:
+            errores["conjunto"] = ["Conjunto desconocido o sin totales."]
+        if empresa not in ("SGX", "SDC"):
+            errores["empresa"] = ["Empresa desconocida."]
+        fechas: dict[str, date | None] = {}
+        for campo in ("desde", "hasta"):
+            valor = datos.get(campo)
+            fechas[campo] = None
+            if valor is None:
+                continue
+            if conjunto in ("MAESTROS", "CARTERA"):
+                errores[campo] = [f"{campo} va solo en VENTAS."]
+                continue
+            try:
+                if not isinstance(valor, str) or not _RE_FECHA.fullmatch(valor):
+                    raise ValueError
+                fechas[campo] = date.fromisoformat(valor)
+            except ValueError:
+                errores[campo] = [f"{campo} debe ser una fecha AAAA-MM-DD."]
+        if fechas["desde"] and fechas["hasta"] and fechas["desde"] > fechas["hasta"]:
+            errores["hasta"] = ["hasta va antes de desde."]
+        return conjunto, empresa, fechas["desde"], fechas["hasta"]
+
+    def _totales(self, datos: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        errores: dict[str, list[str]] = {}
+        conjunto, empresa, desde, hasta = self._consulta(datos, errores)
+        if errores:
+            raise _Error(422, {"message": "La consulta no cumple el contrato.", "errors": errores})
+        if (conjunto, empresa) in self.totales:
+            grupos = self.totales[(conjunto, empresa)]
+        else:
+            grupos = self._totales_cargados(conjunto, empresa, desde, hasta)
+        return 200, {"conjunto": conjunto, "empresa": empresa, "grupos": grupos}
+
+    def _ultima_completa(self, conjunto: str, empresa: str) -> Corrida | None:
+        cerradas = [c for c in self.corridas.values()
+                    if (c.conjunto, c.empresa, c.tipo, c.estado) == (conjunto, empresa, "completa", "cerrada")]
+        return max(cerradas, key=lambda c: c.run_id) if cerradas else None
+
+    def _totales_cargados(self, conjunto: str, empresa: str, desde: date | None, hasta: date | None) -> list[dict]:
+        """Totals of what the closed runs left, as the server computes them (own copy of §13.2)."""
+        def suma(valores: list[Any], decimales: int) -> str:
+            total = sum((Decimal(v) for v in valores), Decimal(0))
+            return f"{abs(total) if total == 0 else total:.{decimales}f}"
+
+        if conjunto == "MAESTROS":
+            corrida = self._ultima_completa(conjunto, empresa)
+            grupos = []
+            for parte in PARTES["MAESTROS"]:
+                filas = corrida.filas(parte) if corrida and parte in corrida.partes else []
+                activas = sum(1 for f in filas if f.get("activo", True) is True)
+                grupos.append({"clave": parte, "filas": activas, "sumas": {}, "nulos": {}})
+            return grupos
+        if conjunto == "CARTERA":
+            corrida = self._ultima_completa(conjunto, empresa)
+            filas = corrida.filas("cartera") if corrida else []
+            return [{"clave": "actual", "filas": len(filas),
+                     "sumas": {"saldo": suma([f["saldo"] for f in filas], 2)}, "nulos": {}}]
+        lineas: dict[tuple, dict[str, Any]] = {}
+        for c in sorted(self.corridas.values(), key=lambda c: c.run_id):
+            if (c.conjunto, c.empresa, c.estado) != ("VENTAS", empresa, "cerrada"):
+                continue
+            recibidas = {(f["tipo_objeto"], f["doc_entry"], f["linea"]): f for f in c.filas("ventas")}
+            if c.tipo == "complemento":  # only kilos and codigo_envio of lines it already has (§10.5)
+                for llave, f in recibidas.items():
+                    if llave in lineas:
+                        lineas[llave].update(kilos=f["kilos"], codigo_envio=f["codigo_envio"])
+                continue
+            if c.tipo != "historico":  # the nightly run replaces its window (§10.2)
+                lineas = {k: v for k, v in lineas.items() if v["fecha_contabilizacion"] < (c.ventana_desde or "")}
+            lineas.update({llave: dict(f) for llave, f in recibidas.items()})
+        por_mes: dict[str, list[dict[str, Any]]] = {}
+        for f in lineas.values():
+            dia = date.fromisoformat(f["fecha_contabilizacion"])
+            if (desde is None or desde <= dia) and (hasta is None or dia <= hasta):
+                por_mes.setdefault(f["fecha_contabilizacion"][:7], []).append(f)
+        return [
+            {"clave": mes, "filas": len(filas),
+             "sumas": {"total": suma([f["total"] for f in filas], 2),
+                       "cantidad": suma([f["cantidad"] for f in filas], 6)},
+             "nulos": {n: sum(1 for f in filas if f.get(n) is None) for n in ("kilos", "codigo_envio")}}
+            for mes, filas in sorted(por_mes.items())
+        ]
+
+    def _comparar(self, datos: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        errores: dict[str, list[str]] = {}
+        self._consulta(datos, errores)
+        comparada_en = datos.get("comparada_en")
+        try:
+            momento = datetime.fromisoformat(comparada_en) if isinstance(comparada_en, str) else None
+        except ValueError:
+            momento = None
+        if momento is None or momento.tzinfo is None:
+            errores["comparada_en"] = ["comparada_en debe ser una hora con zona."]
+        cuadra, diferencias = datos.get("cuadra"), datos.get("diferencias")
+        if not isinstance(cuadra, bool):
+            errores["cuadra"] = ["cuadra debe ser booleano."]
+        if not isinstance(diferencias, list) or len(diferencias) > MAX_DIFERENCIAS:
+            errores["diferencias"] = [f"diferencias debe ser una lista de hasta {MAX_DIFERENCIAS}."]
+        else:
+            if isinstance(cuadra, bool) and cuadra == bool(diferencias):
+                errores["diferencias"] = ["cuadra true va sin diferencias y false con al menos una."]
+            for i, d in enumerate(diferencias):
+                if not isinstance(d, dict) or set(d) != LLAVES_DIFERENCIA:
+                    errores[f"diferencias.{i}"] = ["Una diferencia lleva clave, campo, sap y mysql."]
+                    continue
+                for llave, largo in LARGOS_DIFERENCIA.items():
+                    valor = d[llave]
+                    if valor is None and llave in ("sap", "mysql"):
+                        continue
+                    minimo = 1 if llave in ("clave", "campo") else 0
+                    if not isinstance(valor, str) or not minimo <= len(valor) <= largo:
+                        errores[f"diferencias.{i}.{llave}"] = [f"{llave} es texto de hasta {largo} caracteres."]
+        if errores:
+            raise _Error(422, {"message": "La comparación no cumple el contrato.",
+                               "errors": dict(list(errores.items())[:50])})
+        self.comparaciones.append(datos)
+        return 201, {"id": len(self.comparaciones)}
 
     def _iniciar(self, datos: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         conjunto, empresa, tipo = datos.get("conjunto"), datos.get("empresa"), datos.get("tipo")

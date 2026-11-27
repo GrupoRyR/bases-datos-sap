@@ -1,0 +1,23 @@
+# Pending complements: one-off runs the robot makes by itself after a deploy.
+#
+# The per-minute check (etl/revisar_solicitudes.py) updates the robot to the deployed commit
+# and then launches `run_robot.py --tras-despliegue`, which runs every entry below that is
+# not done yet, in order, through the same path as its manual mode. It also launches it,
+# without a deploy, whenever an entry is pending and fits before the next blocked slot.
+#
+# Each entry:
+#   id          unique, never reused: the robot remembers it in robot/state/complementos.json
+#               (outside git) as done, or as failed at a commit;
+#   modo        the run_robot.py mode without the dashes; today only "complemento-ventas";
+#   argumentos  its options, as strings; only --desde, --hasta and --empresa. --forzar,
+#               --sin-vpn or another mode make the entry invalid (logged, alerted, skipped).
+#
+# A done entry never runs again. A failed one is retried only after the next deploy (a new
+# commit), never every minute. To run something again, add a new entry with a new id.
+#
+# Example (not active):
+#
+# [[complemento]]
+# id = "complemento-ventas-2025-01"
+# modo = "complemento-ventas"
+# argumentos = ["--desde", "2025-01"]

@@ -10,17 +10,30 @@ from types import SimpleNamespace
 
 import pytest
 
+import autoactualizar
 import config
 import hana
 import registro
+import run_robot
 
 PREFIJOS = ("SOPHOS_", "HANA_", "BASES_SAP_", "ALERTA_")
+# The daily full comparison after a good --completa (run_robot._comparacion_diaria): off in
+# every test unless it asks for the `comparacion_diaria` fixture, so the completa tests keep
+# seeing only the load (one VPN session, no /totales).
+_COMPARACION_DIARIA = getattr(run_robot, "_comparacion_diaria", None)
 
 
 def _limpiar_variables() -> None:
     for nombre in list(os.environ):
         if nombre.startswith(PREFIJOS):
             del os.environ[nombre]
+
+
+def _real_prohibido(que: str):
+    def prohibido(*args, **kwargs):
+        raise AssertionError(f"las pruebas nunca corren {que} de verdad: pasa uno falso")
+
+    return prohibido
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +51,12 @@ def aislar_entorno(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(registro, "_SECRETOS", [])
     # El modo TLS de HANA se anuncia una vez por proceso: cada prueba es una ejecución nueva.
     monkeypatch.setattr(hana, "_modo_tls_avisado", False, raising=False)
+    # Self-update (autoactualizar.py): no test runs the real git or a new process, and
+    # robot/complementos.toml is a file in tmp (missing unless the test writes it).
+    monkeypatch.setattr(autoactualizar, "git_por_defecto", _real_prohibido("git"))
+    monkeypatch.setattr(autoactualizar, "lanzador_por_defecto", _real_prohibido("el proceso nuevo"))
+    monkeypatch.setattr(autoactualizar, "RUTA_COMPLEMENTOS", tmp_path / "complementos.toml")
+    monkeypatch.setattr(run_robot, "_comparacion_diaria", lambda *args, **kwargs: None, raising=False)
     yield
     _limpiar_variables()
     # registro.configurar() no vuelve a configurar un logger con handlers: los de una prueba
@@ -180,3 +199,9 @@ def entorno(escenario, entorno_completo, monkeypatch) -> SimpleNamespace:
     """El escenario con un .env completo (en variables) que apunta la carpeta al tmp."""
     monkeypatch.setenv("BASES_SAP_CSV_DIR", str(escenario.csv_dir))
     return escenario
+
+
+@pytest.fixture
+def comparacion_diaria(monkeypatch):
+    """Turns the daily full comparison after a good --completa back on (see aislar_entorno)."""
+    monkeypatch.setattr(run_robot, "_comparacion_diaria", _COMPARACION_DIARIA)
