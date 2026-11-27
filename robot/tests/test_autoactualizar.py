@@ -19,7 +19,7 @@ import config
 import revisar_solicitudes
 import run_robot
 from api import ApiError
-from autoactualizar import ACTUALIZADO, AL_DIA, FALLO, Salida
+from autoactualizar import ACTUALIZADO, AL_DIA, ESPERA, FALLO, Salida
 from conftest import AHORA
 from test_complemento import _datos_de_junio
 from test_historico import _no_dormir, _Reloj
@@ -32,8 +32,10 @@ CANDADO = "robot.lock"
 class GitFalso:
     """A tiny repository: commits with one parent each, HEAD, the branch and origin/main.
 
-    The commits in `remotos` only become known after `git fetch`. Any command the robot
-    is not expected to run (git status, git pull, git reset...) fails the test.
+    The commits in `remotos` only become known after `git fetch`. `modificados` are tracked
+    files with local changes and `sin_seguimiento` untracked files: only a plain `git status`
+    would show those, and the robot never asks it. Any command the robot is not expected to
+    run (git status without --untracked-files=no, pull, reset, show...) fails the test.
     """
 
     def __init__(
@@ -49,6 +51,8 @@ class GitFalso:
         merge_error: str = "",
         merge_no_mueve: bool = False,
         rev_parse_error: bool = False,
+        modificados: tuple[str, ...] = (),
+        sin_seguimiento: tuple[str, ...] = (),
     ) -> None:
         self.head = head
         self.rama = rama
@@ -62,6 +66,8 @@ class GitFalso:
         self.merge_error = merge_error
         self.merge_no_mueve = merge_no_mueve
         self.rev_parse_error = rev_parse_error
+        self.modificados = modificados
+        self.sin_seguimiento = sin_seguimiento
         self.comandos: list[list[str]] = []
 
     def _ref(self, ref: str) -> str | None:
@@ -102,8 +108,8 @@ class GitFalso:
                 return Salida(0 if self._ancestro(ra, rb) else 1)
             case ["diff", "--name-only", "HEAD", _, "--", ruta]:
                 return Salida(0, "".join(f"{c}\n" for c in self.cambiados if c == ruta))
-            case ["show", objeto] if objeto.endswith(":robot/requirements.txt"):
-                return Salida(0, "hdbcli==9.9.9\npython-dotenv==1.2.4\n")
+            case ["status", "--porcelain", "--untracked-files=no"]:
+                return Salida(0, "".join(f" M {ruta}\n" for ruta in self.modificados))
             case ["merge", "--ff-only", "--quiet", sha]:
                 if self.merge_error:
                     return Salida(1, "", self.merge_error)
@@ -114,22 +120,6 @@ class GitFalso:
 
     def hizo(self, primero: str) -> bool:
         return any(c[0] == primero for c in self.comandos)
-
-
-class ComandosFalsos:
-    """Fake runner for pip: records every command and answers `codigo`."""
-
-    def __init__(self, codigo: int = 0, error: str = "") -> None:
-        self.codigo = codigo
-        self.error = error
-        self.comandos: list[list[str]] = []
-        self.requisitos: list[str] = []
-
-    def __call__(self, cmd: list[str]) -> Salida:
-        self.comandos.append(list(cmd))
-        if "-r" in cmd:
-            self.requisitos.append(Path(cmd[cmd.index("-r") + 1]).read_text(encoding="utf-8"))
-        return Salida(self.codigo, "", self.error)
 
 
 class LanzadorFalso:
@@ -203,22 +193,23 @@ def test_version_sin_la_llave_commit_es_un_error(cliente_api):
 
 def test_sin_commit_del_servidor_no_toca_git():
     git = GitFalso()
-    resultado = autoactualizar.actualizar(None, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(None, git=git)
     assert resultado.estado == AL_DIA
     assert git.comandos == []
 
 
 def test_commit_igual_al_local_no_hace_fetch_ni_merge():
     git = GitFalso()
-    resultado = autoactualizar.actualizar(A, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(A, git=git)
     assert (resultado.estado, resultado.antes, resultado.despues) == (AL_DIA, A, A)
     assert git.comandos == [["rev-parse", "HEAD"]]
 
 
 def test_avance_rapido_hace_fetch_y_merge_ff_only_y_verifica_head():
     git = GitFalso()
-    resultado = autoactualizar.actualizar(C, git=git, comando=_prohibida)
-    assert (resultado.estado, resultado.antes, resultado.despues, resultado.requisitos) == (ACTUALIZADO, A, C, False)
+    resultado = autoactualizar.actualizar(C, git=git)
+    assert (resultado.estado, resultado.antes, resultado.despues, resultado.cambios_locales) == (
+        ACTUALIZADO, A, C, ())
     assert git.comandos == [
         ["rev-parse", "HEAD"],
         ["rev-parse", "--abbrev-ref", "HEAD"],
@@ -228,17 +219,17 @@ def test_avance_rapido_hace_fetch_y_merge_ff_only_y_verifica_head():
         ["merge-base", "--is-ancestor", C, "HEAD"],
         ["merge-base", "--is-ancestor", "HEAD", C],
         ["diff", "--name-only", "HEAD", C, "--", "robot/requirements.txt"],
+        ["status", "--porcelain", "--untracked-files=no"],
         ["merge", "--ff-only", "--quiet", C],
         ["rev-parse", "HEAD"],
     ]
     assert git.head == C
-    # Untracked files never stop it: git status is never asked.
-    assert not git.hizo("status")
+    assert autoactualizar.leer_memoria() is None
 
 
 def test_fuera_de_main_no_hace_fetch_ni_merge():
     git = GitFalso(rama="feat/otra")
-    resultado = autoactualizar.actualizar(C, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(C, git=git)
     assert resultado.estado == FALLO
     assert "no está en main" in resultado.motivo and "feat/otra" in resultado.motivo
     assert not git.hizo("fetch") and not git.hizo("merge")
@@ -248,7 +239,7 @@ def test_commit_que_no_esta_en_origin_main_no_se_mezcla():
     # X exists only locally (an old branch): it is not on origin/main.
     git = GitFalso(padres={A: None, B: A, C: B, X: A}, remotos=(B, C))
     git.conocidos.add(X)
-    resultado = autoactualizar.actualizar(X, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(X, git=git)
     assert resultado.estado == FALLO and "origin/main" in resultado.motivo
     assert not git.hizo("merge")
 
@@ -256,7 +247,7 @@ def test_commit_que_no_esta_en_origin_main_no_se_mezcla():
 def test_commit_desconocido_tras_el_fetch_falla():
     desconocido = "d" * 40
     git = GitFalso()
-    resultado = autoactualizar.actualizar(desconocido, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(desconocido, git=git)
     assert resultado.estado == FALLO and "no existe" in resultado.motivo
     assert not git.hizo("merge")
 
@@ -264,95 +255,170 @@ def test_commit_desconocido_tras_el_fetch_falla():
 def test_sin_avance_rapido_no_se_mezcla():
     # Local HEAD X diverged from origin/main (A <- X, A <- B <- C).
     git = GitFalso(head=X)
-    resultado = autoactualizar.actualizar(C, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(C, git=git)
     assert resultado.estado == FALLO and "avance rápido" in resultado.motivo
     assert not git.hizo("merge")
 
 
 def test_copia_local_adelante_del_servidor_no_hace_nada():
     git = GitFalso(head=C, remotos=())
-    resultado = autoactualizar.actualizar(B, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(B, git=git)
     assert resultado.estado == AL_DIA
     assert not git.hizo("merge")
 
 
-def test_merge_rechazado_por_git_falla_con_su_motivo_resumido():
-    error = ("error: Your local changes to the following files would be overwritten by merge:\n"
-             "\trobot/etl/run_robot.py\nPlease commit your changes or stash them before you merge.\nAborting\n")
-    git = GitFalso(merge_error=error)
-    resultado = autoactualizar.actualizar(C, git=git, comando=_prohibida)
+_CAMBIOS_LOCALES = ("error: Your local changes to the following files would be overwritten by merge:\n"
+                    "\trobot/etl/run_robot.py\nPlease commit your changes or stash them before you merge.\n"
+                    "Aborting\n")
+
+
+def test_merge_rechazado_nombra_los_archivos_con_seguimiento_cambiados_y_no_los_sin_seguimiento():
+    git = GitFalso(merge_error=_CAMBIOS_LOCALES, modificados=(".claude/settings.json", "robot/etl/run_robot.py"),
+                   sin_seguimiento=("notas-ti.txt",))
+    resultado = autoactualizar.actualizar(C, git=git)
     assert resultado.estado == FALLO
-    assert "merge --ff-only" in resultado.motivo and "robot/etl/run_robot.py" in resultado.motivo
+    assert "merge --ff-only" in resultado.motivo
+    assert ("La copia tiene cambios locales en archivos con seguimiento: .claude/settings.json, "
+            "robot/etl/run_robot.py.") in resultado.motivo
+    assert "notas-ti.txt" not in resultado.motivo
     assert "\n" not in resultado.motivo
     assert git.head == A
+    assert [c for c in git.comandos if c[0] == "status"] == [["status", "--porcelain", "--untracked-files=no"]]
+
+
+def test_merge_rechazado_por_un_sin_seguimiento_no_lo_nombra():
+    error = ("error: The following untracked working tree files would be overwritten by merge:\n"
+             "\trobot/etl/nuevo.py\nPlease move or remove them before you merge.\nAborting\n")
+    resultado = autoactualizar.actualizar(C, git=GitFalso(merge_error=error, sin_seguimiento=("robot/etl/nuevo.py",)))
+    assert resultado.estado == FALLO and "untracked working tree files" in resultado.motivo
+    assert "robot/etl/nuevo.py" not in resultado.motivo and "cambios locales" not in resultado.motivo
+
+
+def test_lista_de_cambios_locales_se_corta_en_diez():
+    rutas = tuple(f"robot/etl/m{i:02d}.py" for i in range(12))
+    resultado = autoactualizar.actualizar(C, git=GitFalso(merge_error=_CAMBIOS_LOCALES, modificados=rutas))
+    assert "robot/etl/m09.py y 2 más." in resultado.motivo and "m10.py" not in resultado.motivo
+
+
+def test_rutas_de_git_status_porcelain():
+    texto = ' M robot/a.py\nM  robot/b.py\nR  viejo.py -> robot/nuevo.py\n D "con espacio.txt"\n'
+    assert autoactualizar.rutas_modificadas(texto) == ["robot/a.py", "robot/b.py", "robot/nuevo.py",
+                                                       '"con espacio.txt"']
+
+
+def test_cambio_con_seguimiento_que_no_choca_no_frena_el_avance():
+    git = GitFalso(modificados=(".claude/settings.json",), sin_seguimiento=("notas-ti.txt",))
+    resultado = autoactualizar.actualizar(C, git=git)
+    assert (resultado.estado, resultado.cambios_locales) == (ACTUALIZADO, (".claude/settings.json",))
+    assert git.head == C
 
 
 def test_merge_que_no_mueve_head_falla():
     git = GitFalso(merge_no_mueve=True)
-    resultado = autoactualizar.actualizar(C, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(C, git=git)
     assert resultado.estado == FALLO and "HEAD" in resultado.motivo
 
 
 def test_fetch_fallido_no_muestra_credenciales_de_la_url():
     git = GitFalso(fetch_error="fatal: unable to access 'https://usuario:token-secreto@github.com/x/y.git/'")
-    resultado = autoactualizar.actualizar(C, git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar(C, git=git)
     assert resultado.estado == FALLO
     assert "token-secreto" not in resultado.motivo and "github.com" in resultado.motivo
 
 
 def test_commit_con_formato_invalido_falla_sin_tocar_git():
     git = GitFalso()
-    resultado = autoactualizar.actualizar("main; rm -rf", git=git, comando=_prohibida)
+    resultado = autoactualizar.actualizar("main; rm -rf", git=git)
     assert resultado.estado == FALLO
     assert git.comandos == []
 
 
-@pytest.fixture
-def venv(tmp_path, monkeypatch) -> Path:
-    """A fake venv: Scripts/pythonw.exe (what the scheduled task runs) and Scripts/python.exe."""
-    scripts = tmp_path / "venv" / "Scripts"
-    scripts.mkdir(parents=True)
-    for nombre in ("python.exe", "pythonw.exe"):
-        (scripts / nombre).write_text("", encoding="utf-8")
-    monkeypatch.setattr(sys, "executable", str(scripts / "pythonw.exe"))
-    return scripts
-
-
-def test_si_cambia_requirements_instala_con_python_exe_antes_del_merge(venv):
+def test_si_cambia_requirements_no_instala_ni_mezcla_y_lo_recuerda():
     git = GitFalso(cambiados=("robot/requirements.txt",))
-    pip = ComandosFalsos()
-    resultado = autoactualizar.actualizar(C, git=git, comando=pip)
-    assert resultado.estado == ACTUALIZADO and resultado.requisitos
-    [cmd] = pip.comandos
-    assert cmd[:4] == [str(venv / "python.exe"), "-m", "pip", "install"]
-    assert cmd[4] == "-r" and Path(cmd[5]).name == "requirements.txt"
-    # The deployed requirements.txt, read from the commit with git show.
-    assert pip.requisitos == ["hdbcli==9.9.9\npython-dotenv==1.2.4\n"]
-    assert ["show", f"{C}:robot/requirements.txt"] in git.comandos
-    assert git.comandos.index(["show", f"{C}:robot/requirements.txt"]) < git.comandos.index(
-        ["merge", "--ff-only", "--quiet", C])
+    resultado = autoactualizar.actualizar(C, git=git, ahora=lambda: AHORA)
+    assert (resultado.estado, resultado.recordado) == (FALLO, True)
+    assert resultado.motivo == ("requirements.txt cambió: el coordinador debe actualizar el robot a mano "
+                                "(pip install -r requirements.txt y git pull --ff-only).")
+    assert not git.hizo("merge") and not git.hizo("show") and git.head == A
+    assert autoactualizar.leer_memoria() == {"commit": C, "en": AHORA.isoformat(), "motivo": resultado.motivo}
+    assert not hasattr(autoactualizar, "comando_por_defecto") and not hasattr(autoactualizar, "python_consola")
 
 
-def test_si_solo_cambia_requirements_dev_no_instala_nada(venv):
+def test_si_solo_cambia_requirements_dev_actualiza_normal():
     git = GitFalso(cambiados=("robot/requirements-dev.txt",))
-    resultado = autoactualizar.actualizar(C, git=git, comando=_prohibida)
-    assert resultado.estado == ACTUALIZADO and not resultado.requisitos
+    resultado = autoactualizar.actualizar(C, git=git)
+    assert resultado.estado == ACTUALIZADO and git.head == C
 
 
-def test_si_pip_falla_no_se_mezcla_y_falla(venv):
-    git = GitFalso(cambiados=("robot/requirements.txt",))
-    pip = ComandosFalsos(codigo=1, error="ERROR: Could not find a version that satisfies hdbcli==9.9.9")
-    resultado = autoactualizar.actualizar(C, git=git, comando=pip)
-    assert resultado.estado == FALLO and "pip" in resultado.motivo
-    assert not git.hizo("merge") and git.head == A
+# --- the failed update is remembered (robot/state/actualizacion.json) -------------------------------
 
 
-def test_python_consola_cambia_pythonw_por_python(venv, tmp_path):
-    assert autoactualizar.python_consola() == venv / "python.exe"
-    sola = tmp_path / "sola"
-    sola.mkdir()
-    (sola / "pythonw.exe").write_text("", encoding="utf-8")
-    assert autoactualizar.python_consola(sola / "pythonw.exe") == sola / "pythonw.exe"  # no sibling
+def _media_hora():
+    return AHORA + timedelta(minutes=30)
+
+
+def _hora_y_un_minuto():
+    return AHORA + timedelta(hours=1, minutes=1)
+
+
+def test_el_mismo_commit_fallido_no_se_reintenta_dentro_de_la_hora():
+    assert autoactualizar.actualizar(C, git=GitFalso(head=X), ahora=lambda: AHORA).estado == FALLO
+    git = GitFalso(head=X)
+    resultado = autoactualizar.actualizar(C, git=git, ahora=_media_hora)
+    assert resultado.estado == ESPERA and "avance rápido" in resultado.motivo
+    assert git.comandos == [["rev-parse", "HEAD"]]  # no fetch, nothing else
+
+
+def test_el_mismo_commit_fallido_se_reintenta_pasada_la_hora():
+    autoactualizar.actualizar(C, git=GitFalso(head=X), ahora=lambda: AHORA)
+    git = GitFalso(head=X)
+    assert autoactualizar.actualizar(C, git=git, ahora=_hora_y_un_minuto).estado == FALLO
+    assert git.hizo("fetch")
+    assert autoactualizar.leer_memoria()["en"] == _hora_y_un_minuto().isoformat()
+
+
+def test_un_commit_nuevo_se_intenta_enseguida():
+    autoactualizar.actualizar(C, git=GitFalso(head=X), ahora=lambda: AHORA)
+    git = GitFalso(head=X)
+    assert autoactualizar.actualizar(B, git=git, ahora=_media_hora).estado == FALLO
+    assert git.hizo("fetch")
+    assert autoactualizar.leer_memoria()["commit"] == B
+
+
+def test_un_avance_bueno_borra_el_recuerdo():
+    autoactualizar.actualizar(C, git=GitFalso(rama="hotfix"), ahora=lambda: AHORA)
+    assert autoactualizar.leer_memoria()["commit"] == C
+    assert autoactualizar.actualizar(C, git=GitFalso(), ahora=_hora_y_un_minuto).estado == ACTUALIZADO
+    assert autoactualizar.leer_memoria() is None
+    assert not (config.STATE_DIR / "actualizacion.json").exists()
+
+
+def test_al_dia_borra_el_recuerdo():
+    # The coordinator updated the copy by hand (pip and git pull): HEAD is the deployed commit.
+    autoactualizar.actualizar(C, git=GitFalso(cambiados=("robot/requirements.txt",)), ahora=lambda: AHORA)
+    git = GitFalso(head=C, remotos=())
+    assert autoactualizar.actualizar(C, git=git, ahora=_media_hora).estado == AL_DIA
+    assert autoactualizar.leer_memoria() is None
+
+
+def test_un_fetch_fallido_no_se_recuerda():
+    # Network or credentials: retried the next minute (the alert has its own hourly limit).
+    git = GitFalso(fetch_error="fatal: unable to access 'https://github.com/x/y.git/'")
+    resultado = autoactualizar.actualizar(C, git=git, ahora=lambda: AHORA)
+    assert (resultado.estado, resultado.recordado) == (FALLO, False)
+    assert autoactualizar.leer_memoria() is None
+
+
+def test_recuerdo_ilegible_cuenta_como_ninguno_con_advertencia(caplog):
+    config.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    (config.STATE_DIR / "actualizacion.json").write_text("{roto", encoding="utf-8")
+    git = GitFalso(head=X)
+    with caplog.at_level(logging.WARNING, logger="bases_sap"):
+        assert autoactualizar.actualizar(C, git=git, ahora=lambda: AHORA).estado == FALLO
+    assert git.hizo("fetch")
+    assert any("actualizacion.json" in m for m in caplog.messages)
+    assert autoactualizar.leer_memoria()["commit"] == C  # rewritten, valid
+    assert not list(config.STATE_DIR.glob("*.tmp"))
 
 
 def test_git_real_corre_en_la_raiz_del_repo_sin_preguntar_credenciales(monkeypatch):
@@ -504,12 +570,12 @@ def test_estado_ilegible_lanza():
 # --- La revisión de cada minuto --------------------------------------------------------------
 
 
-def _revisar(e, *, git=None, comando=_prohibida, lanzar=None, ahora=None, **kwargs) -> int:
+def _revisar(e, *, git=None, lanzar=None, ahora=None, **kwargs) -> int:
     kwargs.setdefault("fabrica_api", lambda cfg_api: e.nuevo_cliente(cfg_api))
     kwargs.setdefault("fabrica_vpn", lambda cfg_vpn: e.vpn)
     kwargs.setdefault("conectar", e.hana.conectar)
     return revisar_solicitudes.main(
-        [], ahora=ahora or e.ahora, git=git if git is not None else GitFalso(), comando=comando,
+        [], ahora=ahora or e.ahora, git=git if git is not None else GitFalso(),
         lanzar=lanzar if lanzar is not None else LanzadorFalso(), **kwargs,
     )
 
@@ -545,7 +611,7 @@ def test_commit_nuevo_actualiza_suelta_el_candado_y_lanza_el_proceso_nuevo(entor
     assert correos == []
 
 
-def test_fuera_de_main_avisa_con_limite_y_atiende_las_solicitudes(entorno, correos):
+def test_fuera_de_main_avisa_una_vez_por_hora_y_atiende_las_solicitudes(entorno, correos):
     e = entorno
     e.servidor.commit_desplegado = C
     e.servidor.encolar_solicitud({"id": 7, "empresa": "SGX", "conjunto": "CARTERA", "parte": None, "desde": {}})
@@ -556,8 +622,10 @@ def test_fuera_de_main_avisa_con_limite_y_atiende_las_solicitudes(entorno, corre
     assert e.servidor.estado_solicitudes == {7: "terminada"}
     assert [[etapa for etapa, _ in c] for c in correos] == [["AUTOACTUALIZAR"]]
     assert "no está en main" in correos[0][0][1]
-    assert _revisar(e, git=GitFalso(rama="hotfix"), lanzar=lanzar) == 0  # next minute: no new email
+    siguiente = GitFalso(rama="hotfix")
+    assert _revisar(e, git=siguiente, lanzar=lanzar) == 0  # next minute: remembered, no new email
     assert len(correos) == 1
+    assert siguiente.comandos == [["rev-parse", "HEAD"]]
     una_hora = lambda: AHORA + timedelta(hours=1, minutes=1)  # noqa: E731
     assert _revisar(e, git=GitFalso(rama="hotfix"), lanzar=lanzar, ahora=una_hora) == 0
     assert len(correos) == 2
@@ -577,6 +645,46 @@ def test_fallo_de_la_actualizacion_avisa_y_no_lanza(entorno, correos, git, texto
     assert _nombres(e) == ["version", "tomar"]
     [aviso] = correos
     assert aviso[0][0] == "AUTOACTUALIZAR" and texto in aviso[0][1]
+    assert "robot/etl/nuevo.py" not in aviso[0][1]  # untracked files are never listed
+
+
+def test_el_mismo_commit_fallido_no_hace_fetch_ni_avisa_dentro_de_la_hora(entorno, correos):
+    e = entorno
+    e.servidor.commit_desplegado = C
+    assert _revisar(e, git=GitFalso(head=X)) == 0
+    git = GitFalso(head=X)
+    media_hora = lambda: AHORA + timedelta(minutes=30)  # noqa: E731
+    assert _revisar(e, git=git, ahora=media_hora) == 0
+    assert git.comandos == [["rev-parse", "HEAD"]]
+    assert len(correos) == 1
+    e.servidor.commit_desplegado = B  # another deploy: tried at once, and alerted
+    otro = GitFalso(head=X)
+    assert _revisar(e, git=otro, ahora=media_hora) == 0
+    assert otro.hizo("fetch") and len(correos) == 2
+
+
+def test_merge_rechazado_por_cambios_locales_los_nombra_en_el_aviso(entorno, correos, caplog):
+    e = entorno
+    e.servidor.commit_desplegado = C
+    git = GitFalso(merge_error=_CAMBIOS_LOCALES, modificados=(".claude/settings.json",),
+                   sin_seguimiento=("notas-ti.txt",))
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert _revisar(e, git=git) == 0
+    [aviso] = correos
+    texto = "La copia tiene cambios locales en archivos con seguimiento: .claude/settings.json."
+    assert texto in aviso[0][1] and "notas-ti.txt" not in aviso[0][1]
+    assert any(texto in m for m in caplog.messages)
+
+
+def test_avance_con_un_cambio_local_que_no_choca_deja_una_advertencia(entorno, correos, caplog):
+    e = entorno
+    e.servidor.commit_desplegado = C
+    lanzar = LanzadorFalso()
+    with caplog.at_level(logging.INFO, logger="bases_sap"):
+        assert _revisar(e, git=GitFalso(modificados=(".claude/settings.json",)), lanzar=lanzar) == 0
+    assert len(lanzar.lanzados) == 1 and correos == []
+    [advertencia] = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "cambios locales en archivos con seguimiento: .claude/settings.json" in advertencia.getMessage()
 
 
 def test_commit_desplegado_fuera_de_origin_main_avisa(entorno, correos):
@@ -597,22 +705,18 @@ def test_copia_local_adelante_no_avisa(entorno, correos):
     assert lanzar.lanzados == [] and correos == []
 
 
-def test_pip_que_falla_avisa_y_no_lanza(entorno, correos, venv):
+def test_requirements_cambiado_avisa_una_vez_y_no_mezcla(entorno, correos):
     e = entorno
     e.servidor.commit_desplegado = C
     git, lanzar = GitFalso(cambiados=("robot/requirements.txt",)), LanzadorFalso()
-    assert _revisar(e, git=git, comando=ComandosFalsos(codigo=1, error="sin red"), lanzar=lanzar) == 0
+    assert _revisar(e, git=git, lanzar=lanzar) == 0
     assert lanzar.lanzados == [] and not git.hizo("merge")
-    assert correos[0][0][0] == "AUTOACTUALIZAR" and "pip" in correos[0][0][1]
-
-
-def test_pip_que_funciona_lanza_el_proceso_nuevo(entorno, correos, venv):
-    e = entorno
-    e.servidor.commit_desplegado = C
-    pip, lanzar = ComandosFalsos(), LanzadorFalso()
-    assert _revisar(e, git=GitFalso(cambiados=("robot/requirements.txt",)), comando=pip, lanzar=lanzar) == 0
-    assert pip.comandos[0][0] == str(venv / "python.exe")
-    assert len(lanzar.lanzados) == 1
+    [aviso] = correos
+    assert aviso[0][0] == "AUTOACTUALIZAR" and "requirements.txt cambió" in aviso[0][1]
+    assert "pip install -r requirements.txt y git pull --ff-only" in aviso[0][1]
+    siguiente = GitFalso(cambiados=("robot/requirements.txt",))
+    assert _revisar(e, git=siguiente, lanzar=lanzar) == 0  # remembered: nothing the next minute
+    assert siguiente.comandos == [["rev-parse", "HEAD"]] and len(correos) == 1
 
 
 def test_dentro_de_una_franja_no_pregunta_la_version(entorno, correos):

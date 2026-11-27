@@ -51,10 +51,9 @@ def aislar_entorno(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(registro, "_SECRETOS", [])
     # El modo TLS de HANA se anuncia una vez por proceso: cada prueba es una ejecución nueva.
     monkeypatch.setattr(hana, "_modo_tls_avisado", False, raising=False)
-    # Self-update (autoactualizar.py): no test runs the real git, pip or a new process, and
+    # Self-update (autoactualizar.py): no test runs the real git or a new process, and
     # robot/complementos.toml is a file in tmp (missing unless the test writes it).
     monkeypatch.setattr(autoactualizar, "git_por_defecto", _real_prohibido("git"))
-    monkeypatch.setattr(autoactualizar, "comando_por_defecto", _real_prohibido("pip"))
     monkeypatch.setattr(autoactualizar, "lanzador_por_defecto", _real_prohibido("el proceso nuevo"))
     monkeypatch.setattr(autoactualizar, "RUTA_COMPLEMENTOS", tmp_path / "complementos.toml")
     monkeypatch.setattr(run_robot, "_comparacion_diaria", lambda *args, **kwargs: None, raising=False)

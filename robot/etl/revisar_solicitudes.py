@@ -10,8 +10,9 @@ Pasos (contrato §7.3):
        avance rápido. Si se actualizó, o si hay complementos pendientes en
        robot/complementos.toml que caben antes de la siguiente franja, suelta
        el candado, lanza run_robot.py --tras-despliegue en un proceso nuevo
-       (con el código nuevo) y termina. Si la actualización falla, avisa (una
-       vez por hora) y sigue con el código de hoy.
+       (con el código nuevo) y termina. Si la actualización falla, avisa y
+       sigue con el código de hoy; ese commit no se vuelve a intentar (ni se
+       avisa) hasta pasada una hora o hasta que se despliegue otro.
     4. Pide hasta 20 solicitudes a /solicitudes/tomar, sin VPN. Si no hay,
        termina sin subir la VPN.
     5. Si hay, arma una corrida por empresa y conjunto y las corre con las dos
@@ -20,8 +21,9 @@ Pasos (contrato §7.3):
 Para no llenar robot/logs/robot.log, una revisión sin trabajo no escribe nada
 (solo DEBUG). Los avisos por correo que se repetirían cada minuto tienen
 límite: la configuración incompleta, uno al día; un error al tomar las
-solicitudes, uno inesperado, una actualización que falla o un complemento
-inválido, uno por hora. Un error al preguntar /version solo va al log en DEBUG:
+solicitudes, uno inesperado, un fallo de git al actualizarse o un complemento
+inválido, uno por hora. Una actualización que falla avisa en cada intento, que
+es como mucho uno por hora por commit (autoactualizar.REINTENTO). Un error al preguntar /version solo va al log en DEBUG:
 la ruta puede no existir todavía en el servidor. Los fallos de una corrida avisan
 siempre, una vez por revisión.
 
@@ -159,25 +161,33 @@ def _autoactualizar(
     *,
     ahora: Callable[[], datetime],
     git: autoactualizar.Ejecutor | None,
-    comando: autoactualizar.Ejecutor | None,
 ) -> bool:
     """Paso 3, con el candado tomado. True si hay que lanzar run_robot.py --tras-despliegue.
 
-    Nunca lanza: un fallo avisa (una vez por hora) y la revisión sigue con el código de hoy.
+    Nunca lanza: un fallo avisa y la revisión sigue con el código de hoy. Un fallo que queda
+    recordado para ese commit (autoactualizar.actualizar) avisa en cada intento, que es como
+    mucho uno por hora; uno de git mismo (la red, por ejemplo), una vez por hora.
     """
     commit: str | None = None
     try:
         commit = _commit_desplegado(api)
-        resultado = autoactualizar.actualizar(commit, git=git, comando=comando)
+        resultado = autoactualizar.actualizar(commit, git=git, ahora=ahora)
+        if resultado.estado == autoactualizar.ESPERA:
+            return False  # ya se avisó: ni git fetch ni correo hasta otro commit o pasada la hora
         if resultado.estado == autoactualizar.FALLO:
             mensaje = (f"No se pudo actualizar el robot al commit desplegado {(commit or '?')[:12]}: "
                        f"{resultado.motivo} Sigue con el código de hoy.")
             log.error(mensaje)
-            _avisar_con_limite(cfg, "autoactualizar", AVISO_REPETIDO, ahora(), [("AUTOACTUALIZAR", mensaje)])
+            if resultado.recordado:
+                notificar.avisar_fallos(cfg.alertas, [("AUTOACTUALIZAR", mensaje)])
+            else:
+                _avisar_con_limite(cfg, "autoactualizar", AVISO_REPETIDO, ahora(), [("AUTOACTUALIZAR", mensaje)])
             return False
         if resultado.estado == autoactualizar.ACTUALIZADO:
-            log.info("Robot actualizado de %s a %s%s.", (resultado.antes or "?")[:12], (resultado.despues or "?")[:12],
-                     " (con los paquetes nuevos de requirements.txt)" if resultado.requisitos else "")
+            log.info("Robot actualizado de %s a %s.", (resultado.antes or "?")[:12], (resultado.despues or "?")[:12])
+            if resultado.cambios_locales:
+                log.warning("%s No frenaron el avance rápido, pero conviene revisarlos.",
+                            autoactualizar.describir_cambios_locales(resultado.cambios_locales))
             return True
         return _hay_complementos(cfg, ahora, git)
     except Exception as exc:  # la actualización nunca deja sin atender las solicitudes
@@ -259,7 +269,6 @@ def main(
     conectar: Callable[..., Any] = hana.conectar,
     ahora: Callable[[], datetime] = config.ahora,
     git: autoactualizar.Ejecutor | None = None,
-    comando: autoactualizar.Ejecutor | None = None,
     lanzar: autoactualizar.Lanzador | None = None,
 ) -> int:
     argparse.ArgumentParser(
@@ -290,7 +299,7 @@ def main(
         return 0
     try:
         api = fabrica_api(cfg.api)
-        if _autoactualizar(cfg, api, ahora=ahora, git=git, comando=comando):
+        if _autoactualizar(cfg, api, ahora=ahora, git=git):
             candado.soltar()  # el proceso nuevo lo toma; soltar() otra vez en el finally no hace nada
             return _lanzar_tras_despliegue(cfg, lanzar or autoactualizar.lanzador_por_defecto, ahora)
         return _revisar(cfg, api, fabrica_vpn=fabrica_vpn, conectar=conectar, ahora=ahora)

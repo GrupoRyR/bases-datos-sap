@@ -289,16 +289,24 @@ El robot se actualiza solo al commit que la app dice que está desplegado, para 
 Cuándo pasa: en la revisión de cada minuto, solo fuera de las franjas bloqueadas y con el candado tomado (ninguna otra ejecución del robot corriendo). Pregunta a la app qué commit está desplegado (`POST /version`, firmado como las demás rutas, contrato §13.1) y:
 
 1. Si la app no dice ningún commit, o es el mismo de la copia, no hace nada.
-2. La copia debe estar en la rama `main`.
-3. Trae `origin/main` (`git fetch`), y el commit debe estar ahí.
-4. Si la copia ya va adelante de ese commit, no hace nada (no es un error).
-5. Solo avanza si es un avance rápido: si la copia se desvió de `origin/main`, no la toca.
-6. Si cambió `requirements.txt`, instala los paquetes del commit nuevo con el `python.exe` del `.venv` **antes** de cambiar el código: si `pip` falla, el robot sigue con el código de hoy y no con uno al que le faltan paquetes. `requirements-dev.txt` no cuenta: es solo para las pruebas.
-7. `git merge --ff-only` al commit y comprueba que quedó ahí.
+2. Si ese mismo commit ya falló hace menos de una hora, no hace nada: ni `git fetch` ni correo (ver abajo).
+3. La copia debe estar en la rama `main`.
+4. Trae `origin/main` (`git fetch`), y el commit debe estar ahí.
+5. Si la copia ya va adelante de ese commit, no hace nada (no es un error).
+6. Solo avanza si es un avance rápido: si la copia se desvió de `origin/main`, no la toca.
+7. Si cambió `requirements.txt`, **no se actualiza**: el robot nunca instala paquetes solo. Avisa que el coordinador debe actualizarlo a mano, desde `robot\` con `.venv\Scripts\python.exe -m pip install -r requirements.txt` y luego `git pull --ff-only` desde la raíz del repo. `requirements-dev.txt` no cuenta: es solo para las pruebas.
+8. `git merge --ff-only` al commit y comprueba que quedó ahí.
 
-Los archivos sin seguimiento de la copia (los que Git no conoce) no la frenan. Solo la frena lo que Git mismo rechaza: cambios locales en archivos del repo, o un archivo sin seguimiento que el commit nuevo traería con el mismo nombre. Nunca toca el `.env`, nunca usa `--forzar` y nunca hace `git status`, `git pull` ni `git reset`. Necesita `git` en el `PATH` del usuario de las tareas y las credenciales de Git que ya tenga el PC; nunca pide una contraseña (si Git la pidiera, falla).
+Los archivos sin seguimiento de la copia (los que Git no conoce) no la frenan y nunca se nombran. Solo la frena lo que Git mismo rechaza: cambios locales en archivos del repo que el commit nuevo toca, o un archivo sin seguimiento que el commit nuevo traería con el mismo nombre. Antes del merge mira los archivos con seguimiento cambiados (`git status --porcelain --untracked-files=no`, solo las rutas, nunca el contenido):
 
-Si se actualizó, la revisión suelta el candado, lanza `run_robot.py --tras-despliegue` en un proceso nuevo, sin ventana, que ya corre con el código nuevo, y ese minuto no toma solicitudes. Si algo falla (no está en `main`, el commit no está en `origin/main`, no es avance rápido, Git rechaza el merge o `pip` falla), lo deja en el log, avisa por correo una vez por hora y sigue con el código de hoy: las solicitudes se siguen atendiendo. Si la pregunta a la app falla (por ejemplo, la ruta todavía no existe), solo queda en el log en DEBUG y la revisión sigue como siempre.
+- Si Git rechaza el merge, el aviso y el log los nombran, hasta 10: «La copia tiene cambios locales en archivos con seguimiento: .claude/settings.json».
+- Si el merge sale bien igual (el cambio no choca con el despliegue), queda una advertencia en el log con esos archivos, para revisarlos.
+
+Nunca toca el `.env`, nunca usa `--forzar`, nunca corre `pip` y nunca hace `git pull` ni `git reset`. Necesita `git` en el `PATH` del usuario de las tareas y las credenciales de Git que ya tenga el PC; nunca pide una contraseña (si Git la pidiera, falla).
+
+Si se actualizó, la revisión suelta el candado, lanza `run_robot.py --tras-despliegue` en un proceso nuevo, sin ventana, que ya corre con el código nuevo, y ese minuto no toma solicitudes. Si la pregunta a la app falla (por ejemplo, la ruta todavía no existe), solo queda en el log en DEBUG y la revisión sigue como siempre.
+
+Si la actualización falla (no está en `main`, el commit no está en `origin/main`, no es avance rápido, cambió `requirements.txt`, Git rechaza el merge o HEAD no quedó en el commit), lo deja en el log, avisa por correo y sigue con el código de hoy: las solicitudes se siguen atendiendo. Ese fallo queda en `robot\state\actualizacion.json` (fuera de Git: el commit, la hora y el motivo corto) y, mientras la app siga diciendo el mismo commit, no se vuelve a intentar ni a avisar hasta pasada una hora. Si se despliega otro commit, lo intenta enseguida. Una actualización buena, o una copia que ya está en el commit (por ejemplo, porque el coordinador la actualizó a mano), borra el fallo. Si ese archivo se daña, se toma como si no hubiera fallo (queda una advertencia en el log) y el intento siguiente lo reescribe. Un fallo de Git mismo (sin red en el `git fetch`, por ejemplo) no se recuerda: se reintenta el minuto siguiente y avisa una vez por hora.
 
 ### Complementos pendientes
 
@@ -356,6 +364,7 @@ Las tablas `@HBT_*` de `CONFIGURACION` se leen columna por columna y el robot sa
 - `robot\state\ultima_ejecucion.json`: cómo terminó la última ejecución. Nunca lleva datos de SAP.
 - `robot\state\robot.lock`: el candado, mientras el robot corre.
 - `robot\state\complementos.json`: qué complementos pendientes ya corrieron (ver «Actualización automática»).
+- `robot\state\actualizacion.json`: la última actualización automática que falló, para no reintentarla cada minuto (ver «Actualización automática»).
 
 ## Correos de fallo
 
@@ -363,7 +372,7 @@ Si llenas `ALERTA_SMTP_*` y `ALERTA_DESTINATARIOS`, el robot manda un correo con
 
 La conexión al servidor de correo va cifrada (puerto 465, o 587 con STARTTLS) y comprueba su certificado: si el certificado no es válido para `ALERTA_SMTP_HOST`, el correo no sale y el error queda en el log.
 
-Para no llenar el buzón, los avisos de la revisión de cada minuto tienen límite: la configuración incompleta avisa una vez al día y un error al tomar las solicitudes, uno inesperado, una actualización automática que falla o un complemento inválido, una vez por hora. El diagnóstico no avisa: lo corres tú y ves el resumen.
+Para no llenar el buzón, los avisos de la revisión de cada minuto tienen límite: la configuración incompleta avisa una vez al día y un error al tomar las solicitudes, uno inesperado, un fallo de Git al actualizarse o un complemento inválido, una vez por hora. Una actualización automática que falla avisa una vez por commit desplegado y, si sigue fallando, otra vez cada hora. El diagnóstico no avisa: lo corres tú y ves el resumen.
 
 ## Pruebas
 
