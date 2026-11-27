@@ -268,3 +268,34 @@ La app vive en cPanel de GoDaddy y se publica con `deploy/deploy.sh`, que corre 
 - **Migraciones:** un solo `migrate` llena las cuatro bases porque cada migración declara su conexión (§4). Las bases se crean antes en cPanel.
 - **Usuario MySQL de las migraciones:** crea las vistas `v_*`, así que queda como su `DEFINER`. Nunca se borra: si se borra, las vistas dejan de funcionar para las apps.
 - **Assets:** el servidor no tiene Node. `public/build` se compila en tu equipo y se sube al repo (§7).
+
+### Despliegue automático (piloto)
+
+GitHub Actions entra al servidor por SSH con una llave propia que solo puede correr `deploy/despachar.sh`. En `~/.ssh/authorized_keys` del servidor esa llave ocupa una sola línea:
+
+```text
+restrict,command="bash ~/bases-sap/deploy/despachar.sh" ssh-ed25519 AAAA… bases-sap-deploy
+```
+
+`restrict` quita la terminal y todo reenvío; `command=` hace que sshd ignore lo que pida el cliente y corra el despachador, que recibe el pedido en `$SSH_ORIGINAL_COMMAND`. Es la única entrada de esa llave y acepta solo estas órdenes:
+
+| Orden | Hace |
+|---|---|
+| `ping` | Responde `ok`. |
+| `pendientes` | `migrate:status --pending`. |
+| `puede-desplegar` | `sap:puede-desplegar`, con su mismo código de salida. |
+| `previsualizar <sha>` | Lista y cuenta las migraciones que `<sha>` agrega frente a HEAD. Nunca migra. |
+| `desplegar <sha>` | Toma un candado, verifica que `<sha>` esté en `origin/main` y avance HEAD sin fusión, consulta `puede-desplegar`, corre `deploy/deploy.sh` con `DEPLOY_REF=<sha>` y comprueba que HEAD quedó en `<sha>`. |
+| `estado` | HEAD, si está en mantenimiento y los errores de hoy del log (cuántos y los últimos 5, de 200 caracteres como máximo). |
+
+Cualquier otra cosa (vacío, argumentos de más, mayúsculas o caracteres de shell) sale con 64 sin correr nada; el pedido nunca se evalúa. Los demás códigos: 65 commit rechazado, 70 HEAD no quedó en `<sha>`, 75 intenta más tarde (candado tomado o `puede-desplegar` dijo que no). Nunca lee ni muestra el `.env`. `tests/Feature/Deploy/DispatcherTest.php` prueba cada orden y cada rechazo con repos de prueba y stubs.
+
+**Solo despliegan commits de `origin/main`.** GrupoRyR es una cuenta GitHub Free, así que la llave es un secreto del repositorio y un workflow de cualquier rama podría usarla. Por eso decide el servidor: rechaza todo `<sha>` que no esté ya en `origin/main` y, como solo avanza, tampoco vuelve a un commit viejo. Para revertir, haz `git revert` en `main` y despliega ese commit nuevo.
+
+**Tus pasos únicos (fase 0):**
+
+1. En tu PC, en Git Bash, crea la llave sin frase de paso, porque la usa GitHub y no tú: `ssh-keygen -t ed25519 -N "" -C "bases-sap-deploy" -f ~/.ssh/bases-sap-deploy_ed25519`.
+2. En el servidor, agrega a `~/.ssh/authorized_keys` la línea de arriba: `restrict,command="bash ~/bases-sap/deploy/despachar.sh"`, un espacio y el contenido de `bases-sap-deploy_ed25519.pub`. Si la carpeta de la app no es `~/bases-sap`, cambia la ruta.
+3. En GitHub › Settings › Secrets and variables › Actions, guarda la llave privada (`bases-sap-deploy_ed25519`) como el secreto `BASES_SAP_DEPLOY_KEY`.
+4. En la pestaña Variables de esa misma pantalla, crea `BASES_SAP_DEPLOY_HOST` (`<host>`), `BASES_SAP_DEPLOY_USER` (`<usuario-cpanel>`) y `BASES_SAP_KNOWN_HOSTS` (la salida de `ssh-keyscan -t ed25519 <host>`, comparada antes con la huella que muestra cPanel).
+5. En la pestaña Actions, corre una vez «Deploy ping» (`deploy-ping.yml`). Debe terminar en verde con `ok`. Si el runner no llega al puerto 22, el piloto cambia a un cron en el servidor que trae los cambios.

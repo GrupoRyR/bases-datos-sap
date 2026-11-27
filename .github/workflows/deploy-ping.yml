@@ -1,0 +1,59 @@
+# One-off Phase 0 connectivity test of the automatic deploy pilot: a GitHub runner
+# reaches the cPanel server with the forced-command deploy key and asks the dispatcher
+# (deploy/despachar.sh) for `ping`, which must answer `ok`. It runs only by hand from
+# the Actions tab. If the runner cannot reach port 22, the pilot switches to a
+# server-pull cron instead of SSH from GitHub.
+name: Deploy ping
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: Ping the dispatcher
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Write the deploy key and known_hosts
+        env:
+          DEPLOY_KEY: ${{ secrets.BASES_SAP_DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ vars.BASES_SAP_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.BASES_SAP_DEPLOY_USER }}
+          KNOWN_HOSTS: ${{ vars.BASES_SAP_KNOWN_HOSTS }}
+        run: |
+          for name in DEPLOY_KEY DEPLOY_HOST DEPLOY_USER KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is empty: set the BASES_SAP_* secret and variables first."
+              exit 1
+            fi
+          done
+          umask 077
+          mkdir -p "$RUNNER_TEMP/deploy-ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
+
+      - name: Ping
+        env:
+          DEPLOY_HOST: ${{ vars.BASES_SAP_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.BASES_SAP_DEPLOY_USER }}
+        run: |
+          output="$(ssh -i "$RUNNER_TEMP/deploy-ssh/key" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" ping)"
+          if [ "$output" != "ok" ]; then
+            echo "::error::The dispatcher did not answer ok."
+            exit 1
+          fi
+          echo "The dispatcher answered ok."
+
+      - name: Delete the deploy key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/deploy-ssh"
