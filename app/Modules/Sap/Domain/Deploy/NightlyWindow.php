@@ -6,21 +6,21 @@ use Carbon\CarbonImmutable;
 use InvalidArgumentException;
 
 /**
- * The time around the nightly run when no deploy may start, in Bogota.
- * The start is included and the end excluded, like the blocked slots: with
- * "01:45-02:15", 01:45:00 and 02:14:59 are inside and 02:15:00 is not. A
- * window whose end comes before its start crosses midnight.
+ * The time around the nightly run when no deploy may start, in the app
+ * timezone (Bogota), as the blocked slots read theirs, so both guards move
+ * together. The start is included and the end excluded, like the blocked
+ * slots: with "01:45-02:15", 01:45:00 and 02:14:59 are inside and 02:15:00
+ * is not. A window whose end comes before its start crosses midnight; one
+ * whose start equals its end is refused, since it would turn the guard off.
  */
 final readonly class NightlyWindow
 {
-    private const TIMEZONE = 'America/Bogota';
-
     private function __construct(private int $start, private int $end) {}
 
     /**
      * @param  string  $window  "HH:MM-HH:MM", as BASES_SAP_VENTANA_NOCTURNA_DESPLIEGUE.
      *
-     * @throws InvalidArgumentException When it is not two valid times.
+     * @throws InvalidArgumentException When it is not two valid times, or both are the same.
      */
     public static function fromConfig(string $window): self
     {
@@ -34,12 +34,18 @@ final readonly class NightlyWindow
             throw new InvalidArgumentException("Invalid nightly window [{$window}].");
         }
 
-        return new self($startHour * 60 + $startMinute, $endHour * 60 + $endMinute);
+        [$start, $end] = [$startHour * 60 + $startMinute, $endHour * 60 + $endMinute];
+
+        if ($start === $end) {
+            throw new InvalidArgumentException("Empty nightly window [{$window}].");
+        }
+
+        return new self($start, $end);
     }
 
     public function contains(CarbonImmutable $at): bool
     {
-        $time = $at->setTimezone(self::TIMEZONE);
+        $time = $at->setTimezone((string) config('app.timezone'));
         $second = $time->hour * 3600 + $time->minute * 60 + $time->second;
         [$start, $end] = [$this->start * 60, $this->end * 60];
 

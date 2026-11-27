@@ -129,13 +129,17 @@ it('handles a nightly window that crosses midnight', function (string $time, int
     'midday' => ['12:00', 0],
 ]);
 
-it('refuses when the nightly window is not valid', function () {
-    config()->set('sap.deploy.nightly_window', '1:45 a 2:15');
+it('refuses when the nightly window is not valid', function (string $window) {
+    config()->set('sap.deploy.nightly_window', $window);
 
     $this->artisan('sap:puede-desplegar')
-        ->expectsOutput('Ahora no: la ventana nocturna configurada no es válida (1:45 a 2:15).')
+        ->expectsOutput("Ahora no: la ventana nocturna configurada no es válida ({$window}).")
         ->assertExitCode(1);
-});
+})->with([
+    'not two times' => ['1:45 a 2:15'],
+    // An empty window would switch the guard off without a word.
+    'start equal to end' => ['02:00-02:00'],
+]);
 
 it('reports a blocked slot before the nightly window', function () {
     config()->set('sap.requests.blocked_slots', '02:00');
