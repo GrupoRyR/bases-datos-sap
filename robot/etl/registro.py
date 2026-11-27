@@ -59,6 +59,23 @@ def registrar_secretos(cfg: config.Config) -> None:
     registrar_secreto(cfg.alertas.smtp_password)
 
 
+class _ConsolaSegura(logging.StreamHandler):
+    """Console handler that never fails on characters the console cannot encode.
+
+    The Windows console is usually cp1252: a message with "→" would raise
+    UnicodeEncodeError there. Those characters are written as "?" instead; the
+    log file keeps them, since it is UTF-8.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        texto = super().format(record)
+        codificacion = getattr(self.stream, "encoding", None) or "utf-8"
+        try:
+            return texto.encode(codificacion, "replace").decode(codificacion)
+        except LookupError:
+            return texto
+
+
 def configurar(nivel: int = logging.INFO) -> logging.Logger:
     logger = logging.getLogger("bases_sap")
     if logger.handlers:
@@ -71,10 +88,12 @@ def configurar(nivel: int = logging.INFO) -> logging.Logger:
     )
     filtro = _RedactarSecretos()
 
-    consola = logging.StreamHandler(sys.stdout)
-    consola.setFormatter(formato)
-    consola.addFilter(filtro)
-    logger.addHandler(consola)
+    # pythonw.exe (the scheduled tasks) has no console: only the file is written.
+    if sys.stdout is not None:
+        consola = _ConsolaSegura(sys.stdout)
+        consola.setFormatter(formato)
+        consola.addFilter(filtro)
+        logger.addHandler(consola)
 
     # config.LOGS_DIR se lee aquí (no al importar) para que las pruebas lo cambien.
     config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
