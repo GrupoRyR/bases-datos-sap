@@ -68,6 +68,13 @@ desplegar() {
     local sha="$1" previous head
     require_sha "$sha"
 
+    # A deploy takes a few minutes, so a lock older than 30 minutes was left by one that died.
+    # Nobody can remove it by hand: this key opens no shell.
+    if [ -n "$(find "$LOCK_DIR" -maxdepth 0 -type d -mmin +30 2>/dev/null)" ]; then
+        printf 'removing a stale lock (older than 30 minutes)\n' >&2
+        rmdir "$LOCK_DIR"
+    fi
+
     # mkdir is atomic: only one deploy gets the lock. The trap is set only once this run owns it.
     mkdir "$LOCK_DIR" 2>/dev/null || refuse 75 "deploy already running (lock: storage/despachar.lock)"
     trap release_lock EXIT

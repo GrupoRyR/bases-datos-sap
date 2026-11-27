@@ -397,6 +397,21 @@ it('refuses to deploy while another deploy holds the lock', function () {
         ->and(is_dir("{$this->fx['app']}/storage/despachar.lock"))->toBeTrue();
 });
 
+it('takes over a lock left by a deploy that died more than 30 minutes ago', function () {
+    // With a forced-command key nobody can open a shell to remove a stale lock by hand.
+    dispatcherRepos($this->fx);
+    $sha = dispatcherPush($this->fx['root'], ['README.md' => "next\n"]);
+    mkdir("{$this->fx['app']}/storage/despachar.lock");
+    touch("{$this->fx['app']}/storage/despachar.lock", time() - 31 * 60);
+
+    $process = dispatcherRun($this->fx, "desplegar {$sha}");
+
+    expect($process->getExitCode())->toBe(0)
+        ->and($process->getErrorOutput())->toContain('stale lock')
+        ->and(dispatcherHead($this->fx))->toBe($sha)
+        ->and(is_dir("{$this->fx['app']}/storage/despachar.lock"))->toBeFalse();
+});
+
 it('refuses to deploy when puede-desplegar says no', function () {
     dispatcherRepos($this->fx);
     $before = dispatcherHead($this->fx);

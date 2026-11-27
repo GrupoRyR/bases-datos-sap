@@ -70,6 +70,12 @@ log "Running database migrations"
 log "Caching config, routes, views and events"
 "$PHP" artisan optimize
 
+# The robot asks the app which commit runs here (POST /api/robot/v1/version) and only
+# updates itself to that commit: the server always goes first.
+log "Recording the deployed commit"
+mkdir -p storage/app/deploy
+git rev-parse HEAD > storage/app/deploy/commit
+
 trap - EXIT
 bring_up
 
