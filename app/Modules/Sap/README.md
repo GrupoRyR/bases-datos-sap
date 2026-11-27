@@ -8,7 +8,7 @@ Los datos de SAP y todo lo que los mueve: los conjuntos MAESTROS, CARTERA, VENTA
 | Rutas web | `/sap/*`, nombres `sap.*` |
 | Rutas API | `/api/robot/v1/*` y `/api/v1/*`, exactas como dice el contrato (`apiPrefix()` vacío), nombres `sap.api.*` |
 | Migraciones | `2026_11_02_*` |
-| Conexiones | `maestros`, `cartera` y `ventas` para las tablas de cada conjunto (PEDIDOS y PRODUCCION también van en `ventas`); `app` para el resto (solicitudes, corridas, lotes) |
+| Conexiones | `maestros`, `cartera` y `ventas` para las tablas de cada conjunto (PEDIDOS y PRODUCCION también van en `ventas`); `app` para el resto (solicitudes, corridas, lotes, comparaciones) |
 | Puede usar | Contratos de Core |
 
 Lo que Panel necesite leer de aquí lo publica Sap en `App\Modules\Sap\Contracts`. El contrato con el robot está en `docs/contrato-robot.md` y no cambia sin avisarle al usuario.
@@ -147,3 +147,11 @@ El despachador de despliegues corre `php artisan sap:puede-desplegar --no-ansi` 
 1. A 15 minutos o menos de una franja bloqueada, con la misma regla de `BlockedSlots` que las solicitudes: desde 15 minutos antes (incluido) hasta 15 minutos después (excluido).
 2. Dentro de la ventana de la corrida nocturna en Bogotá (`sap.deploy.nightly_window`, `BASES_SAP_VENTANA_NOCTURNA_DESPLIEGUE`, por defecto `01:45-02:15`; `Domain\Deploy\NightlyWindow`): el inicio incluido y el fin excluido; si el fin va antes del inicio, cruza la medianoche. Una ventana mal escrita también rechaza.
 3. Una corrida `abierta` que sigue dentro de su ventana de 30 minutos (`Run::isOpen()`), o una solicitud `tomada` que todavía no cumple los 30 minutos para vencer.
+
+## Versión, totales y comparaciones
+
+Rutas del robot del contrato §13, en el mismo grupo `sap.robot`. Ninguna cambia los datos de los conjuntos.
+
+- `POST /api/robot/v1/version` (`Application\Deploy\DeployedCommit`, §13.1): responde `{"commit": "<sha>"}` con el commit que `deploy/deploy.sh` escribe después de un despliegue bueno en `sap.deploy.commit_file` (por defecto `storage/app/deploy/commit`, fuera del disco `local`, cuya raíz es `storage/app/private`), o `null` si el archivo falta o no trae exactamente un sha de 40 caracteres hexadecimales. Acepta mayúsculas y responde en minúscula. Nunca corre `git`: el robot solo se actualiza al commit que ya corre el servidor.
+- `POST /api/robot/v1/totales` (`Application\Totals\ComputeTotals`, §13.2): solo lee. `Application\Totals\TotalsScope` valida `conjunto` (`MAESTROS`, `CARTERA` o `VENTAS`), `empresa` y, solo en VENTAS, `desde` y `hasta`. VENTAS da un grupo por mes de `fecha_contabilizacion` (`SUBSTR(..., 1, 7)`, igual en MySQL y SQLite) con `filas`, `sumas.total`, `sumas.cantidad` y `nulos.kilos` y `nulos.codigo_envio`; CARTERA, un grupo `actual` con la suma de `saldo`; MAESTROS, un grupo por parte con sus filas activas. Las sumas son exactas: en MySQL, `SUM` sobre las columnas `DECIMAL`; en SQLite, que guarda los decimales como `REAL`, la suma de cada valor llevado a entero de sus decimales. El resultado sale por bcmath como texto, nunca como `float`.
+- `POST /api/robot/v1/comparaciones` (`Application\Totals\StoreComparison`, §13.3): guarda en `robot_comparisons` (conexión `app`) lo que el robot informa al comparar, con la llave que lo firmó, y responde 201 con su `id`. Nunca toca los datos de los conjuntos. El panel lo lee por `Contracts\Comparisons::latest()`: la última comparación de cada empresa y conjunto (`DatabaseComparisons`).

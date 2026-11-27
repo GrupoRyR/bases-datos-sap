@@ -12,6 +12,9 @@ Versión 1. Lo implementan dos sesiones en paralelo: «Datos y API» (el servido
 | Corrida | Un envío completo del robot: iniciar, lotes y cerrar (§4) | Tipo `completa`, `solicitud`, `historico` (solo `VENTAS`, §10.4) o `complemento` (solo `VENTAS`, §10.5) |
 | Lote | Hasta 1.000 filas de una sola parte | Numerados desde 1 en cada corrida |
 | Solicitud | Pedido de actualización de una app o del panel (§7) | Estados en §7.2 |
+| Versión | El commit que corre el servidor, al que el robot se actualiza (§13.1, `POST /api/robot/v1/version`) | 40 caracteres hexadecimales en minúscula, o `null` |
+| Totales | Filas, sumas exactas y nulos de MySQL por grupo, para comparar con SAP (§13.2, `POST /api/robot/v1/totales`) | Solo `MAESTROS`, `CARTERA` y `VENTAS` |
+| Comparación | Lo que el robot informa al comparar sus totales de SAP con los de MySQL; se guarda y nunca se aplica (§13.3, `POST /api/robot/v1/comparaciones`) | `cuadra` `true` o `false`, con sus `diferencias` |
 
 Solo existen los conjuntos y partes de esta tabla. Las tablas que van solo a la carpeta (plan §5) **nunca** se envían: la API responde 422 a cualquier conjunto o parte desconocidos.
 
@@ -300,6 +303,8 @@ El botón del panel crea solicitudes por dentro (contratos de `Sap`), con las mi
 | Corridas | Guarda lotes, aplica al cerrar, inactiva, compara el conteo | Extrae, arma lotes de hasta 1.000 filas, cierra o falla |
 | Solicitudes | Recibe de las apps, une, encola, aplica franjas, vence | Pregunta cada minuto y las atiende |
 | Horarios | Vence corridas y solicitudes (scheduler) | Nocturna a las 02:00, preguntas cada minuto, fotos de la carpeta |
+| Versión | Responde el commit desplegado (§13.1) | Se actualiza solo a ese commit |
+| Totales y comparaciones | Responde los totales de MySQL (§13.2) y guarda las comparaciones (§13.3) | Saca los mismos totales de SAP, compara con la regla de §13.2 e informa el resultado |
 
 ## 9. Variables de entorno
 
@@ -633,3 +638,118 @@ Llave: `codigo_articulo`, única por empresa. No puede repetirse en la corrida (
   - que `padre` + `hijo` en `BEAS_STL` y `codigo_articulo` + `operacion` en `BEAS_APL` no se repitan; si no se repiten, pasan a ser llave;
   - si una entrada de producto terminado (`OIGN`) anulada deja dos filas que se anulan entre sí o una sola: la consulta original no filtra `CANCELED`;
   - cuánto tarda la consulta de costos en la ventana y en la carga inicial, por las franjas bloqueadas de la noche.
+
+## 13. Versión, totales y comparaciones
+
+Aprobado por el usuario el 2026-11-27 (piloto de despliegue automático, ticket `20261125-centro-001`).
+
+Tres rutas para que el robot se actualice solo y compruebe, sin cambiar datos, que MySQL cuadra con SAP. Van firmadas como todas (§3), sin query string (§2), y responden 401, 400, 413 y 429 como las demás. **Ninguna cambia datos**: la única escritura es guardar una comparación (§13.3), que nunca se aplica a las tablas de los conjuntos.
+
+### 13.1 Versión: `POST /api/robot/v1/version`
+
+Cuerpo: `{}`. Respuesta 200:
+
+```json
+{"commit": "0123456789abcdef0123456789abcdef01234567"}
+```
+
+- `commit`: el commit que corre el servidor, 40 caracteres hexadecimales en minúscula. Lo lee del archivo `storage/app/deploy/commit` que escribe `deploy/deploy.sh` después de un despliegue bueno: una línea con el sha. La API nunca corre `git` ni ningún otro proceso.
+- `{"commit": null}` si el archivo no existe, está vacío o no trae exactamente un sha de 40 caracteres hexadecimales (sin contar espacios ni saltos de línea alrededor). Un sha en mayúscula se acepta y se responde en minúscula.
+- **Servidor primero.** El robot solo se actualiza al commit que ya corre el servidor: si `commit` es `null` o el robot no lo tiene, no se actualiza. Así el robot nunca va adelante del servidor (§4.2, excepciones de transición).
+
+### 13.2 Totales: `POST /api/robot/v1/totales`
+
+Solo lee. Cuerpo:
+
+```json
+{"conjunto": "VENTAS", "empresa": "SGX", "desde": "2025-01-01", "hasta": "2026-11-26"}
+```
+
+- `conjunto`: `MAESTROS`, `CARTERA` o `VENTAS`. `PEDIDOS`, `PRODUCCION` o cualquier otro, 422 (por ahora no tienen totales).
+- `empresa`: `SGX` o `SDC`.
+- `desde` y `hasta`: fechas `AAAA-MM-DD`, cada una opcional, **solo en `VENTAS`**. Filtran `fecha_contabilizacion`, las dos incluidas. `null` es lo mismo que no enviarla.
+
+Respuesta 200 en `VENTAS`: un grupo por mes de `fecha_contabilizacion` con líneas, de menor a mayor; los meses sin líneas no salen.
+
+```json
+{
+  "conjunto": "VENTAS",
+  "empresa": "SGX",
+  "grupos": [
+    {"clave": "2026-09", "filas": 1204, "sumas": {"total": "1234567.89", "cantidad": "3456.500000"}, "nulos": {"kilos": 0, "codigo_envio": 12}},
+    {"clave": "2026-10", "filas": 980, "sumas": {"total": "-12.50", "cantidad": "-1.000000"}, "nulos": {"kilos": 3, "codigo_envio": 0}}
+  ]
+}
+```
+
+- `clave`: el mes, `AAAA-MM`. `filas`: el `COUNT(*)` de las líneas de la empresa en ese mes (dentro de `desde` y `hasta`). `sumas.total`: la suma de `total`, con 2 decimales; `sumas.cantidad`: la suma de `cantidad`, con 6. Las notas crédito suman con su signo (§10), así que `total` es la venta neta. `nulos.kilos` y `nulos.codigo_envio`: las líneas con esa columna en `null`.
+- Sin líneas en el rango: `"grupos": []`.
+
+En `CARTERA`: un solo grupo, `actual`, con la cartera actual de la empresa (no las fotos). La columna del saldo es **`saldo`** (§6):
+
+```json
+{"conjunto": "CARTERA", "empresa": "SGX", "grupos": [{"clave": "actual", "filas": 3120, "sumas": {"saldo": "987654321.09"}, "nulos": {}}]}
+```
+
+Una empresa sin cartera responde `"filas": 0` y `"saldo": "0.00"`.
+
+En `MAESTROS`: un grupo por parte (§5), todas y en el orden de §1, también las que tienen 0 filas. `filas` son las filas de la empresa con `activo = true`; `sumas` y `nulos` van vacíos, `{}`:
+
+```json
+{"conjunto": "MAESTROS", "empresa": "SDC", "grupos": [{"clave": "clientes", "filas": 6098, "sumas": {}, "nulos": {}}, {"clave": "proveedores", "filas": 0, "sumas": {}, "nulos": {}}]}
+```
+
+(El ejemplo corta la lista: llegan las doce partes.)
+
+- **Sumas.** Texto con el formato de los montos y cantidades de §4.2: punto decimal, sin separador de miles, `-` si son negativas, y siempre con exactamente 2 decimales (`total`, `saldo`) o 6 (`cantidad`), aunque sean ceros (`"0.00"`). La API suma exacto, en decimal y nunca en coma flotante; como cada valor guardado ya tiene esos decimales, la suma no se redondea. El robot suma lo de SAP también exacto (en HANA o con `Decimal`) y redondea al final a 2 o 6 decimales, la mitad lejos del cero.
+- **Regla para cuadrar.** Por cada `clave`, `filas` y cada número de `nulos` deben ser iguales, y cada valor de `sumas` debe ser igual como texto después de ese redondeo. Una `clave` que está en un lado y no en el otro es una diferencia (en VENTAS, un mes con líneas solo en SAP o solo en MySQL).
+- 422 (`{"message": "La consulta no cumple el contrato.", "errors": {...}}`, como en §4.2):
+  - `conjunto` que falta, desconocido o sin totales (`PEDIDOS`, `PRODUCCION`);
+  - `empresa` que falta o desconocida;
+  - `desde` o `hasta` en `MAESTROS` o `CARTERA`;
+  - `desde` o `hasta` que no es una fecha `AAAA-MM-DD` real (un número, una hora o `2026-02-30`);
+  - `desde` posterior a `hasta` (el error va en `hasta`).
+
+### 13.3 Comparaciones: `POST /api/robot/v1/comparaciones`
+
+El robot informa el resultado de comparar sus totales de SAP con los de §13.2. La API lo guarda (`robot_comparisons`) para el coordinador y el panel; **nunca lo aplica a los datos** ni cambia nada más. Cuerpo:
+
+```json
+{
+  "conjunto": "VENTAS",
+  "empresa": "SGX",
+  "comparada_en": "2026-11-27T03:05:00-05:00",
+  "desde": "2025-01-01",
+  "hasta": "2026-11-26",
+  "cuadra": false,
+  "diferencias": [
+    {"clave": "2026-10", "campo": "filas", "sap": "1204", "mysql": "1203"},
+    {"clave": "2026-10", "campo": "sumas.total", "sap": "1234567.89", "mysql": "1234500.00"},
+    {"clave": "2026-11", "campo": "filas", "sap": "15", "mysql": null}
+  ]
+}
+```
+
+- `conjunto`, `empresa`, `desde` y `hasta`: las mismas reglas de §13.2 (`desde` y `hasta` solo en `VENTAS`, opcionales, `null` es no enviarlas). Son los de la consulta de totales que comparó.
+- `comparada_en`: cuándo comparó el robot, hora ISO 8601 con zona (§2). La API la guarda en hora de Bogotá. No puede pasar de la hora del servidor más **5 minutos**, para que un reloj adelantado no deje esa comparación como la última para siempre.
+- `cuadra`: `true` o `false` (booleano JSON). Con `true`, `diferencias` va vacía; con `false`, trae al menos una.
+- `diferencias`: lista, hasta **500**. Cada una es un objeto con exactamente estas cuatro llaves:
+  - `clave`: la `clave` del grupo (§13.2), texto de 1 a 20 caracteres;
+  - `campo`: qué no cuadra, texto de 1 a 40: `filas`, `sumas.<nombre>` o `nulos.<nombre>` (p. ej. `sumas.total`, `nulos.kilos`);
+  - `sap` y `mysql`: cada valor como texto, hasta 40 caracteres (los números también: `"1204"`, `"1234567.89"`), o `null` si el grupo no existe en ese lado.
+  Si hay más de 500, el robot envía las primeras 500.
+
+Respuesta 201: `{"id": 17}`.
+
+**Reintento.** Una comparación se identifica por la llave del robot que la firma, `conjunto`, `empresa` y `comparada_en`. Si el robot la reenvía porque perdió la respuesta, la API no guarda otra fila: responde 201 con el `id` de la primera, aunque el resto del cuerpo cambie. Para una comparación nueva, el robot usa la hora nueva en que comparó.
+
+422 (`{"message": "La comparación no cumple el contrato.", "errors": {...}}`, hasta 50 llaves):
+
+- los casos de §13.2 en `conjunto`, `empresa`, `desde` y `hasta`;
+- `comparada_en` que falta, no es una hora con zona o pasa de la hora del servidor más 5 minutos;
+- `cuadra` que falta o no es booleano (`"false"` o `0` no valen);
+- `diferencias` que falta, no es una lista o trae más de 500;
+- `cuadra: true` con diferencias, o `cuadra: false` sin ninguna (el error va en `diferencias`);
+- una diferencia que no es un objeto o trae otra llave (`diferencias.N`); una llave que falta (`sap` y `mysql` deben venir aunque sean `null`), que no es texto, vacía en `clave` o `campo`, o más larga de lo permitido (`diferencias.N.clave`…).
+
+Con un 422 no se guarda nada.
