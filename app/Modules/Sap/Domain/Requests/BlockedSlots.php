@@ -58,4 +58,13 @@ final readonly class BlockedSlots
 
         return $time;
     }
+
+    /**
+     * Whether $at falls inside a window: from margin minutes before a slot
+     * (included) until margin minutes after it (excluded), as next() sees it.
+     */
+    public function contains(CarbonImmutable $at): bool
+    {
+        return ! $this->next($at)->equalTo($at);
+    }
 }
