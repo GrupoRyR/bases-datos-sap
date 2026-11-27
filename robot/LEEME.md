@@ -101,17 +101,18 @@ Todos se corren desde `robot\etl` con el Python del `.venv`.
 | `run_robot.py --historico-ventas --desde AAAA-MM` | Una vez, a mano: VENTAS mes por mes antes de la ventana nocturna (ver «Histórico de ventas») | Sí |
 | `run_robot.py --complemento-ventas --desde AAAA-MM` | A mano: llena `kilos` y `codigo_envio` de VENTAS mes por mes, como el histórico (ver «Complemento de ventas») | Sí |
 | `run_robot.py --diagnostico` | Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo Segurex) con sus conteos; no envía nada | No |
-| `run_robot.py --tras-despliegue` | Lo lanza solo la revisión de cada minuto: corre los complementos pendientes de `complementos.toml` (ver «Actualización automática») | Sí |
+| `run_robot.py --comparar` | Solo lee: compara los totales de MAESTROS, CARTERA y VENTAS en SAP con los de la app y guarda el resultado en la app (ver «Comparación con SAP») | Sí |
+| `run_robot.py --tras-despliegue` | Lo lanza solo la revisión de cada minuto: corre los complementos pendientes de `complementos.toml` y al final la comparación con SAP (ver «Actualización automática») | Sí |
 | `revisar_solicitudes.py` | Se actualiza al commit desplegado (ver «Actualización automática»), toma hasta 20 solicitudes de la app (MAESTROS, CARTERA, VENTAS, PEDIDOS o PRODUCCION) y las corre; sin solicitudes no sube la VPN | Sí |
 
 Opciones de `run_robot.py`:
 
 - `--empresa SGX` o `--empresa SDC`: solo esa empresa (se puede repetir). Por defecto, las dos.
 - `--sin-vpn`: no maneja la VPN; úsalo si ya la conectaste a mano.
-- `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
+- `--forzar`: corre `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas`, `--comparar` o `--archivo` aunque sea dentro de una franja bloqueada. Sin él, si arrancan dentro de una franja (por ejemplo, el PC prendió tarde), esperan a que pase. Úsalo solo si sabes que los otros robots no están corriendo.
 - `--desde` y `--hasta`: solo para `--carga-produccion` (`--desde AAAA-MM-DD`), `--historico-ventas` y `--complemento-ventas` (`--desde AAAA-MM`, `--hasta AAAA-MM`).
 
-Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas`, `--tras-despliegue` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
+Si el robot está ocupado (otra ejecución tiene el candado), `--completa`, `--carga-produccion`, `--historico-ventas`, `--complemento-ventas`, `--comparar`, `--tras-despliegue` y `--archivo` esperan hasta 20 minutos; `--catalogo` y `--diagnostico` salen enseguida y te piden intentar de nuevo en unos minutos.
 
 Códigos de salida: `0` todo bien, `1` algún fallo, `2` configuración incompleta, `130` cancelado con Ctrl+C.
 
@@ -183,6 +184,31 @@ Cuándo correrlo: con la API de la corrida `complemento` desplegada, fuera de la
 
 Al final, el log trae un resumen por empresa: cuántos tramos quedaron `llenos`, `vacíos` (sin ventas en SAP) y `fallidos`, y cuáles, con el motivo de los fallidos y sin valores de SAP. Sale con `1` si algún tramo falló (y avisa por correo) y con `0` si no. `robot\state\ultima_ejecucion.json` lista cada tramo con su estado.
 
+## Comparación con SAP
+
+Comprueba, sin cambiar nada, que lo que tiene la app cuadra con SAP (contrato §13). Por empresa, calcula en SAP los mismos totales que la app da en `/totales`, se los pide, compara y guarda el resultado en la app (`/comparaciones`, una por conjunto y empresa) para el coordinador y el panel:
+
+```powershell
+.venv\Scripts\python.exe etl\run_robot.py --comparar
+.venv\Scripts\python.exe etl\run_robot.py --comparar --empresa SDC
+```
+
+- **Solo lee.** En SAP solo corre `SELECT` (las mismas consultas de `robot\queries` que la nocturna y el histórico); nunca escribe en SAP, no abre ninguna corrida en la app y no escribe CSV. Lo único que guarda la app es el resultado de la comparación, que nunca se aplica a los datos.
+- **Qué compara**, con los valores tal como el robot los envía (el mismo signo de las notas crédito, los mismos redondeos por línea y el texto vacío como vacío):
+  - MAESTROS: por cada una de las doce partes, las filas activas que envía la nocturna (en direcciones, todas). Si la empresa no tiene lista de precios pública, `precios` va en 0, como la nocturna, que no la envía.
+  - CARTERA: la cartera actual, filas y suma de `saldo`.
+  - VENTAS: de enero de 2025 a hoy, mes por mes: líneas, suma de `total` y de `cantidad`, y cuántas líneas tienen `kilos` y `codigo_envio` vacíos.
+  - PEDIDOS y PRODUCCION no se comparan.
+- Las sumas se hacen exactas y se comparan como texto con 2 decimales (`total`, `saldo`) o 6 (`cantidad`). Un mes, una parte o la cartera que está en un lado y no en el otro también es una diferencia.
+- **Dos fases**, como siempre: con la VPN arriba solo consulta SAP; con la VPN abajo pide los totales a la app y guarda las comparaciones.
+- Respeta las franjas de los otros robots y espera el candado hasta 20 minutos, como la nocturna (`--forzar` no espera la franja). Antes de subir la VPN estima cuánto la va a tener arriba: lo del complemento de ventas (2 minutos fijos más 10 segundos por mes de cada empresa) más 1 minuto por empresa para MAESTROS y CARTERA (`SEGUNDOS_POR_EMPRESA` en `etl\comparar.py`). Desde enero de 2025, con las dos empresas, son unos 11 minutos; todavía no está medido con SAP. Si no cabe antes de la siguiente franja, espera a que pase.
+- Si un conjunto falla en SAP o al pedir sus totales a la app, no se guarda su comparación: queda en el log y en el correo, y los demás siguen.
+- El log trae una línea por conjunto y empresa: `cuadra`, `no cuadra en N grupos` con el mes o la parte y el campo que no cuadran (por ejemplo `2026-10 (filas, sumas.total)`), o `error` con el motivo. Nunca trae valores de SAP. `robot\state\ultima_ejecucion.json` lista cada comparación con su resultado.
+- Sale con `0` si todo cuadra y quedó guardado, y con `1` si algo no cuadra o falló (y avisa por correo, como la nocturna).
+- **Diferencias esperables:** VENTAS va hasta hoy y la app tiene lo que cargó la corrida de las 02:00, así que las ventas contabilizadas después en SAP salen como diferencia del mes en curso; la cartera cambia con cada pago del día. Una diferencia en un mes viejo suele querer decir que ese mes cambió en SAP después del histórico.
+
+Corre sola al final de cada `--tras-despliegue` (ver «Actualización automática»).
+
 ## Pedidos
 
 Cada corrida de PEDIDOS (la nocturna o una solicitud) trae todas las líneas abiertas de los pedidos de clientes de la empresa, y la app reemplaza todos sus pedidos por los recibidos: lo que ya se facturó o se cerró desaparece (contrato §11).
@@ -242,7 +268,7 @@ El robot se actualiza solo al commit que la app dice que está desplegado, para 
 
 **La primera vez** la copia del PC de TI no tiene este código: hay que traerlo a mano una sola vez, desde la raíz del repo, con `git pull --ff-only`. Desde ahí se actualiza sola.
 
-Cuándo pasa: en la revisión de cada minuto, solo fuera de las franjas bloqueadas y con el candado tomado (ninguna otra ejecución del robot corriendo). Pregunta a la app qué commit está desplegado (`POST /version`, firmado como las demás rutas; la forma es provisional hasta que la app la defina) y:
+Cuándo pasa: en la revisión de cada minuto, solo fuera de las franjas bloqueadas y con el candado tomado (ninguna otra ejecución del robot corriendo). Pregunta a la app qué commit está desplegado (`POST /version`, firmado como las demás rutas, contrato §13.1) y:
 
 1. Si la app no dice ningún commit, o es el mismo de la copia, no hace nada.
 2. La copia debe estar en la rama `main`.
@@ -276,9 +302,9 @@ La revisión de cada minuto lanza `--tras-despliegue` después de actualizarse y
 
 ### El modo `--tras-despliegue`
 
-Es un modo programado: respeta las franjas como los otros (nunca con `--forzar`, que además no acepta, como tampoco `--empresa`, `--desde` ni `--hasta`), espera el candado hasta 20 minutos y lo renueva mientras corre. Antes de subir la VPN espera a que la suma de lo que estima cada complemento pendiente quepa antes de la siguiente franja, como el complemento de ventas.
+Es un modo programado: respeta las franjas como los otros (nunca con `--forzar`, que además no acepta, como tampoco `--empresa`, `--desde` ni `--hasta`), espera el candado hasta 20 minutos y lo renueva mientras corre. Antes de subir la VPN espera a que la suma de lo que estima cada complemento pendiente más la comparación con SAP quepa antes de la siguiente franja, como el complemento de ventas.
 
-Con el candado tomado vuelve a mirar qué está pendiente (otro proceso pudo haberlo corrido) y corre cada complemento en orden, por el mismo camino del modo a mano (`--complemento-ventas` con sus argumentos, con su propia sesión de VPN). Marca cada uno como hecho o fallido en `complementos.json`; uno que falla no frena a los siguientes. El log trae una línea por complemento (`Complemento <id>: hecho` o `fallido`) y `ultima_ejecucion.json` los lista con sus tramos. Si alguno falló, avisa por correo y sale con `1`. Sin nada pendiente sale con `0` sin tocar SAP, la VPN ni la app.
+Con el candado tomado vuelve a mirar qué está pendiente (otro proceso pudo haberlo corrido) y corre cada complemento en orden, por el mismo camino del modo a mano (`--complemento-ventas` con sus argumentos, con su propia sesión de VPN). Marca cada uno como hecho o fallido en `complementos.json`; uno que falla no frena a los siguientes. El log trae una línea por complemento (`Complemento <id>: hecho` o `fallido`) y `ultima_ejecucion.json` los lista con sus tramos. Al final, siempre, corre la comparación con SAP de las dos empresas (ver «Comparación con SAP»), con su propia sesión de VPN: también si no había nada pendiente o si un complemento falló. `ultima_ejecucion.json` trae también el resultado de cada comparación. Si algún complemento falló o algo no cuadra, avisa por correo y sale con `1`.
 
 ## Carpeta de CSV
 

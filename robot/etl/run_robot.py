@@ -38,17 +38,21 @@ Uso:
                                                    # mes por mes, como el histórico (complemento.py,
                                                    # orden 016). No corre si ventas.sql no trae los
                                                    # kilos
+    python run_robot.py --comparar [--empresa SGX] # solo lee: totales de MAESTROS, CARTERA y VENTAS en
+                                                   # SAP contra los de la app (/totales), y el
+                                                   # resultado a /comparaciones (comparar.py)
     python run_robot.py --tras-despliegue          # lo lanza la revisión de cada minuto después de
                                                    # actualizarse (autoactualizar.py): corre los
                                                    # complementos pendientes de robot/complementos.toml
+                                                   # y al final la comparación
 
 Un solo proceso del robot a la vez (bloqueo.Bloqueo, robot/state/robot.lock): la
 completa y el archivo esperan hasta 20 minutos a que lo suelte otro (la
 revisión de solicitudes que está terminando); el catálogo y el diagnóstico, que
 los corre el usuario, no esperan. Si la completa o el archivo arrancan dentro de
 una franja bloqueada de los otros robots (±15 minutos), esperan a que pase,
-salvo con --forzar (--tras-despliegue nunca lo usa). El histórico, el complemento de ventas y
---tras-despliegue, además, esperan a que su fase
+salvo con --forzar (--tras-despliegue nunca lo usa). El histórico, el complemento de ventas,
+la comparación y --tras-despliegue, además, esperan a que su fase
 con VPN quepa entera antes de la siguiente franja (bloqueo.inicio_hueco) y renuevan el
 candado por cada tramo, porque pueden durar más que su vigencia.
 
@@ -70,6 +74,7 @@ import archivo
 import autoactualizar
 import bloqueo
 import catalogo
+import comparar
 import complemento
 import config
 import diagnostico
@@ -323,8 +328,13 @@ def _parser() -> argparse.ArgumentParser:
                            "queries/ventas/ventas.sql no trae la columna de kilos.")
     modo.add_argument("--tras-despliegue", action="store_true",
                       help="Lo lanza la revisión de cada minuto después de actualizarse al commit desplegado: "
-                           "corre los complementos pendientes de robot/complementos.toml. Respeta las franjas "
-                           "y espera el candado; no lleva otras opciones.")
+                           "corre los complementos pendientes de robot/complementos.toml y al final la "
+                           "comparación con SAP (--comparar). Respeta las franjas y espera el candado; no lleva "
+                           "otras opciones.")
+    modo.add_argument("--comparar", action="store_true",
+                      help="Solo lee: calcula en SAP los totales de MAESTROS, CARTERA y VENTAS (desde 2025-01-01) y "
+                           "los compara con los de la app (/totales); guarda cada resultado en /comparaciones. "
+                           "No escribe en SAP ni abre corridas. Respeta las franjas y espera el candado.")
     modo.add_argument("--diagnostico", action="store_true",
                       help="Extrae MAESTROS, CARTERA, VENTAS, PEDIDOS y PRODUCCION (solo SGX) con sus conteos "
                            "a _DIAGNOSTICO; no envía nada.")
@@ -334,8 +344,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="No gestionar la VPN (asume que ya está activa).")
     parser.add_argument("--forzar", action="store_true",
                         help="Correr la completa, la carga de producción, el histórico o el complemento "
-                             "de ventas o el archivo aunque sea dentro de una franja bloqueada de los otros "
-                             "robots.")
+                             "de ventas, la comparación o el archivo aunque sea dentro de una franja bloqueada "
+                             "de los otros robots.")
     parser.add_argument("--desde", metavar="AAAA-MM-DD | AAAA-MM",
                         help="Primer día de la carga de producción (AAAA-MM-DD, con --carga-produccion) "
                              "o primer mes del histórico o del complemento de ventas (AAAA-MM, con "
@@ -516,6 +526,8 @@ def main(
         modo = "complemento ventas" if args.complemento_ventas else "historico ventas"
     elif tras:
         modo = TRAS_DESPLIEGUE
+    elif args.comparar:
+        modo = "comparar"
     elif args.archivo:
         modo = f"archivo {args.archivo}"
     else:
@@ -532,10 +544,11 @@ def main(
     try:
         cfg = cargar_config()
         registro.registrar_secretos(cfg)
-        # Solo la completa, la carga, el histórico y el complemento hablan con la API; el archivo,
-        # el catálogo y el diagnóstico no.
+        # Solo la completa, la carga, el histórico, el complemento y la comparación hablan con la
+        # API; el archivo, el catálogo y el diagnóstico no.
         cfg.validar(requiere_vpn=not args.sin_vpn,
-                    requiere_api=completa or carga is not None or meses is not None or tras, empresas=empresas)
+                    requiere_api=completa or carga is not None or meses is not None or tras or args.comparar,
+                    empresas=empresas)
         if args.complemento_ventas:
             # Sin la columna de kilos en ventas.sql no corre: antes de esperar la franja o el
             # candado y de subir la VPN (complemento.revisar_consulta).
@@ -555,19 +568,23 @@ def main(
         for problema in problemas:
             # The per-minute check alerts these (once an hour); here they only go to the log.
             log.error("%s", problema)
-        if not planes:
-            # T7b: when --comparar exists it also runs after a deploy with nothing pending, so
-            # this early exit moves into _tras_despliegue.
-            log.info("Sin complementos pendientes después del despliegue.")
-            return 0
-        log.info("Complementos pendientes: %s.", ", ".join(c.id for c, _ in planes))
-        estimado = sum((plan.estimado for _, plan in planes), timedelta())
+        if planes:
+            log.info("Complementos pendientes: %s.", ", ".join(c.id for c, _ in planes))
+        else:
+            log.info("Sin complementos pendientes después del despliegue: queda la comparación con SAP.")
+        # The comparison always runs at the end, also with nothing pending.
+        estimado = (sum((plan.estimado for _, plan in planes), timedelta())
+                    + comparar.duracion_estimada(len(EMPRESAS), ahora().date()))
+    elif args.comparar:
+        estimado = comparar.duracion_estimada(len(empresas), ahora().date())
 
-    programado = completa or carga is not None or meses is not None or tras or modo.startswith("archivo")
+    programado = (completa or carga is not None or meses is not None or tras or args.comparar
+                  or modo.startswith("archivo"))
     avisar = modo != "diagnostico"  # el diagnóstico lo corre el usuario y ve el resumen
     momento = ahora()
     franja = bloqueo.en_franja(momento, cfg.franjas, cfg.margen_franja_min)
-    carga_meses = ("de los complementos" if tras
+    carga_meses = ("de los complementos y la comparación" if tras
+                   else "de la comparación" if args.comparar
                    else "del complemento" if args.complemento_ventas else "del histórico")
     if estimado is not None:
         # El histórico y el complemento tienen la VPN arriba mucho tiempo: no basta con estar fuera
@@ -699,8 +716,33 @@ def _tras_despliegue(
         resumen.append({"id": c.id, "modo": c.modo, "argumentos": list(c.argumentos),
                         "estado": "hecho" if hecho else "fallido",
                         "tramos": [t.para_estado() for t in tramos]})
-    # T7b: --comparar is called here, once, after the pending complements (not implemented yet).
-    return fallos, {"complementos": resumen}
+    # Always the comparison at the end, once, also after a failed complement or with nothing
+    # pending: it only reads SAP (its own VPN session) and the app.
+    renovar()
+    try:
+        comparaciones, propios = _comparar(cfg, args, EMPRESAS, fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn,
+                                           conectar=conectar, ahora=ahora, renovar=renovar)
+    except Exception as exc:
+        log.exception("Error inesperado en la comparación con SAP.")
+        comparaciones, propios = [], [("INESPERADO", f"Comparación: {extraccion.mensaje_seguro(exc)}")]
+    fallos += propios
+    return fallos, {"complementos": resumen, "comparaciones": [c.para_estado() for c in comparaciones]}
+
+
+def _comparar(
+    cfg: Config,
+    args: argparse.Namespace,
+    empresas: list[str],
+    *,
+    fabrica_api: Callable[..., ApiCliente],
+    fabrica_vpn: Callable[..., Any],
+    **kwargs: Any,
+) -> tuple[list[comparar.Comparacion], list[tuple[str, str]]]:
+    """The same path as `run_robot.py --comparar` (see _ejecutar)."""
+    return comparar.ejecutar(
+        cfg, empresas, api=fabrica_api(cfg.api), robot_vpn=None if args.sin_vpn else fabrica_vpn(cfg.vpn),
+        sin_vpn=args.sin_vpn, **kwargs,
+    )
 
 
 def _ejecutar(
@@ -730,6 +772,12 @@ def _ejecutar(
                 cfg, args, fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn, conectar=conectar,
                 ahora=ahora, renovar=renovar, git=git,
             )
+        elif modo == "comparar":
+            comparaciones, fallos = _comparar(
+                cfg, args, empresas, fabrica_api=fabrica_api, fabrica_vpn=fabrica_vpn, conectar=conectar,
+                ahora=ahora, renovar=renovar,
+            )
+            extra["comparaciones"] = [c.para_estado() for c in comparaciones]
         elif meses is not None and modo == "complemento ventas":
             tramos, fallos = complemento.ejecutar(
                 cfg, empresas, *meses, api=fabrica_api(cfg.api),

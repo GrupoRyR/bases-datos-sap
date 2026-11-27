@@ -1,4 +1,4 @@
-"""Cliente de la API del robot (docs/contrato-robot.md §2, §3, §4 y §7.3, y /version).
+"""Cliente de la API del robot (docs/contrato-robot.md §2, §3, §4, §7.3 y §13: /version, /totales y /comparaciones).
 
 Cada petición es un POST JSON firmado con HMAC (firma.py), comprimido con gzip
 por defecto. El gzip usa mtime=0 para que un lote reenviado tenga los mismos
@@ -135,6 +135,10 @@ def _leer_json(respuesta: Respuesta) -> Any:
         return None
 
 
+def _es_entero(valor: Any) -> bool:
+    return isinstance(valor, int) and not isinstance(valor, bool)
+
+
 def _retry_after(valor: str | None) -> int:
     try:
         segundos = int(float(str(valor).strip()))
@@ -170,9 +174,8 @@ class ApiCliente:
     def version(self) -> str | None:
         """The commit the server reports as deployed (40 lowercase hex), or None.
 
-        PROVISIONAL until the Datos y API PR defines the route: POST /version with {} (signed
-        like every robot route, contract §2 and §3), answer {"commit": "<sha>" | null}. The
-        path and the parsing live only here, so adapting it is a one-method change.
+        Contract §13.1: POST /version with {} (signed like every robot route, §2 and §3),
+        answer {"commit": "<sha>" | null}. The path and the parsing live only here.
         """
         datos = self._post("/version", {})
         if "commit" not in datos:
@@ -183,6 +186,66 @@ class ApiCliente:
         if not isinstance(commit, str) or not _RE_COMMIT.match(commit):
             raise ApiError("La API respondió /version con un commit que no es un SHA de 40 caracteres.")
         return commit
+
+    def totales(
+        self, conjunto: str, empresa: str, desde: str | None = None, hasta: str | None = None
+    ) -> list[dict[str, Any]]:
+        """The groups of POST /totales (contract §13.2): what MySQL holds for a dataset and company.
+
+        `desde` and `hasta` (AAAA-MM-DD) go only in VENTAS. Each group comes back as
+        {clave, filas, sumas, nulos}: `filas` an int, `sumas` texts with their decimals and
+        `nulos` ints (absent or null objects become {}). Any other shape is an ApiError. The
+        path and the parsing live only here.
+        """
+        cuerpo: dict[str, Any] = {"conjunto": conjunto, "empresa": empresa}
+        if desde is not None:
+            cuerpo["desde"] = desde
+        if hasta is not None:
+            cuerpo["hasta"] = hasta
+        datos = self._post("/totales", cuerpo)
+        grupos = datos.get("grupos")
+        if not isinstance(grupos, list):
+            raise ApiError("La API respondió /totales sin la lista grupos.")
+        salida: list[dict[str, Any]] = []
+        vistas: set[str] = set()
+        for grupo in grupos:
+            if not isinstance(grupo, dict) or not isinstance(grupo.get("clave"), str) or not _es_entero(grupo.get("filas")):
+                raise ApiError("La API respondió /totales con un grupo sin clave o sin filas enteras.")
+            sumas, nulos = grupo.get("sumas") or {}, grupo.get("nulos") or {}
+            if not isinstance(sumas, dict) or not all(isinstance(v, str) for v in sumas.values()):
+                raise ApiError("La API respondió /totales con sumas que no son texto.")
+            if not isinstance(nulos, dict) or not all(_es_entero(v) for v in nulos.values()):
+                raise ApiError("La API respondió /totales con nulos que no son enteros.")
+            if grupo["clave"] in vistas:
+                raise ApiError("La API respondió /totales con una clave repetida.")
+            vistas.add(grupo["clave"])
+            salida.append({"clave": grupo["clave"], "filas": grupo["filas"], "sumas": dict(sumas),
+                           "nulos": dict(nulos)})
+        return salida
+
+    def guardar_comparacion(
+        self,
+        *,
+        conjunto: str,
+        empresa: str,
+        comparada_en: str,
+        cuadra: bool,
+        diferencias: list[dict[str, Any]],
+        desde: str | None = None,
+        hasta: str | None = None,
+    ) -> int | None:
+        """POST /comparaciones (contract §13.3): one comparison of a dataset and company. Returns
+        the id the API gives (201 {"id": N}). `desde` and `hasta` go only in VENTAS."""
+        cuerpo: dict[str, Any] = {"conjunto": conjunto, "empresa": empresa, "comparada_en": comparada_en}
+        if desde is not None:
+            cuerpo["desde"] = desde
+        if hasta is not None:
+            cuerpo["hasta"] = hasta
+        cuerpo["cuadra"] = cuadra
+        cuerpo["diferencias"] = diferencias
+        datos = self._post("/comparaciones", cuerpo)
+        identificador = datos.get("id")
+        return identificador if _es_entero(identificador) else None
 
     def iniciar_corrida(
         self,

@@ -160,7 +160,7 @@ def _validar(modo: str, argumentos: list[str]):
     return run_robot.plan_complemento(modo, argumentos, lambda: AHORA)
 
 
-# --- api.version() (PROVISIONAL shape: POST /version, {"commit": sha | null}) ------------------
+# --- api.version() (contract §13.1: POST /version, {"commit": sha | null}) -------------------
 
 
 @pytest.fixture
@@ -645,7 +645,7 @@ def test_error_al_preguntar_la_version_no_frena_la_revision(entorno, correos, ca
     assert e.servidor.estado_solicitudes == {9: "terminada"}
     assert not git.hizo("fetch")
     assert correos == []
-    # The provisional route may not exist yet on the server: it must not fill robot.log.
+    # The route may not exist yet on an older server: it must not fill robot.log.
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
@@ -746,7 +746,22 @@ _DOS = (
 )
 
 
-def test_tras_despliegue_corre_los_complementos_pendientes_en_orden(entorno, correos, caplog):
+@pytest.fixture
+def comparacion(monkeypatch, entorno):
+    """--tras-despliegue always ends with the comparison (T7b, tested in test_comparar.py): here
+    it is replaced by a recorder, so these tests only see the complements. Each call records
+    the companies and the API requests made before it."""
+    llamadas: list[tuple[list[str], int]] = []
+
+    def falsa(cfg, args, empresas, **kwargs):
+        llamadas.append((list(empresas), len(entorno.servidor.peticiones)))
+        return [], []
+
+    monkeypatch.setattr(run_robot, "_comparar", falsa)
+    return llamadas
+
+
+def test_tras_despliegue_corre_los_complementos_pendientes_en_orden(entorno, correos, caplog, comparacion):
     e = entorno
     _datos_de_junio(e)
     _escribir_complementos(_DOS)
@@ -765,12 +780,14 @@ def test_tras_despliegue_corre_los_complementos_pendientes_en_orden(entorno, cor
     assert any(m.startswith("Complemento kilos-sdc: hecho") for m in caplog.messages)
     assert correos == []
     assert not (config.STATE_DIR / CANDADO).exists()
+    # The comparison runs once, of both companies, after both complements.
+    assert comparacion == [(["SGX", "SDC"], len(e.servidor.peticiones))]
     # Done: the next run has nothing pending.
     assert _main(e, "--tras-despliegue", git=GitFalso(head=C), fabrica_vpn=_prohibida,
                  dormir=_no_dormir) == 0
 
 
-def test_tras_despliegue_un_complemento_que_falla_no_frena_el_siguiente(entorno, correos):
+def test_tras_despliegue_un_complemento_que_falla_no_frena_el_siguiente(entorno, correos, comparacion):
     e = entorno
     _datos_de_junio(e)
     _escribir_complementos(_DOS)
@@ -782,6 +799,7 @@ def test_tras_despliegue_un_complemento_que_falla_no_frena_el_siguiente(entorno,
     assert estado["kilos-sgx"]["estado"] == "hecho"
     [aviso] = correos
     assert all("kilos-sdc" in mensaje for _, mensaje in aviso)
+    assert len(comparacion) == 1  # a failed complement still lets the comparison run
     # Failed at this commit: not retried until the next deploy.
     assert _main(e, "--tras-despliegue", git=GitFalso(head=C), fabrica_vpn=_prohibida,
                  dormir=_no_dormir) == 0
@@ -790,15 +808,16 @@ def test_tras_despliegue_un_complemento_que_falla_no_frena_el_siguiente(entorno,
     assert autoactualizar.leer_estado()["kilos-sdc"]["estado"] == "hecho"
 
 
-def test_tras_despliegue_sin_pendientes_no_toca_sap_vpn_ni_api(entorno, correos):
+def test_tras_despliegue_sin_pendientes_solo_corre_la_comparacion(entorno, correos, comparacion):
     e = entorno
     assert _main(e, "--tras-despliegue", git=GitFalso(), fabrica_api=_prohibida, fabrica_vpn=_prohibida,
                  conectar=_prohibida, dormir=_no_dormir) == 0
     assert e.servidor.peticiones == [] and e.hana.ejecutadas == []
+    assert comparacion == [(["SGX", "SDC"], 0)]
     assert correos == []
 
 
-def test_tras_despliegue_dentro_de_una_franja_espera_a_que_pase(entorno, correos):
+def test_tras_despliegue_dentro_de_una_franja_espera_a_que_pase(entorno, correos, comparacion):
     e = entorno
     _datos_de_junio(e)
     _escribir_complementos(_DOS)
@@ -808,7 +827,7 @@ def test_tras_despliegue_dentro_de_una_franja_espera_a_que_pase(entorno, correos
     assert len(e.servidor.corridas) == 7
 
 
-def test_tras_despliegue_espera_el_candado_como_los_programados(entorno, correos, candado_ajeno):
+def test_tras_despliegue_espera_el_candado_como_los_programados(entorno, correos, candado_ajeno, comparacion):
     e = entorno
     _datos_de_junio(e)
     _escribir_complementos(_DOS)
