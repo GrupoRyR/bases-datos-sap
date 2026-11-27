@@ -89,6 +89,11 @@ return [
 
     'deploy' => [
         'nightly_window' => (string) env('BASES_SAP_VENTANA_NOCTURNA_DESPLIEGUE', '01:45-02:15'),
+
+        // The commit deploy/deploy.sh writes after a good deploy, one line
+        // with its sha; POST /api/robot/v1/version answers it (contract
+        // section 13.1). Not on the local disk, whose root is storage/app/private.
+        'commit_file' => storage_path('app/deploy/commit'),
     ],
 
 ];

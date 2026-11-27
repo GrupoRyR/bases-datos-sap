@@ -12,6 +12,7 @@ Versión 1. Lo implementan dos sesiones en paralelo: «Datos y API» (el servido
 | Corrida | Un envío completo del robot: iniciar, lotes y cerrar (§4) | Tipo `completa`, `solicitud`, `historico` (solo `VENTAS`, §10.4) o `complemento` (solo `VENTAS`, §10.5) |
 | Lote | Hasta 1.000 filas de una sola parte | Numerados desde 1 en cada corrida |
 | Solicitud | Pedido de actualización de una app o del panel (§7) | Estados en §7.2 |
+| Versión | El commit que corre el servidor, al que el robot se actualiza (§13.1, `POST /api/robot/v1/version`) | 40 caracteres hexadecimales en minúscula, o `null` |
 
 Solo existen los conjuntos y partes de esta tabla. Las tablas que van solo a la carpeta (plan §5) **nunca** se envían: la API responde 422 a cualquier conjunto o parte desconocidos.
 
@@ -300,6 +301,7 @@ El botón del panel crea solicitudes por dentro (contratos de `Sap`), con las mi
 | Corridas | Guarda lotes, aplica al cerrar, inactiva, compara el conteo | Extrae, arma lotes de hasta 1.000 filas, cierra o falla |
 | Solicitudes | Recibe de las apps, une, encola, aplica franjas, vence | Pregunta cada minuto y las atiende |
 | Horarios | Vence corridas y solicitudes (scheduler) | Nocturna a las 02:00, preguntas cada minuto, fotos de la carpeta |
+| Versión | Responde el commit desplegado (§13.1) | Se actualiza solo a ese commit |
 
 ## 9. Variables de entorno
 
@@ -633,3 +635,21 @@ Llave: `codigo_articulo`, única por empresa. No puede repetirse en la corrida (
   - que `padre` + `hijo` en `BEAS_STL` y `codigo_articulo` + `operacion` en `BEAS_APL` no se repitan; si no se repiten, pasan a ser llave;
   - si una entrada de producto terminado (`OIGN`) anulada deja dos filas que se anulan entre sí o una sola: la consulta original no filtra `CANCELED`;
   - cuánto tarda la consulta de costos en la ventana y en la carga inicial, por las franjas bloqueadas de la noche.
+
+## 13. Versión, totales y comparaciones
+
+Aprobado por el usuario el 2026-11-27 (piloto de despliegue automático, ticket `20261125-centro-001`).
+
+Tres rutas para que el robot se actualice solo y compruebe, sin cambiar datos, que MySQL cuadra con SAP. Van firmadas como todas (§3), sin query string (§2), y responden 401, 400, 413 y 429 como las demás. **Ninguna cambia datos**: la única escritura es guardar una comparación (§13.3), que nunca se aplica a las tablas de los conjuntos.
+
+### 13.1 Versión: `POST /api/robot/v1/version`
+
+Cuerpo: `{}`. Respuesta 200:
+
+```json
+{"commit": "0123456789abcdef0123456789abcdef01234567"}
+```
+
+- `commit`: el commit que corre el servidor, 40 caracteres hexadecimales en minúscula. Lo lee del archivo `storage/app/deploy/commit` que escribe `deploy/deploy.sh` después de un despliegue bueno: una línea con el sha. La API nunca corre `git` ni ningún otro proceso.
+- `{"commit": null}` si el archivo no existe, está vacío o no trae exactamente un sha de 40 caracteres hexadecimales (sin contar espacios ni saltos de línea alrededor). Un sha en mayúscula se acepta y se responde en minúscula.
+- **Servidor primero.** El robot solo se actualiza al commit que ya corre el servidor: si `commit` es `null` o el robot no lo tiene, no se actualiza. Así el robot nunca va adelante del servidor (§4.2, excepciones de transición).

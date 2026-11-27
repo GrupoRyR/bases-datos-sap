@@ -147,3 +147,9 @@ El despachador de despliegues corre `php artisan sap:puede-desplegar --no-ansi` 
 1. A 15 minutos o menos de una franja bloqueada, con la misma regla de `BlockedSlots` que las solicitudes: desde 15 minutos antes (incluido) hasta 15 minutos después (excluido).
 2. Dentro de la ventana de la corrida nocturna en Bogotá (`sap.deploy.nightly_window`, `BASES_SAP_VENTANA_NOCTURNA_DESPLIEGUE`, por defecto `01:45-02:15`; `Domain\Deploy\NightlyWindow`): el inicio incluido y el fin excluido; si el fin va antes del inicio, cruza la medianoche. Una ventana mal escrita también rechaza.
 3. Una corrida `abierta` que sigue dentro de su ventana de 30 minutos (`Run::isOpen()`), o una solicitud `tomada` que todavía no cumple los 30 minutos para vencer.
+
+## Versión, totales y comparaciones
+
+Rutas del robot del contrato §13, en el mismo grupo `sap.robot`. Ninguna cambia los datos de los conjuntos.
+
+- `POST /api/robot/v1/version` (`Application\Deploy\DeployedCommit`, §13.1): responde `{"commit": "<sha>"}` con el commit que `deploy/deploy.sh` escribe después de un despliegue bueno en `sap.deploy.commit_file` (por defecto `storage/app/deploy/commit`, fuera del disco `local`, cuya raíz es `storage/app/private`), o `null` si el archivo falta o no trae exactamente un sha de 40 caracteres hexadecimales. Acepta mayúsculas y responde en minúscula. Nunca corre `git`: el robot solo se actualiza al commit que ya corre el servidor.
